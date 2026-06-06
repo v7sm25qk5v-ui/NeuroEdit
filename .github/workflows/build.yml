@@ -1,0 +1,92 @@
+name: Build alpha installers
+
+# Build the macOS .dmg and the Windows Setup.exe from the SAME commit, so every
+# change to the shared desktop/src code ships to both platforms at once.
+#
+#   - Push a version tag (e.g. `git tag v0.2.0-alpha && git push --tags`) to build
+#     both installers AND publish them to a GitHub Release.
+#   - Or trigger manually (Actions tab -> Run workflow) to build test artifacts
+#     without cutting a release.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version label for the build (e.g. alpha-002)"
+        default: "dev"
+
+jobs:
+  macos:
+    name: Build macOS (.dmg)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build unsigned macOS alpha
+        working-directory: desktop
+        run: |
+          VERSION="${{ github.event.inputs.version || github.ref_name }}"
+          chmod +x scripts/build_alpha_macos.sh
+          ./scripts/build_alpha_macos.sh "$VERSION"
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-installers
+          path: |
+            desktop/release/*.dmg
+            desktop/release/*.zip
+          if-no-files-found: error
+
+  windows:
+    name: Build Windows (Setup.exe)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+      - name: Build unsigned Windows alpha
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          $Version = "${{ github.event.inputs.version || github.ref_name }}"
+          .\scripts\build_alpha_windows.ps1 -Version $Version
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: desktop/release/*.exe
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create / update the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          fail_on_unmatched_files: true
+          body: |
+            Unsigned alpha build of NeuroEdit.
+
+            - **macOS**: download the `.dmg`. First launch: right-click the app -> Open.
+            - **Windows**: download the `-Windows-Setup.exe`. First launch: if SmartScreen
+              warns, click "More info" -> "Run anyway".
+
+            Both installers are built from the same commit and are functionally identical.

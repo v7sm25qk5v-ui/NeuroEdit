@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "neuroedit-desktop"
+version = "0.1.0"
+description = "Native macOS-first NeuroEdit desktop application."
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "imageio-ffmpeg>=0.5",
+  "numpy>=2.0",
+  "opencv-python>=4.10",
+  "PySide6>=6.8",
+]
+
+[project.optional-dependencies]
+sam = [
+  "huggingface-hub>=0.30",
+  "pillow>=10",
+  "safetensors>=0.5",
+  "transformers>=5.6",
+  "torch>=2.7",
+  "torchvision>=0.22",
+]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.8",
+]
+package = [
+  "pyinstaller>=6.11",
+]
+
+[project.scripts]
+neuroedit-desktop = "neuroedit_desktop.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/neuroedit_desktop"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

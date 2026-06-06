@@ -1,0 +1,237 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+## 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+## 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+## 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+---
+
+## Repository layout
+
+This repo contains two apps:
+
+- **Root** (`./`): legacy React/Vite/TypeScript browser prototype. Largely
+  superseded — most current work happens in `desktop/`.
+- **`desktop/`**: the active native macOS application (PySide6). All commands
+  and architecture below refer to the desktop app unless noted.
+
+## Commands (desktop)
+
+All commands assume `cd desktop` first.
+
+```bash
+# Setup (one-time). Python 3.12 is preferred for SAM3.
+python3.12 -m venv .venv          # see venv-location caveat below
+source .venv/bin/activate
+python -m pip install -e ".[sam]" # adds torch, transformers, hf-hub
+
+# Run the app
+python -m neuroedit_desktop
+
+# Lint
+ruff check src
+ruff format src
+
+# Fast syntax check without paying torch's import cost (~7s warm, ~90s cold)
+python -c "import py_compile; py_compile.compile('src/neuroedit_desktop/<file>.py', doraise=True)"
+
+# SAM3 weights are gated. After install:
+hf auth login
+```
+
+`pyproject.toml` declares `pytest` as a dev dep but **no tests exist yet** —
+don't pretend to "run tests" without writing one first.
+
+### venv-location note (current setup is intentional)
+
+`desktop/.venv` is a symlink to `~/Documents/Claude/venv`, which lives **inside
+iCloud Drive on purpose** — this is the chosen setup; do not relocate it.
+Tradeoff to remember: if the optional `[sam]` stack (torch, ~1.6 GB of dylibs)
+is installed here, Apple's iCloud file-provider can inflate `import torch` from
+~7 s to 90+ s on cold start. The current venv is ~600 MB and does **not**
+include torch, so `SamBackend.probe()` returns "missing" and SAM features
+no-op until `pip install -e ".[sam]"` is run. If torch cold-start ever becomes
+painful, the fix is to `pip install -e ".[sam]"` once and accept the first-run
+sync delay — not to move the venv off iCloud.
+
+## Big-picture architecture
+
+### Process and threading model
+
+- Single `QApplication` process. UI on the main thread.
+- SAM (PyTorch + transformers) runs on background `QThread`s via three worker
+  `QObject`s in `ui/main_window.py`: `SamProbeWorker`, `SamSegmentWorker`,
+  `SamPropagationWorker`. Each emits `progress(str)` and `finished(...)`.
+  Workers wrap calls into `sam_backend.SamBackend`.
+- Because torch import + first weight download can take tens of seconds, every
+  long-running stage is paired with a 500 ms heartbeat timer
+  (`_start_sam_heartbeat` / `_tick_sam_heartbeat`) that appends elapsed
+  seconds to the SAM panel status — this is what proves the app is alive
+  during the cold start.
+
+### Rendering pipeline (the part that bites macOS newcomers)
+
+A widget-on-top-of-`QVideoWidget` overlay is **broken on macOS Metal** —
+QtMultimedia's native surface paints over the overlay. The fix is to keep
+everything in one `QGraphicsScene` owned by `VideoGraphicsView`:
+
+- `QGraphicsVideoItem` (z=0) — receives output from `QMediaPlayer`.
+- `QGraphicsPixmapItem` (z=5) — shown for image clips; hidden for video clips.
+- `AnnotationGraphicsItem` (z=10, custom `QGraphicsObject`) — paints
+  annotations, SAM points, slides (when not in overlay mode), and the fade
+  overlay. Coordinates inside it are **normalized 0..1 multiplied by `_size`**,
+  which is set from `nativeSizeChanged` for video and `pixmap.size()` for
+  images. Slide title/body rectangles use the same normalized convention.
+
+When `clip.media_type == "image"`, the QMediaPlayer source is cleared, the
+pixmap item is shown, and the manual time-tick path
+(`_tick_timeline_playback`) advances `current_time` — the same path used for
+slides. Don't try to feed image paths into QMediaPlayer.
+
+### State, persistence, and undo/redo
+
+- `models.py` is the single source of truth for all serializable state. Every
+  user-editable thing is a dataclass with `to_dict`/`from_dict` round-tripping
+  through `ProjectState`. Adding new fields is fine **iff they have defaults**
+  — `from_dict` does `Cls(**data)`, so old saves and old undo snapshots will
+  break loudly otherwise.
+- `project_store.ProjectStore` writes `project.json` plus sibling directories
+  `masks/`, `audio/`, `stills/`. Default autosave path is
+  `~/Documents/NeuroEdit/Autosave/`. Autosave runs every 2 s when `dirty`.
+- Undo/redo is **JSON snapshots of the entire `ProjectState`**, not per-field
+  patches. Every `_mark_dirty` / `_mark_project_dirty` pushes a snapshot (cap
+  50). `_apply_snapshot` rebuilds via `ProjectState.from_dict` and reloads the
+  active clip. The `_restoring` guard prevents undo-during-undo from
+  duplicating history.
+- `QSettings("NeuroEdit", "Desktop")` is used for app-level prefs (tutorial
+  seen flag etc.) — separate from the project file.
+
+### Module map (what lives where)
+
+- `models.py` — every dataclass + `to_dict`/`from_dict`. Includes
+  `ProjectState.arrange_clips_without_overlap`, an opt-in helper that re-packs
+  the video track sequentially. **It is not auto-called from trim/cut paths**
+  — those intentionally leave gaps.
+- `project_store.py` — JSON load/save with atomic temp-file rename.
+- `sam_backend.py` — model loading, frame extraction (OpenCV), and SAM3 with
+  SAM1 (`facebook/sam-vit-base`) fallback. Uses `inspect.signature` to filter
+  kwargs for cross-version model compatibility.
+- `video_probe.py` — fast `probe_video(path) → (duration, w, h)` via ffmpeg.
+- `exporter.py` — timeline → ffmpeg composition (export pipeline).
+- `ui/main_window.py` — `MainWindow` plus `VideoGraphicsView`,
+  `AnnotationGraphicsItem`, `LabelsPanel`, `SamPanel`, `TimelineWidget`, and
+  the SAM worker QObjects. The biggest file; mouse/keyboard tool routing all
+  lives in `VideoGraphicsView`.
+- `ui/editor_panels.py` — `TimelineCanvas` + `RichTimelineWidget` (the actual
+  scrollable timeline with trim handles, fade controls, cut), plus
+  `SlideEditorPanel`, `SlidePreview`, `TipsPanel`, `AudioPanel`. Cut splits a
+  clip into two pieces sharing the same source path.
+- `ui/tutorial.py` — `TutorialOverlay` coach-marks. Steps are
+  `(title, body, target_resolver)` triples; resolver returns a widget at
+  display time so dynamically-built widgets work.
+- `ui/styles.py` — color tokens + global QSS.
+
+### Tool routing in `VideoGraphicsView`
+
+A single `mousePressEvent` dispatches by **panel context first, then
+`project.active_tool`**:
+
+1. Slides panel open + click in slide title/body rect → drag slide text.
+2. `sam` tool → emit point.
+3. `rect` / `ellipse` / `arrow` / `redact` → drag-to-create with live preview.
+4. `text` → click-to-place.
+5. `select` → hit-test annotations: handle drag → resize, body drag → move.
+
+A completed move/resize (select-drag or slide-text drag) emits
+`VideoGraphicsView.edit_committed`, which `MainWindow._commit_canvas_edit` turns
+into exactly one undo snapshot. During the drag only `annotation_mutated` fires
+(marks dirty + light refresh, no history) so the gesture is a single undo step.
+
+Selection state lives on `project.selected_annotation_id` (round-tripped via
+undo). `LabelsPanel` and `VideoGraphicsView` both read/write it and re-sync
+each other through signals.
+
+### PHI redaction & de-identification
+
+The `redact` annotation type is the PHI tool. It reuses rect geometry but is
+treated specially everywhere:
+
+- **Defaults (`_build_drag_annotation`)**: opaque black, `frame_time=0` +
+  `ann_duration=0` so it covers the **whole timeline** by default (over-redact
+  is the safe default; shorten the window in the Labels panel if needed).
+- **Always burned last and on top.** Both the live canvas
+  (`AnnotationGraphicsItem._paint_redactions`) and the exporter
+  (`ProjectExporter._paint_redactions`) draw redactions opaque in a final pass,
+  after every other annotation and the fade — never via the normal shape path
+  (which `continue`s on `redact`). Don't move redaction painting earlier.
+- **Forces re-encode.** Because a redaction is a visible annotation,
+  `_segment_needs_render` returns True for any segment it overlaps, so the fast
+  stream-copy path can't emit original PHI frames. `tests/test_redaction_export.py`
+  locks both properties (pixels blacked out + segments re-rendered).
+- **Take Still** reuses `_render_frame`, so captured stills inherit redactions.
+
+Other PHI safeguards:
+- **Metadata is stripped** from every ffmpeg output (`-map_metadata -1
+  -map_chapters -1`) so source creation time / device / GPS never reach the MP4.
+- **Source audio** can be dropped on export via
+  `ExportSettings.mute_source_audio` (Export dialog → Privacy checkbox); narration
+  added on the Audio panel is kept.
+- `project_preflight_warnings` nudges toward the Redact tool when clips exist,
+  PHI review isn't confirmed, and no redactions are present.
+
+### Files to ignore
+
+- `__init__ 2.py`, `__main__ 2.py`, `video_probe 2.py` etc. are iCloud sync
+  conflict copies. Don't import or edit them.

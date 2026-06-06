@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Virtual environments (note: desktop/.venv is a local symlink, never commit it)
+.venv/
+.venv
+.venv[ ]*
+.venv.old/
+venv/
+
+# Build / packaging output
+build/
+dist/
+release/
+
+# macOS / editor cruft
+.DS_Store
+
+# iCloud sync conflict copies (e.g. "__init__ 2.py", "video_probe 2.py")
+* [0-9].py
+* [0-9].*
+
+# Local Claude Code config (personal permissions, worktrees, memory)
+.claude/
