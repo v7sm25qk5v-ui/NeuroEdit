@@ -37,7 +37,6 @@ from PySide6.QtWidgets import (
     QProgressDialog,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
     QSlider,
     QSplitter,
     QStackedWidget,
@@ -2262,7 +2261,7 @@ class MainWindow(QMainWindow):
     def _build_header(self) -> None:
         header = QWidget()
         header.setObjectName("appHeader")
-        header.setFixedHeight(56)
+        header.setFixedHeight(88)
         header.setStyleSheet(f"""
             QWidget#appHeader {{
                 background: {BG_TERTIARY};
@@ -2270,9 +2269,21 @@ class MainWindow(QMainWindow):
             }}
         """)
 
-        layout = QHBoxLayout(header)
-        layout.setContentsMargins(12, 0, 12, 0)
-        layout.setSpacing(6)
+        # Two rows so the toolbar never overflows / overlaps at higher display
+        # scaling: row 1 = identity, history, project, panels, export;
+        # row 2 = the annotation drawing tools.
+        row1 = QHBoxLayout()
+        row1.setContentsMargins(0, 0, 0, 0)
+        row1.setSpacing(6)
+        row2 = QHBoxLayout()
+        row2.setContentsMargins(0, 0, 0, 0)
+        row2.setSpacing(6)
+        outer = QVBoxLayout(header)
+        outer.setContentsMargins(12, 6, 12, 6)
+        outer.setSpacing(6)
+        outer.addLayout(row1)
+        outer.addLayout(row2)
+        layout = row1
 
         # Logo
         logo = QLabel("⬡")
@@ -2329,7 +2340,32 @@ class MainWindow(QMainWindow):
         self.video_type.currentIndexChanged.connect(self._video_type_changed)
         layout.addWidget(self.video_type)
 
-        layout.addWidget(self._vdivider())
+        # Right side of row 1: panel tabs + export
+        row1.addStretch(1)
+
+        self.panel_buttons: dict[str, QPushButton] = {}
+        self.panel_group = QButtonGroup(self)
+        self.panel_group.setExclusive(True)
+        for panel, label, color in PANELS:
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setFixedHeight(30)
+            btn.clicked.connect(lambda _=False, p=panel: self._set_panel(p))
+            self.panel_group.addButton(btn)
+            self.panel_buttons[panel] = btn
+            row1.addWidget(btn)
+            if panel == self.project.active_panel:
+                btn.setChecked(True)
+
+        row1.addWidget(self._vdivider())
+
+        self.export_btn = QPushButton("Export")
+        self.export_btn.setProperty("variant", "emerald")
+        self.export_btn.clicked.connect(self._export_project)
+        row1.addWidget(self.export_btn)
+
+        # ── Row 2: annotation drawing tools ──────────────────────────────
+        layout = row2
 
         # Tool buttons
         self.tool_buttons: dict[str, QPushButton] = {}
@@ -2409,33 +2445,7 @@ class MainWindow(QMainWindow):
         self.label_input.currentTextChanged.connect(self._label_changed)
         layout.addWidget(self.label_input)
 
-        # Spacer
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        layout.addWidget(spacer)
-
-        # Panel tabs
-        self.panel_buttons: dict[str, QPushButton] = {}
-        self.panel_group = QButtonGroup(self)
-        self.panel_group.setExclusive(True)
-        for panel, label, color in PANELS:
-            btn = QPushButton(label)
-            btn.setCheckable(True)
-            btn.setFixedHeight(30)
-            btn.clicked.connect(lambda _=False, p=panel: self._set_panel(p))
-            self.panel_group.addButton(btn)
-            self.panel_buttons[panel] = btn
-            layout.addWidget(btn)
-            if panel == self.project.active_panel:
-                btn.setChecked(True)
-
-        layout.addWidget(self._vdivider())
-
-        # Export button
-        self.export_btn = QPushButton("Export")
-        self.export_btn.setProperty("variant", "emerald")
-        self.export_btn.clicked.connect(self._export_project)
-        layout.addWidget(self.export_btn)
+        row2.addStretch(1)
 
         # Install as top widget (no native toolbar)
         container = QWidget()

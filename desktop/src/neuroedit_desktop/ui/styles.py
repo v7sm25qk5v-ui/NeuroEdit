@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtWidgets import QApplication
 
@@ -241,9 +243,20 @@ QMenu::item:selected {{
 """
 
 
+def _ui_font() -> QFont:
+    """Platform-native UI font. The previous hardcoded ".AppleSystemUIFont"
+    does not exist on Windows/Linux, where Qt fell back to an oversized default
+    face that overflowed the toolbar. Use each platform's native UI font."""
+    if sys.platform == "darwin":
+        return QFont(".AppleSystemUIFont", 12)
+    if sys.platform == "win32":
+        return QFont("Segoe UI", 9)
+    return QFont("Sans Serif", 10)
+
+
 def apply_app_style(app: QApplication) -> None:
     app.setStyle("Fusion")
-    app.setFont(QFont(".AppleSystemUIFont", 12))
+    app.setFont(_ui_font())
 
     palette = QPalette()
     palette.setColor(QPalette.ColorRole.Window, QColor(BG_PRIMARY))
