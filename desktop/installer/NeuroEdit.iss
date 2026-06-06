@@ -37,7 +37,7 @@ UninstallDisplayName={#MyAppName} {#MyAppVersion}
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupFlags: unchecked
+Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
 
 [Files]
 ; The whole PyInstaller COLLECT folder produced by NeuroEdit.spec.

@@ -38,7 +38,9 @@ New-Item -ItemType Directory -Force -Path $ReleaseDir | Out-Null
 
 # 3. PyInstaller -> dist\NeuroEdit\NeuroEdit.exe
 & ".\.venv\Scripts\pyinstaller.exe" --clean --noconfirm NeuroEdit.spec
-
+if ($LASTEXITCODE -ne 0) {
+    throw "PyInstaller failed (exit $LASTEXITCODE)."
+}
 if (-not (Test-Path $AppExe)) {
     throw "Build failed: $AppExe was not created."
 }
@@ -62,6 +64,9 @@ if (-not $Iscc) {
 
 # 5. Compile the installer.
 & $Iscc "/DMyAppVersion=$Version" "installer\NeuroEdit.iss"
+if ($LASTEXITCODE -ne 0) {
+    throw "Inno Setup compile failed (exit $LASTEXITCODE)."
+}
 
 $Setup = Join-Path $ReleaseDir "NeuroEdit-$Version-Windows-Setup.exe"
 Write-Host ""
