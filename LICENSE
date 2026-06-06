@@ -1,21 +1,38 @@
-MIT License
+NeuroEdit — Proprietary Software License
+Copyright (c) 2026 Alan Gordillo. All rights reserved.
 
-Copyright (c) 2026 Alan Gordillo
+This software, including its source code, build scripts, and associated
+documentation files (the "Software"), is the proprietary and confidential
+property of Alan Gordillo (the "Owner"). The Software is made available for
+viewing and evaluation purposes only.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+NO LICENSE GRANTED
+No license, right, or permission is granted to any person or entity to use,
+copy, modify, merge, publish, distribute, sublicense, sell, or create
+derivative works of the Software, in whole or in part, without the prior
+written permission of the Owner. All rights not expressly granted are reserved.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Unauthorized use, reproduction, or distribution of the Software, or any portion
+of it, may result in civil and criminal liability and will be prosecuted to the
+maximum extent permitted by law.
 
+THIRD-PARTY COMPONENTS
+The Software incorporates and/or distributes third-party components (including,
+without limitation, Qt/PySide6, FFmpeg, OpenCV, and NumPy) that are licensed
+separately by their respective copyright holders. This license applies only to
+the Owner's own code and does not alter the terms of those third-party
+licenses, which continue to govern their respective components.
+
+MEDICAL / CLINICAL DISCLAIMER
+The Software is provided for research and informational purposes only. It is
+not a medical device, has not been reviewed or cleared by any regulatory
+authority (including the U.S. Food and Drug Administration), and must not be
+relied upon for clinical diagnosis, treatment, or any patient-care decision.
+
+NO WARRANTY
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+OWNER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
