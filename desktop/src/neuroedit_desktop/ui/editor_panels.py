@@ -1066,6 +1066,9 @@ class SlideEditorPanel(QWidget):
         style_row.addWidget(self.italic_check)
 
         form = QFormLayout()
+        # Stack labels above fields so the form (and thus this panel) doesn't
+        # demand the label+field combined width — keeps the side panel compact.
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
         form.addRow("Title", self.title_input)
         form.addRow("Body", self.content_input)
         form.addRow("Duration", self.duration_input)

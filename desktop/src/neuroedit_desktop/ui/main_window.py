@@ -2163,9 +2163,8 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(f"NeuroEdit — {self.project.project_name}")
         self.setObjectName("mainWindow")
-        # Floor that fits the toolbar/panels yet still suits a 1366x768 laptop;
-        # below this the header scrolls rather than clipping (see _build_header).
-        self.setMinimumSize(960, 600)
+        # Minimum window size is computed from the real pane widths once the
+        # central UI is built (see the end of _build_central_ui).
         self._build_media()
         self._build_actions()
         self._build_menubar()
@@ -2666,7 +2665,10 @@ class MainWindow(QMainWindow):
         self.panel_scroll.setWidgetResizable(True)
         self.panel_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.panel_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.panel_scroll.setMinimumWidth(240)
+        # Never let the right pane be narrower than its widest panel's content,
+        # so panels don't clip / horizontally scroll when the window is resized.
+        panel_min = self.panels.minimumSizeHint().width()
+        self.panel_scroll.setMinimumWidth(panel_min)
         self.panel_scroll.setMinimumHeight(0)
         splitter.addWidget(self.panel_scroll)
         # Stretch factors: media list and side panel hold their size; the
@@ -2676,7 +2678,7 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
         splitter.setCollapsible(2, False)
-        splitter.setSizes([250, 900, 340])
+        splitter.setSizes([260, 900, panel_min])
         splitter.setMinimumHeight(0)
 
         main_splitter.addWidget(splitter)
@@ -2684,6 +2686,14 @@ class MainWindow(QMainWindow):
         main_splitter.setSizes([500, 380])
 
         self._main_vbox.addWidget(body, 1)
+
+        # Window floor that fits media + video + the side panel at their content
+        # widths, so narrowing the window can never clip the panels. The header
+        # scrolls above this width, so it is never the binding constraint.
+        self.setMinimumSize(
+            self.media_scroll.minimumWidth() + video_column.minimumWidth() + panel_min + 30,
+            600,
+        )
 
     # ── Status bar ────────────────────────────────────────────────────────
 
