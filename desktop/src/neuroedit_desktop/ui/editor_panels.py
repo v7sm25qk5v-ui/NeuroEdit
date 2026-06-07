@@ -731,7 +731,6 @@ class RichTimelineWidget(QWidget):
         toolbar.addWidget(self.fade_out_input)
         toolbar.addWidget(self.fade_color_combo)
         toolbar.addStretch(1)
-        toolbar_widget.setMinimumWidth(toolbar_widget.sizeHint().width())
 
         self.toolbar_scroll = QScrollArea()
         self.toolbar_scroll.setWidget(toolbar_widget)

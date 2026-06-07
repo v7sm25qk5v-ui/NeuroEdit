@@ -2163,6 +2163,9 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(f"NeuroEdit — {self.project.project_name}")
         self.setObjectName("mainWindow")
+        # Floor that fits the toolbar/panels yet still suits a 1366x768 laptop;
+        # below this the header scrolls rather than clipping (see _build_header).
+        self.setMinimumSize(960, 600)
         self._build_media()
         self._build_actions()
         self._build_menubar()
@@ -2446,13 +2449,26 @@ class MainWindow(QMainWindow):
 
         row2.addStretch(1)
 
-        # Install as top widget (no native toolbar)
+        # Install as top widget (no native toolbar). Wrap the two-row header in a
+        # horizontal scroll area so a narrow window scrolls the toolbar instead of
+        # clipping its right-hand controls (panel tabs / Export). The 8px scrollbar
+        # (global QSS) only appears below the header's natural width and overlays
+        # the header's bottom margin, so the visible height is unchanged.
         container = QWidget()
         container.setObjectName("appRoot")
         vbox = QVBoxLayout(container)
         vbox.setContentsMargins(0, 0, 0, 0)
         vbox.setSpacing(0)
-        vbox.addWidget(header)
+        header.setMinimumWidth(header.sizeHint().width())
+        header_scroll = QScrollArea()
+        header_scroll.setObjectName("headerScroll")
+        header_scroll.setWidget(header)
+        header_scroll.setWidgetResizable(True)
+        header_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        header_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        header_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        header_scroll.setFixedHeight(header.maximumHeight())
+        vbox.addWidget(header_scroll)
         self._header_widget = header
         self._main_container = container
         self._main_vbox = vbox
@@ -2497,6 +2513,9 @@ class MainWindow(QMainWindow):
         # Video column
         video_column = QWidget()
         video_column.setObjectName("videoColumn")
+        # Keep the video preview + playback controls usable; stops the splitter or
+        # a narrow window from squeezing the video pane to nothing.
+        video_column.setMinimumWidth(360)
         video_column_layout = QVBoxLayout(video_column)
         video_column_layout.setContentsMargins(0, 0, 0, 0)
         video_column_layout.setSpacing(0)
@@ -2593,7 +2612,7 @@ class MainWindow(QMainWindow):
         self.media_scroll.setObjectName("mediaExplorerScroll")
         self.media_scroll.setWidget(self.media_panel)
         self.media_scroll.setWidgetResizable(True)
-        self.media_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.media_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.media_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.media_scroll.setMinimumWidth(250)
         self.media_scroll.setMinimumHeight(0)
@@ -2645,7 +2664,7 @@ class MainWindow(QMainWindow):
         self.panel_scroll.setObjectName("rightPanelScroll")
         self.panel_scroll.setWidget(self.panels)
         self.panel_scroll.setWidgetResizable(True)
-        self.panel_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.panel_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.panel_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.panel_scroll.setMinimumWidth(240)
         self.panel_scroll.setMinimumHeight(0)
