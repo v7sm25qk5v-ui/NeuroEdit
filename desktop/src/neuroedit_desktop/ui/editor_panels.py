@@ -57,7 +57,6 @@ from neuroedit_desktop.ui.styles import (
     ACCENT_EMERALD,
     ACCENT_RED,
     BG_CARD,
-    BG_HOVER,
     BG_PRIMARY,
     BG_SECONDARY,
     BG_TERTIARY,
@@ -117,7 +116,7 @@ class MediaExplorerPanel(QWidget):
         import_video.clicked.connect(lambda _checked=False: self.import_videos_requested.emit())
         import_image.clicked.connect(lambda _checked=False: self.import_images_requested.emit())
 
-        import_row = QHBoxLayout()
+        import_row = QVBoxLayout()
         import_row.setSpacing(6)
         import_row.addWidget(import_video)
         import_row.addWidget(import_image)

@@ -11,8 +11,6 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 

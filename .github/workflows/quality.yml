@@ -1,0 +1,29 @@
+name: Quality checks
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test-and-lint:
+    name: Test and lint desktop app
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install desktop app with dev dependencies
+        working-directory: desktop
+        run: python -m pip install -e ".[dev]"
+      - name: Ruff
+        working-directory: desktop
+        run: ruff check src tests
+      - name: Pytest
+        working-directory: desktop
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest tests/ -q

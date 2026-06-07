@@ -41,7 +41,6 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStackedWidget,
     QStatusBar,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -64,9 +63,9 @@ from neuroedit_desktop.ui.editor_panels import (
 from neuroedit_desktop.ui.tutorial import TutorialOverlay, build_default_steps
 from neuroedit_desktop.video_probe import probe_video
 from neuroedit_desktop.ui.styles import (
-    ACCENT_AMBER, ACCENT_CYAN, ACCENT_EMERALD, ACCENT_RED,
-    BG_CARD, BG_HOVER, BG_PRIMARY, BG_SECONDARY, BG_TERTIARY,
-    BORDER, BORDER_BRIGHT, PRIMARY, TEXT_DIM, TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY,
+    ACCENT_AMBER, ACCENT_CYAN, ACCENT_RED,
+    BG_CARD, BG_HOVER,
+    BORDER, BORDER_BRIGHT, PRIMARY, TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY,
 )
 
 VIDEO_TYPES = [
@@ -1371,13 +1370,14 @@ class SamPanel(QWidget):
         self.include_btn.clicked.connect(lambda: self._set_mode("positive"))
         self.exclude_btn.clicked.connect(lambda: self._set_mode("negative"))
 
-        mode_row = QHBoxLayout()
+        mode_row = QVBoxLayout()
         mode_row.setSpacing(6)
         mode_row.addWidget(self.include_btn)
         mode_row.addWidget(self.exclude_btn)
 
         self.point_toggle = QPushButton()
         self.point_toggle.setCheckable(True)
+        self.point_toggle.setToolTip("When on, clicks in the video add SAM prompt points.")
         self.point_toggle.setChecked(project.sam_points_enabled)
         self.point_toggle.toggled.connect(self._points_enabled_changed)
         self._apply_point_toggle_style()
@@ -1469,9 +1469,9 @@ class SamPanel(QWidget):
     def _apply_point_toggle_style(self) -> None:
         enabled = self.point_toggle.isChecked()
         self.point_toggle.setText(
-            "Point Placement On — Click Video to Add"
+            "Point Placement On"
             if enabled
-            else "Point Placement Off — Locked"
+            else "Point Placement Off"
         )
         color = "#22d3ee" if enabled else "#64748b"
         bg = "rgba(34, 211, 238, 0.16)" if enabled else "rgba(100, 116, 139, 0.10)"
@@ -1595,7 +1595,11 @@ class LabelsPanel(QWidget):
         for idx, (label, color) in enumerate(ANATOMY_PRESETS):
             btn = QPushButton(label)
             btn.setToolTip(f"Use label: {label}")
-            btn.clicked.connect(lambda _=False, l=label, c=color: self.preset_selected.emit(l, c))
+            btn.clicked.connect(
+                lambda _=False, preset_label=label, c=color: (
+                    self.preset_selected.emit(preset_label, c)
+                )
+            )
             btn.setStyleSheet(
                 f"QPushButton {{ color: {color}; border: 1px solid {BORDER};"
                 f" background: {BG_CARD}; border-radius: 10px;"
@@ -2041,7 +2045,6 @@ class ProjectLibraryDialog(QDialog):
         self._populate()
 
     def _build_ui(self) -> None:
-        from neuroedit_desktop.ui.styles import BG_SECONDARY, BG_CARD, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
@@ -2261,26 +2264,20 @@ class MainWindow(QMainWindow):
     def _build_header(self) -> None:
         header = QWidget()
         header.setObjectName("appHeader")
-        header.setFixedHeight(88)
-        header.setStyleSheet(f"""
-            QWidget#appHeader {{
-                background: {BG_TERTIARY};
-                border-bottom: 1px solid {BORDER};
-            }}
-        """)
+        header.setFixedHeight(92)
 
         # Two rows so the toolbar never overflows / overlaps at higher display
         # scaling: row 1 = identity, history, project, panels, export;
         # row 2 = the annotation drawing tools.
         row1 = QHBoxLayout()
         row1.setContentsMargins(0, 0, 0, 0)
-        row1.setSpacing(6)
+        row1.setSpacing(8)
         row2 = QHBoxLayout()
         row2.setContentsMargins(0, 0, 0, 0)
-        row2.setSpacing(6)
+        row2.setSpacing(8)
         outer = QVBoxLayout(header)
-        outer.setContentsMargins(12, 6, 12, 6)
-        outer.setSpacing(6)
+        outer.setContentsMargins(14, 7, 14, 7)
+        outer.setSpacing(7)
         outer.addLayout(row1)
         outer.addLayout(row2)
         layout = row1
@@ -2302,7 +2299,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(logo)
 
         name_label = QLabel("NeuroEdit")
-        name_label.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 13px; font-weight: 700;")
+        name_label.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 13px; font-weight: 750;")
         layout.addWidget(name_label)
 
         layout.addWidget(self._vdivider())
@@ -2325,7 +2322,7 @@ class MainWindow(QMainWindow):
 
         # Project name
         self.project_name = QLineEdit(self.project.project_name)
-        self.project_name.setFixedWidth(160)
+        self.project_name.setFixedWidth(176)
         self.project_name.setPlaceholderText("Project name")
         self.project_name.editingFinished.connect(self._project_name_changed)
         layout.addWidget(self.project_name)
@@ -2334,7 +2331,7 @@ class MainWindow(QMainWindow):
 
         # Video type
         self.video_type = QComboBox()
-        self.video_type.setFixedWidth(130)
+        self.video_type.setFixedWidth(140)
         for value, label in VIDEO_TYPES:
             self.video_type.addItem(label, value)
         self.video_type.currentIndexChanged.connect(self._video_type_changed)
@@ -2348,8 +2345,9 @@ class MainWindow(QMainWindow):
         self.panel_group.setExclusive(True)
         for panel, label, color in PANELS:
             btn = QPushButton(label)
+            btn.setProperty("role", "panelTab")
             btn.setCheckable(True)
-            btn.setFixedHeight(30)
+            btn.setFixedHeight(32)
             btn.clicked.connect(lambda _=False, p=panel: self._set_panel(p))
             self.panel_group.addButton(btn)
             self.panel_buttons[panel] = btn
@@ -2361,6 +2359,7 @@ class MainWindow(QMainWindow):
 
         self.export_btn = QPushButton("Export")
         self.export_btn.setProperty("variant", "emerald")
+        self.export_btn.setFixedHeight(32)
         self.export_btn.clicked.connect(self._export_project)
         row1.addWidget(self.export_btn)
 
@@ -2374,7 +2373,7 @@ class MainWindow(QMainWindow):
         for tool, char, tip in TOOLS:
             btn = QPushButton(char)
             btn.setToolTip(tip)
-            btn.setFixedSize(32, 32)
+            btn.setFixedSize(30, 30)
             btn.setCheckable(True)
             btn.setStyleSheet(self._tool_btn_css())
             btn.clicked.connect(lambda _=False, t=tool: self._set_tool(t))
@@ -2392,7 +2391,7 @@ class MainWindow(QMainWindow):
         self._swatch_buttons: dict[str, QPushButton] = {}
         for color in SWATCH_COLORS:
             btn = QPushButton()
-            btn.setFixedSize(20, 20)
+            btn.setFixedSize(18, 18)
             btn.setToolTip(color)
             btn.setCheckable(True)
             btn.setStyleSheet(self._swatch_css(color, checked=color == self.project.draw_color))
@@ -2405,10 +2404,10 @@ class MainWindow(QMainWindow):
 
         # Custom color picker
         self.color_picker_btn = QPushButton()
-        self.color_picker_btn.setFixedSize(20, 20)
+        self.color_picker_btn.setFixedSize(18, 18)
         self.color_picker_btn.setToolTip("Custom color…")
         self.color_picker_btn.setStyleSheet(
-            f"QPushButton {{ border-radius: 10px; border: 1px solid {BORDER_BRIGHT}; background: {BG_CARD}; }}"
+            f"QPushButton {{ border-radius: 9px; border: 1px solid {BORDER_BRIGHT}; background: {BG_CARD}; }}"
             f"QPushButton:hover {{ border-color: white; }}"
         )
         self.color_picker_btn.clicked.connect(self._choose_color)
@@ -2420,7 +2419,7 @@ class MainWindow(QMainWindow):
         self.width_slider = QSlider(Qt.Orientation.Horizontal)
         self.width_slider.setRange(1, 20)
         self.width_slider.setValue(self.project.draw_width)
-        self.width_slider.setFixedWidth(70)
+        self.width_slider.setFixedWidth(80)
         self.width_slider.valueChanged.connect(self._width_changed)
         layout.addWidget(self.width_slider)
 
@@ -2435,7 +2434,7 @@ class MainWindow(QMainWindow):
         # Label selector
         self.label_input = QComboBox()
         self.label_input.setEditable(True)
-        self.label_input.setFixedWidth(160)
+        self.label_input.setFixedWidth(176)
         self.label_input.addItem("")
         for label, _color in ANATOMY_PRESETS:
             self.label_input.addItem(label)
@@ -2720,18 +2719,16 @@ class MainWindow(QMainWindow):
             btn = self.panel_buttons[panel]
             active = panel == self.project.active_panel
             btn.setChecked(active)
-            if active:
-                btn.setStyleSheet(
-                    f"QPushButton {{ background: {accent}; border: 1px solid {accent};"
-                    f"  color: white; border-radius: 8px; font-weight: 700; padding: 4px 10px; }}"
-                    f"QPushButton:hover {{ background: {accent}; }}"
-                )
-            else:
-                btn.setStyleSheet(
-                    f"QPushButton {{ background: transparent; border: none;"
-                    f"  color: {TEXT_SECONDARY}; border-radius: 8px; padding: 4px 10px; }}"
-                    f"QPushButton:hover {{ background: {BG_HOVER}; color: {TEXT_PRIMARY}; }}"
-                )
+            border = accent if active else "transparent"
+            bg = f"rgba({QColor(accent).red()}, {QColor(accent).green()}, {QColor(accent).blue()}, 0.18)" if active else "transparent"
+            weight = "700" if active else "600"
+            btn.setStyleSheet(
+                f"QPushButton {{ background: {bg}; border: 1px solid {border};"
+                f"  color: {TEXT_PRIMARY if active else TEXT_SECONDARY};"
+                f"  border-radius: 7px; font-weight: {weight}; padding: 5px 9px; }}"
+                f"QPushButton:hover {{ background: {BG_HOVER}; color: {TEXT_PRIMARY};"
+                f" border-color: {BORDER_BRIGHT}; }}"
+            )
 
         # Panel stack
         for i, (panel, *_) in enumerate(PANELS):

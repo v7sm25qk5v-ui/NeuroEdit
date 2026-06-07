@@ -5,15 +5,15 @@ import sys
 from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtWidgets import QApplication
 
-BG_PRIMARY = "#07070f"
-BG_SECONDARY = "#0d0d1a"
-BG_TERTIARY = "#131325"
-BG_CARD = "#181830"
-BG_HOVER = "#1e1e38"
-BORDER = "#252545"
-BORDER_BRIGHT = "#3a3a6a"
-PRIMARY = "#6366f1"
-PRIMARY_HOVER = "#4f46e5"
+BG_PRIMARY = "#090a0f"
+BG_SECONDARY = "#10131a"
+BG_TERTIARY = "#151923"
+BG_CARD = "#1b202b"
+BG_HOVER = "#242a36"
+BORDER = "#2c3340"
+BORDER_BRIGHT = "#465161"
+PRIMARY = "#4f7cff"
+PRIMARY_HOVER = "#3f68dc"
 ACCENT_CYAN = "#22d3ee"
 ACCENT_EMERALD = "#10b981"
 ACCENT_AMBER = "#f59e0b"
@@ -35,6 +35,11 @@ QWidget {{
     color: {TEXT_PRIMARY};
     selection-background-color: {PRIMARY};
     selection-color: white;
+}}
+
+QWidget#appHeader {{
+    background: {BG_TERTIARY};
+    border-bottom: 1px solid {BORDER};
 }}
 
 QStatusBar {{
@@ -82,10 +87,29 @@ QPushButton,
 QToolButton {{
     background: {BG_CARD};
     border: 1px solid {BORDER};
-    border-radius: 8px;
+    border-radius: 7px;
     color: {TEXT_SECONDARY};
     padding: 7px 11px;
     font-weight: 600;
+}}
+
+QPushButton[role="panelTab"] {{
+    background: transparent;
+    border: 1px solid transparent;
+    color: {TEXT_SECONDARY};
+    padding: 5px 9px;
+}}
+
+QPushButton[role="panelTab"]:hover {{
+    background: {BG_HOVER};
+    border-color: {BORDER};
+    color: {TEXT_PRIMARY};
+}}
+
+QPushButton[role="panelTab"]:checked {{
+    background: {BG_HOVER};
+    border-color: {BORDER_BRIGHT};
+    color: {TEXT_PRIMARY};
 }}
 
 QPushButton:hover,
@@ -110,6 +134,12 @@ QPushButton[variant="cyan"] {{
 }}
 
 QPushButton[variant="emerald"] {{
+    background: rgba(16, 185, 129, 0.18);
+    border-color: rgba(16, 185, 129, 0.55);
+    color: #d1fae5;
+}}
+
+QPushButton[variant="emerald"]:hover {{
     background: {ACCENT_EMERALD};
     border-color: {ACCENT_EMERALD};
     color: white;
