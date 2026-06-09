@@ -228,18 +228,122 @@ they had to run `hf auth login` manually. This commit adds a full first-run flow
 
 ---
 
+## 7. Project Library / Recent Cases dialog improvements (uncommitted)
+
+All changes are in `desktop/src/neuroedit_desktop/ui/main_window.py`.
+
+### What was added
+
+**New top-level helpers (lines ~2124–2189):**
+- `_relative_time(ts)` — converts a unix timestamp to "Opened today", "Opened yesterday", "Opened N days ago", "Opened last week", "Opened X weeks ago", or a full date string ("Mar 14, 2025") for items 28+ days old.
+- `_read_project_meta(path)` — opens `project.json` once and extracts: `project_name`, `total_duration` (sum of all clip durations), `media_count` (clips + audio_tracks + slides), `missing_count` (paths that fail `os.path.exists`), `first_source_path` + `first_clip_duration` for thumbnail generation. Returns an `ok: False` sentinel if the file is unreadable; never raises.
+- `_make_gray_placeholder()` — renders a solid `#2c3340` 160×90 `QPixmap` used as the thumbnail placeholder while the background thread works (or as the fallback if ffmpeg fails).
+
+**New class `ThumbnailWorker(QObject)` (lines ~2192–2230):**
+- Runs on a background `QThread` spawned by `ProjectLibraryDialog`.
+- For each `(project_path, source_path, clip_dur)` task: checks for a cached `.thumb.jpg` that is newer than the project file; if fresh, emits it immediately. Otherwise calls `imageio_ffmpeg.get_ffmpeg_exe()` + `subprocess.run` to extract a single frame at 15% of the clip's duration (or 5 s if duration is 0). Caches as `<project_path>.thumb.jpg`.
+- Gracefully skips any task where ffmpeg isn't available or fails; emits `thumbnail_ready(project_path, thumb_path)` for successes only.
+- Has a `stop()` flag so the thread can be cleanly cancelled when the dialog re-populates or closes.
+
+**`ProjectLibraryDialog` — rewritten `_populate`, extended class (lines ~2233–2461):**
+- Each item now shows 3 lines: project name, relative timestamp, and a detail line (`M:SS  •  N clips, N audio, N slides`).
+- A gray placeholder icon is set immediately at populate time; the background worker replaces it when a real thumbnail arrives (`_on_thumbnail_ready`).
+- Icon size set to `QSize(160, 90)`.
+- Missing-file indicator: if the JSON parsed OK and 1+ files are missing, appends `⚠ N source file(s) missing` to the item text and colors it red (`#F44336`). If all files present, name is green (`#4CAF50`). If the project file itself is gone, gray (`#6b7280`).
+- Right-click context menu (`_show_context_menu`) adds "Open", "Reveal in Finder" / "Reveal in Explorer" / "Open folder" (platform-aware), and "Remove from List". Uses `QDesktopServices.openUrl(QUrl.fromLocalFile(...))`.
+- `closeEvent` calls `_stop_thumb_thread()` so the worker is always cleaned up.
+
+**New imports added at file top:**
+- stdlib: `datetime`, `json`, `subprocess`, `sys`
+- Qt: `QSize` (QtCore), `QDesktopServices` (QtGui), `QMenu` (QtWidgets)
+
+### What each card now shows
+```
+[160×90 thumbnail or gray placeholder]  Project Name
+                                         Opened today
+                                         1:23  •  3 clips, 1 audio
+```
+or with a warning:
+```
+[gray placeholder]  My Project  ⚠ 2 source files missing
+                    Opened 3 days ago
+                    2:47  •  2 clips
+```
+
+### Edge cases handled
+- JSON unreadable / project file missing → shows folder name, gray, "(not found)" suffix, no crash
+- No clips / duration = 0 → detail line omitted or shows only media count
+- Thumbnail ffmpeg failure → placeholder persists; no crash, no broken icon
+- Dialog closed while thumbnails are generating → `_stop_thumb_thread` cancels cleanly
+- Cached thumbnail newer than project file → served immediately without re-running ffmpeg
+- Windows paths with spaces → source path quoted in ffmpeg command
+
+### Edge cases left as TODO
+- The dialog reads each project file twice (once in `_read_project_meta`, once in `_populate` for the parts breakdown). Could be collapsed into one read with a minor refactor, but it's fast enough for the typical handful of recent projects.
+- Thumbnail `.thumb.jpg` files accumulate next to the project files indefinitely. A cache-eviction pass (e.g., delete thumbs for removed-from-recents projects) would be a polish step.
+
+### Verification
+- `ruff check src tests` — All checks passed (zero errors)
+- `python -m pytest tests/ -q` — 6 passed
+
+---
+
+## 8. Annotation workflow improvements (uncommitted)
+
+All changes in `desktop/src/neuroedit_desktop/ui/main_window.py` and `desktop/src/neuroedit_desktop/models.py`.
+
+### Feature 1: Duplicate annotation at playhead (Cmd+D)
+- `LabelsPanel` gains `duplicate_requested = Signal(str)` and a **Duplicate** button in the inspector's action row.
+- `MainWindow._duplicate_annotation(annotation_id)` does `copy.deepcopy(ann)`, assigns a new UUID, sets `frame_time = current_time`, appends to the list, selects the copy, pushes to undo.
+- `MainWindow._duplicate_selected_annotation()` is the Cmd+D handler — guards against `QLineEdit`/`QTextEdit` focus, then delegates.
+- `QAction("Duplicate Annotation at Playhead")` with shortcut `Ctrl+D` added to the Edit menu.
+
+### Feature 2: Delete button in inspector + keyboard shortcut
+- A red **Delete** button (`color: #F44336`) added to the inspector's action row alongside Duplicate.
+- Keyboard Delete/Backspace already handled by `VideoGraphicsView.keyPressEvent` (unchanged — works when the canvas has focus). The inspector button routes through `LabelsPanel._delete_selected → delete_requested signal → MainWindow._delete_annotation`.
+- `QAction("Delete Annotation")` added to Edit menu (no shortcut — canvas keyPressEvent is the shortcut; adding a global shortcut would conflict with text editing).
+
+### Feature 3: Custom label preset management
+- `CUSTOM_PRESETS_PATH = Path.home() / ".neuroedit" / "custom_label_presets.json"` — JSON array of strings.
+- `_load_custom_presets()` / `_save_custom_presets()` module-level helpers (safe: returns `[]` on any error).
+- Presets section in `LabelsPanel` now shows: **Built-in** grid (no × button), **Custom** section with a row per preset (preset button + × remove button), and a **text field + Add button** at the bottom.
+- `_refresh_custom_grid()` rebuilds the custom section from `self._custom_presets`.
+- `_add_custom_preset()` deduplicates case-insensitively against built-ins and existing custom entries.
+- `_remove_custom_preset(label)` removes and immediately saves to JSON.
+- Toolbar label `QComboBox` also pre-loads custom presets at header-build time (`_load_custom_presets()`).
+- `_BUILTIN_PRESET_LABELS` set used for the duplicate guard.
+
+### Feature 4: Default annotation color → `#00E5FF` (cyan)
+- `models.py`: `draw_color: str = "#00e5ff"` (was `"#22d3ee"`).
+- `SWATCH_COLORS` in `main_window.py`: first entry changed from `"#22d3ee"` to `"#00e5ff"` so the swatch toolbar and inspector color swatches match the new default.
+
+### Feature 5: "Set start/end to playhead" buttons in inspector
+- `LabelsPanel` gains `set_start_to_playhead = Signal(str)` and `set_end_to_playhead = Signal(str)`.
+- Two buttons **"◀ Set start"** and **"Set end ▶"** placed in a row below the Duration field.
+- `start_time_label` (role=muted) shows `"Start: M:SS.S"` above the Duration field; updated in `_load_selected()`.
+- `MainWindow._set_annotation_start_to_playhead(id)` → `ann.frame_time = current_time`, `_mark_dirty()`.
+- `MainWindow._set_annotation_end_to_playhead(id)` → `ann.ann_duration = max(0.1, current_time - ann.frame_time)`, `_mark_dirty()`.
+- Both mutations go through `_mark_dirty()` → `_push_history()` → undoable.
+
+### Verification
+- `ruff check src tests` → **All checks passed** (zero errors)
+- `python -m pytest tests/ -q` → **6 passed**
+- Syntax-checked both changed files with `py_compile.compile`.
+
+---
+
 ## Current state at handoff
 
 - All work committed and pushed to `main`. Commit order (condensed):
   `e4850e9` initial → `85e6498` pipeline → `505c3c2` installer fix →
   `600a55a` Windows UI fixes → `751fb97` proprietary license →
   `030bbf6` UI polish baseline → `82c6768` resize-safe UI →
-  `1ce8c02` panel-content sizing → **`23e53b8` SAM3 first-run (HEAD)**.
+  `1ce8c02` panel-content sizing → **`23e53b8` SAM3 first-run**.
   Local and remote are in sync.
 - Tags: **`v0.2.0-alpha`** (`505c3c2`), **`v0.2.1-alpha`** (`600a55a`),
   **`v0.2.2-alpha`** (`1ce8c02`). HEAD (`23e53b8`, SAM3 first-run) is
   **not yet tagged** — cut `v0.2.3-alpha` to ship it.
-- Local working tree clean except `HANDOFF.md` and `TODO.md` (both untracked).
+- Local working tree: `HANDOFF.md` and `TODO.md` untracked; `main_window.py` has the Project Library improvements (section 7) and annotation workflow improvements (section 8) — not yet committed.
   macOS app builds; tests pass (6).
 - **Heads-up:** work is happening in more than one tool/session. Always `git fetch`
   and check HEAD before editing (that's how `030bbf6` was caught).
@@ -252,10 +356,10 @@ they had to run `hf auth login` manually. This commit adds a full first-run flow
   - ✅ `TODO.md` created at repo root with full feature roadmap and a new
     **Stryker Imaging / Video Integration** section (17 items covering DICOM
     ingest/export, fluorescence multi-stream, MWL, FHIR, PACS publish targets).
+  - ✅ Project Library dialog overhaul (thumbnails, duration/media count, missing-file indicator, relative timestamps, Reveal in Finder/Explorer, status color coding).
+  - ✅ Annotation workflow: duplicate at playhead (Cmd+D), delete in inspector, custom label presets, default cyan color, set start/end to playhead.
 - **Outstanding / next steps:**
-  - Tag **`v0.2.3-alpha`** to ship the SAM3 first-run flow.
-  - Verify macOS DMG end-to-end: launch, import media, play/scrub, export MP4 +
-    `.export-report.txt`.
+  - Commit `main_window.py` and `models.py` annotation workflow changes and tag **`v0.2.3-alpha`** (or `v0.3.0-alpha`).
   - Verify SAM3 download on a clean machine with a valid HF token.
   - Owner to make the repo **private** if keeping control.
   - Commit `HANDOFF.md` and `TODO.md` if you want them in version history.

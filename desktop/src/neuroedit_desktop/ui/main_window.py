@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+import copy
+import datetime
+import json
 import math
 import os
+import subprocess
+import sys
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QPointF, QRectF, QSizeF, Qt, QThread, QTimer, QUrl, Signal
-from PySide6.QtGui import QAction, QBrush, QColor, QFont, QFontMetricsF, QImage, QPainter, QPen, QPixmap, QPolygonF
+from PySide6.QtCore import QObject, QPointF, QRectF, QSize, QSizeF, Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtGui import QAction, QBrush, QColor, QDesktopServices, QFont, QFontMetricsF, QImage, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 from PySide6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QCheckBox,
     QColorDialog,
@@ -32,6 +38,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QProgressBar,
     QProgressDialog,
@@ -41,6 +48,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStackedWidget,
     QStatusBar,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -96,7 +104,7 @@ PANELS: list[tuple[PanelType, str, str]] = [
     ("audio",  "Audio",  ACCENT_RED),
 ]
 
-SWATCH_COLORS = ["#22d3ee", "#ef4444", "#f59e0b", "#10b981", "#8b5cf6", "#f43f5e", "#ffffff", "#fb923c"]
+SWATCH_COLORS = ["#00e5ff", "#ef4444", "#f59e0b", "#10b981", "#8b5cf6", "#f43f5e", "#ffffff", "#fb923c"]
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".webm"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".heic", ".bmp", ".webp"}
@@ -118,6 +126,29 @@ ANATOMY_PRESETS = [
     ("Disc space", "#34d399"),
     ("Vertebral body", "#94a3b8"),
 ]
+
+_BUILTIN_PRESET_LABELS = {label.lower() for label, _ in ANATOMY_PRESETS}
+CUSTOM_PRESETS_PATH = Path.home() / ".neuroedit" / "custom_label_presets.json"
+
+
+def _load_custom_presets() -> list[str]:
+    try:
+        data = json.loads(CUSTOM_PRESETS_PATH.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            return [str(s) for s in data if s]
+    except Exception:  # noqa: BLE001
+        pass
+    return []
+
+
+def _save_custom_presets(presets: list[str]) -> None:
+    try:
+        CUSTOM_PRESETS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CUSTOM_PRESETS_PATH.write_text(
+            json.dumps(presets, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def default_project_root() -> Path:
@@ -1512,6 +1543,9 @@ class SamPanel(QWidget):
 
 class LabelsPanel(QWidget):
     delete_requested = Signal(str)
+    duplicate_requested = Signal(str)
+    set_start_to_playhead = Signal(str)
+    set_end_to_playhead = Signal(str)
     seek_requested = Signal(float)
     preset_selected = Signal(str, str)
     duration_changed = Signal(str, float)
@@ -1580,10 +1614,6 @@ class LabelsPanel(QWidget):
             self._color_row.addWidget(btn)
         self._color_row.addStretch(1)
 
-        delete_button = QPushButton("Delete Selected")
-        delete_button.setProperty("variant", "danger")
-        delete_button.clicked.connect(self._delete_selected)
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
@@ -1602,10 +1632,19 @@ class LabelsPanel(QWidget):
         layout.addWidget(self._presets_toggle)
 
         self._presets_container = QWidget()
-        preset_grid = QGridLayout(self._presets_container)
-        preset_grid.setContentsMargins(0, 0, 0, 0)
-        preset_grid.setHorizontalSpacing(6)
-        preset_grid.setVerticalSpacing(6)
+        presets_layout = QVBoxLayout(self._presets_container)
+        presets_layout.setContentsMargins(0, 0, 0, 4)
+        presets_layout.setSpacing(4)
+
+        builtin_label = QLabel("Built-in")
+        builtin_label.setProperty("role", "muted")
+        presets_layout.addWidget(builtin_label)
+
+        builtin_grid_widget = QWidget()
+        self._builtin_grid = QGridLayout(builtin_grid_widget)
+        self._builtin_grid.setContentsMargins(0, 0, 0, 0)
+        self._builtin_grid.setHorizontalSpacing(6)
+        self._builtin_grid.setVerticalSpacing(6)
         for idx, (label, color) in enumerate(ANATOMY_PRESETS):
             btn = QPushButton(label)
             btn.setToolTip(f"Use label: {label}")
@@ -1620,7 +1659,37 @@ class LabelsPanel(QWidget):
                 f" padding: 5px 7px; font-size: 10px; text-align: left; }}"
                 f"QPushButton:hover {{ border-color: {color}; background: {BG_HOVER}; }}"
             )
-            preset_grid.addWidget(btn, idx // 2, idx % 2)
+            self._builtin_grid.addWidget(btn, idx // 2, idx % 2)
+        presets_layout.addWidget(builtin_grid_widget)
+
+        custom_label = QLabel("Custom")
+        custom_label.setProperty("role", "muted")
+        presets_layout.addWidget(custom_label)
+
+        self._custom_grid_widget = QWidget()
+        self._custom_grid = QGridLayout(self._custom_grid_widget)
+        self._custom_grid.setContentsMargins(0, 0, 0, 0)
+        self._custom_grid.setHorizontalSpacing(6)
+        self._custom_grid.setVerticalSpacing(4)
+        presets_layout.addWidget(self._custom_grid_widget)
+
+        add_row = QHBoxLayout()
+        add_row.setSpacing(4)
+        self._new_preset_edit = QLineEdit()
+        self._new_preset_edit.setPlaceholderText("New preset label…")
+        self._new_preset_edit.setFixedHeight(26)
+        add_preset_btn = QPushButton("Add")
+        add_preset_btn.setFixedHeight(26)
+        add_preset_btn.setFixedWidth(44)
+        add_preset_btn.clicked.connect(self._add_custom_preset)
+        self._new_preset_edit.returnPressed.connect(self._add_custom_preset)
+        add_row.addWidget(self._new_preset_edit, 1)
+        add_row.addWidget(add_preset_btn)
+        presets_layout.addLayout(add_row)
+
+        self._custom_presets: list[str] = _load_custom_presets()
+        self._refresh_custom_grid()
+
         self._presets_container.setVisible(False)
         layout.addWidget(self._presets_container)
 
@@ -1646,12 +1715,45 @@ class LabelsPanel(QWidget):
             row.addWidget(widget, 1)
             return row
 
+        self.start_time_label = QLabel("")
+        self.start_time_label.setProperty("role", "muted")
+
+        set_start_btn = QPushButton("◀ Set start")
+        set_start_btn.setToolTip("Set annotation start to current playhead position")
+        set_start_btn.clicked.connect(self._set_start_to_playhead)
+        set_end_btn = QPushButton("Set end ▶")
+        set_end_btn.setToolTip("Set annotation end to current playhead position")
+        set_end_btn.clicked.connect(self._set_end_to_playhead)
+        playhead_row = QHBoxLayout()
+        playhead_row.setSpacing(4)
+        playhead_row.addWidget(set_start_btn, 1)
+        playhead_row.addWidget(set_end_btn, 1)
+
+        inspector_layout.addWidget(self.start_time_label)
         inspector_layout.addLayout(_row("Duration", self.duration_input))
+        inspector_layout.addLayout(playhead_row)
         inspector_layout.addLayout(_row("Font size", self.font_size_input))
         inspector_layout.addLayout(_row("Stroke", self.stroke_input))
         inspector_layout.addLayout(_row("Opacity", self.opacity_slider))
+
+        action_row = QHBoxLayout()
+        action_row.setSpacing(6)
+        self._duplicate_btn = QPushButton("Duplicate")
+        self._duplicate_btn.setToolTip("Duplicate annotation at playhead (Cmd+D)")
+        self._duplicate_btn.clicked.connect(self._duplicate_selected)
+        self._delete_inspector_btn = QPushButton("Delete")
+        self._delete_inspector_btn.setToolTip("Delete selected annotation")
+        self._delete_inspector_btn.setStyleSheet(
+            "QPushButton { color: #F44336; border-color: rgba(244, 67, 54, 0.35);"
+            " background: rgba(244, 67, 54, 0.10); }"
+            "QPushButton:hover { background: rgba(244, 67, 54, 0.22); }"
+        )
+        self._delete_inspector_btn.clicked.connect(self._delete_selected)
+        action_row.addWidget(self._duplicate_btn, 1)
+        action_row.addWidget(self._delete_inspector_btn, 1)
+        inspector_layout.addLayout(action_row)
+
         layout.addWidget(self._inspector)
-        layout.addWidget(delete_button)
 
     def set_project(self, project: ProjectState) -> None:
         self.project = project
@@ -1701,6 +1803,59 @@ class LabelsPanel(QWidget):
         self._presets_container.setVisible(visible)
         self._presets_toggle.setText(("▾" if visible else "▸") + "  Quick Label Presets")
 
+    def _refresh_custom_grid(self) -> None:
+        while self._custom_grid.count():
+            item = self._custom_grid.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        for idx, preset_label in enumerate(self._custom_presets):
+            row_widget = QWidget()
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(2)
+            btn = QPushButton(preset_label)
+            btn.setToolTip(f"Use label: {preset_label}")
+            btn.clicked.connect(
+                lambda _=False, pl=preset_label: self.preset_selected.emit(pl, self.project.draw_color)
+            )
+            btn.setStyleSheet(
+                f"QPushButton {{ color: {TEXT_SECONDARY}; border: 1px solid {BORDER};"
+                f" background: {BG_CARD}; border-radius: 10px;"
+                f" padding: 5px 7px; font-size: 10px; text-align: left; }}"
+                f"QPushButton:hover {{ border-color: {BORDER_BRIGHT}; background: {BG_HOVER}; }}"
+            )
+            remove_btn = QPushButton("×")
+            remove_btn.setFixedSize(18, 18)
+            remove_btn.setToolTip(f"Remove preset: {preset_label}")
+            remove_btn.setStyleSheet(
+                f"QPushButton {{ color: {TEXT_MUTED}; border: none; background: transparent;"
+                f" font-size: 12px; padding: 0; }}"
+                f"QPushButton:hover {{ color: #F44336; }}"
+            )
+            remove_btn.clicked.connect(lambda _=False, pl=preset_label: self._remove_custom_preset(pl))
+            row_layout.addWidget(btn, 1)
+            row_layout.addWidget(remove_btn)
+            self._custom_grid.addWidget(row_widget, idx, 0)
+        self._custom_grid_widget.setVisible(bool(self._custom_presets))
+
+    def _add_custom_preset(self) -> None:
+        text = self._new_preset_edit.text().strip()
+        if not text:
+            return
+        if text.lower() in _BUILTIN_PRESET_LABELS:
+            return
+        if text.lower() in {p.lower() for p in self._custom_presets}:
+            return
+        self._custom_presets.append(text)
+        _save_custom_presets(self._custom_presets)
+        self._new_preset_edit.clear()
+        self._refresh_custom_grid()
+
+    def _remove_custom_preset(self, label: str) -> None:
+        self._custom_presets = [p for p in self._custom_presets if p != label]
+        _save_custom_presets(self._custom_presets)
+        self._refresh_custom_grid()
+
     def _load_selected(self) -> None:
         ann = self._selected_annotation()
         has = ann is not None
@@ -1722,6 +1877,11 @@ class LabelsPanel(QWidget):
         self.opacity_slider.setValue(int(round((ann.opacity if ann else 0.85) * 100)))
         for w in blockers:
             w.blockSignals(False)
+
+        if ann is not None:
+            self.start_time_label.setText(f"Start: {format_time(ann.frame_time)}")
+        else:
+            self.start_time_label.setText("")
 
         for color, btn in self._color_buttons.items():
             active = ann is not None and color.lower() == ann.color.lower()
@@ -1791,6 +1951,21 @@ class LabelsPanel(QWidget):
         item = self.list_widget.currentItem()
         if item:
             self.delete_requested.emit(str(item.data(Qt.ItemDataRole.UserRole)))
+
+    def _duplicate_selected(self) -> None:
+        ann_id = self._selected_id()
+        if ann_id:
+            self.duplicate_requested.emit(ann_id)
+
+    def _set_start_to_playhead(self) -> None:
+        ann_id = self._selected_id()
+        if ann_id:
+            self.set_start_to_playhead.emit(ann_id)
+
+    def _set_end_to_playhead(self) -> None:
+        ann_id = self._selected_id()
+        if ann_id:
+            self.set_end_to_playhead.emit(ann_id)
 
     def _seek_item(self, item: QListWidgetItem) -> None:
         ann_id = str(item.data(Qt.ItemDataRole.UserRole))
@@ -2116,13 +2291,124 @@ class ExportWorker(QObject):
             self.finished.emit(None, str(exc), [])
 
 
+def _relative_time(ts: float) -> str:
+    now = datetime.datetime.now()
+    dt = datetime.datetime.fromtimestamp(ts)
+    delta = now - dt
+    days = delta.days
+    if days < 1:
+        return "Opened today"
+    if days == 1:
+        return "Opened yesterday"
+    if days < 7:
+        return f"Opened {days} days ago"
+    if days < 14:
+        return "Opened last week"
+    if days < 28:
+        weeks = days // 7
+        return f"Opened {weeks} weeks ago"
+    return dt.strftime("%b %-d, %Y")
+
+
+def _read_project_meta(path: Path) -> dict:
+    result = {
+        "project_name": None,
+        "total_duration": 0.0,
+        "media_count": 0,
+        "missing_count": 0,
+        "first_source_path": None,
+        "first_clip_duration": 0.0,
+        "ok": False,
+    }
+    try:
+        with path.open(encoding="utf-8") as f:
+            data = json.load(f)
+        result["project_name"] = data.get("project_name")
+        clips = data.get("clips") or []
+        audio = data.get("audio_tracks") or data.get("audio") or []
+        slides = data.get("slides") or []
+        for clip in clips:
+            dur = clip.get("duration") or 0.0
+            result["total_duration"] += float(dur)
+            src = clip.get("path") or clip.get("source_path")
+            if src and result["first_source_path"] is None:
+                result["first_source_path"] = src
+                result["first_clip_duration"] = float(dur)
+        result["media_count"] = len(clips) + len(audio) + len(slides)
+        for clip in clips:
+            src = clip.get("path") or clip.get("source_path")
+            if src and not Path(src).exists():
+                result["missing_count"] += 1
+        for track in audio:
+            src = track.get("path") or track.get("source_path")
+            if src and not Path(src).exists():
+                result["missing_count"] += 1
+        for slide in slides:
+            src = slide.get("image_path") or slide.get("source_path")
+            if src and not Path(src).exists():
+                result["missing_count"] += 1
+        result["ok"] = True
+    except Exception:  # noqa: BLE001
+        pass
+    return result
+
+
+def _make_gray_placeholder(width: int = 160, height: int = 90) -> QPixmap:
+    img = QImage(width, height, QImage.Format.Format_RGB32)
+    img.fill(QColor("#2c3340"))
+    return QPixmap.fromImage(img)
+
+
+class ThumbnailWorker(QObject):
+    thumbnail_ready = Signal(str, str)  # project_path, thumb_path
+
+    def __init__(self, tasks: list[tuple[str, str, float]]) -> None:
+        super().__init__()
+        self._tasks = tasks
+        self._stopped = False
+
+    def stop(self) -> None:
+        self._stopped = True
+
+    def run(self) -> None:
+        try:
+            import imageio_ffmpeg
+            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:  # noqa: BLE001
+            return
+        for project_path, source_path, clip_dur in self._tasks:
+            if self._stopped:
+                break
+            thumb = Path(project_path).with_suffix(".thumb.jpg")
+            try:
+                proj_mtime = Path(project_path).stat().st_mtime
+                if thumb.exists() and thumb.stat().st_mtime >= proj_mtime:
+                    self.thumbnail_ready.emit(project_path, str(thumb))
+                    continue
+                offset = clip_dur * 0.15 if clip_dur > 0 else 5.0
+                src = f'"{source_path}"' if sys.platform in ("win32",) and " " in source_path else source_path
+                cmd = [
+                    ffmpeg, "-y", "-ss", str(offset),
+                    "-i", src,
+                    "-frames:v", "1", "-q:v", "2",
+                    str(thumb),
+                ]
+                subprocess.run(cmd, capture_output=True, timeout=15)
+                if thumb.exists():
+                    self.thumbnail_ready.emit(project_path, str(thumb))
+            except Exception:  # noqa: BLE001
+                pass
+
+
 class ProjectLibraryDialog(QDialog):
     project_selected = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Project Library")
-        self.setMinimumSize(580, 380)
+        self.setMinimumSize(640, 420)
+        self._thumb_thread = None
+        self._thumb_worker = None
         self._build_ui()
         self._populate()
 
@@ -2141,7 +2427,10 @@ class ProjectLibraryDialog(QDialog):
         self.list_widget = QListWidget()
         self.list_widget.setAlternatingRowColors(False)
         self.list_widget.setSpacing(2)
+        self.list_widget.setIconSize(QSize(160, 90))
         self.list_widget.itemDoubleClicked.connect(self._open_selected)
+        self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.list_widget.customContextMenuRequested.connect(self._show_context_menu)
         layout.addWidget(self.list_widget)
 
         btn_row = QHBoxLayout()
@@ -2159,42 +2448,158 @@ class ProjectLibraryDialog(QDialog):
         layout.addLayout(btn_row)
 
     def _populate(self) -> None:
+        self._stop_thumb_thread()
         self.list_widget.clear()
         settings = QSettings("NeuroEdit", "Desktop")
         recents: list[str] = settings.value("recentProjects", []) or []
+
+        thumb_tasks: list[tuple[str, str, float]] = []
+        placeholder_icon = QPixmap(_make_gray_placeholder())
+
         for path_str in recents:
             p = Path(path_str)
             folder_name = p.parent.name if p.name == "project.json" else p.name
-            try:
-                import json as _json
-                with p.open() as f:
-                    data = _json.load(f)
-                project_name = data.get("project_name") or folder_name
-                exists = True
-            except Exception:
-                project_name = folder_name
-                exists = p.exists()
+            meta = _read_project_meta(p)
+            project_name = meta["project_name"] or folder_name
 
             modified = ""
             try:
-                import datetime
                 ts = p.stat().st_mtime
-                modified = datetime.datetime.fromtimestamp(ts).strftime("%b %-d, %Y  %-I:%M %p")
-            except Exception:
+                modified = _relative_time(ts)
+            except Exception:  # noqa: BLE001
                 pass
 
-            display = f"{project_name}\n{p.parent}  •  {modified}" if modified else f"{project_name}\n{p.parent}"
+            dur = meta["total_duration"]
+            if dur > 0:
+                mins = int(dur) // 60
+                secs = int(dur) % 60
+                dur_str = f"{mins}:{secs:02d}"
+            else:
+                dur_str = ""
+
+            clips_data = []
+            try:
+                with p.open(encoding="utf-8") as f:
+                    _d = json.load(f)
+                clips_data = _d.get("clips") or []
+                audio_data = _d.get("audio_tracks") or _d.get("audio") or []
+                slides_data = _d.get("slides") or []
+            except Exception:  # noqa: BLE001
+                clips_data = []
+                audio_data = []
+                slides_data = []
+
+            parts = []
+            if clips_data:
+                parts.append(f"{len(clips_data)} clip{'s' if len(clips_data) != 1 else ''}")
+            if audio_data:
+                parts.append(f"{len(audio_data)} audio")
+            if slides_data:
+                parts.append(f"{len(slides_data)} slide{'s' if len(slides_data) != 1 else ''}")
+            media_str = ", ".join(parts) if parts else ""
+
+            detail_line = ""
+            if dur_str and media_str:
+                detail_line = f"{dur_str}  •  {media_str}"
+            elif dur_str:
+                detail_line = dur_str
+            elif media_str:
+                detail_line = media_str
+
+            missing = meta["missing_count"]
+            if meta["ok"] and missing > 0:
+                status_suffix = f"  ⚠ {missing} source file{'s' if missing != 1 else ''} missing"
+            elif not meta["ok"] and not p.exists():
+                status_suffix = "  (not found)"
+            else:
+                status_suffix = ""
+
+            lines = [project_name]
+            if modified:
+                lines.append(modified)
+            if detail_line:
+                lines.append(detail_line)
+            display = "\n".join(lines)
+            if status_suffix:
+                display += status_suffix
+
             item = QListWidgetItem(display)
             item.setData(Qt.ItemDataRole.UserRole, path_str)
-            if not exists:
+            item.setIcon(QPixmap(placeholder_icon))
+
+            if meta["ok"] and missing == 0:
+                item.setForeground(QColor("#4CAF50"))
+            elif meta["ok"] and missing > 0:
+                item.setForeground(QColor("#F44336"))
+            elif not p.exists():
                 item.setForeground(QColor("#6b7280"))
-                item.setText(item.text() + "  (not found)")
+
             self.list_widget.addItem(item)
+
+            if meta["first_source_path"]:
+                thumb_tasks.append((path_str, meta["first_source_path"], meta["first_clip_duration"]))
 
         if not recents:
             placeholder = QListWidgetItem("No recent projects")
             placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
             self.list_widget.addItem(placeholder)
+
+        if thumb_tasks:
+            self._start_thumb_thread(thumb_tasks)
+
+    def _start_thumb_thread(self, tasks: list[tuple[str, str, float]]) -> None:
+        self._thumb_thread = QThread()
+        self._thumb_worker = ThumbnailWorker(tasks)
+        self._thumb_worker.moveToThread(self._thumb_thread)
+        self._thumb_thread.started.connect(self._thumb_worker.run)
+        self._thumb_worker.thumbnail_ready.connect(self._on_thumbnail_ready)
+        self._thumb_thread.start()
+
+    def _stop_thumb_thread(self) -> None:
+        if self._thumb_worker is not None:
+            self._thumb_worker.stop()
+        if self._thumb_thread is not None:
+            self._thumb_thread.quit()
+            self._thumb_thread.wait(500)
+        self._thumb_thread = None
+        self._thumb_worker = None
+
+    def _on_thumbnail_ready(self, project_path: str, thumb_path: str) -> None:
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if item and item.data(Qt.ItemDataRole.UserRole) == project_path:
+                pix = QPixmap(thumb_path)
+                if not pix.isNull():
+                    item.setIcon(pix)
+                break
+
+    def _show_context_menu(self, pos) -> None:
+        item = self.list_widget.itemAt(pos)
+        if item is None:
+            return
+        path_str = item.data(Qt.ItemDataRole.UserRole)
+        if not path_str:
+            return
+        if sys.platform == "darwin":
+            reveal_label = "Reveal in Finder"
+        elif sys.platform == "win32":
+            reveal_label = "Reveal in Explorer"
+        else:
+            reveal_label = "Open folder"
+        menu = QMenu(self)
+        open_act = menu.addAction("Open")
+        reveal_act = menu.addAction(reveal_label)
+        remove_act = menu.addAction("Remove from List")
+        chosen = menu.exec(self.list_widget.mapToGlobal(pos))
+        if chosen == open_act:
+            self.list_widget.setCurrentItem(item)
+            self._open_selected()
+        elif chosen == reveal_act:
+            folder = str(Path(path_str).parent)
+            QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+        elif chosen == remove_act:
+            self.list_widget.setCurrentItem(item)
+            self._remove_selected()
 
     def _open_selected(self, *_) -> None:
         item = self.list_widget.currentItem()
@@ -2219,6 +2624,10 @@ class ProjectLibraryDialog(QDialog):
             recents.remove(path_str)
         settings.setValue("recentProjects", recents)
         self._populate()
+
+    def closeEvent(self, event) -> None:
+        self._stop_thumb_thread()
+        super().closeEvent(event)
 
 
 class MainWindow(QMainWindow):
@@ -2309,6 +2718,13 @@ class MainWindow(QMainWindow):
         self.redo_action.setShortcuts(["Ctrl+Shift+Z", "Ctrl+Y"])
         self.redo_action.setEnabled(False)
 
+        self.duplicate_annotation_action = QAction("Duplicate Annotation at Playhead", self)
+        self.duplicate_annotation_action.setShortcut("Ctrl+D")
+        self.duplicate_annotation_action.triggered.connect(self._duplicate_selected_annotation)
+
+        self.delete_annotation_action = QAction("Delete Annotation", self)
+        self.delete_annotation_action.triggered.connect(self._delete_selected_annotation)
+
         self.new_action.triggered.connect(self._new_project)
         self.open_action.triggered.connect(self._open_project)
         self.open_library_action.triggered.connect(self._open_project_library)
@@ -2339,6 +2755,9 @@ class MainWindow(QMainWindow):
         edit_menu = menubar.addMenu("Edit")
         edit_menu.addAction(self.undo_action)
         edit_menu.addAction(self.redo_action)
+        edit_menu.addSeparator()
+        edit_menu.addAction(self.duplicate_annotation_action)
+        edit_menu.addAction(self.delete_annotation_action)
 
         help_menu = menubar.addMenu("Help")
         help_menu.addAction(self.tutorial_action)
@@ -2521,6 +2940,8 @@ class MainWindow(QMainWindow):
         self.label_input.setFixedWidth(176)
         self.label_input.addItem("")
         for label, _color in ANATOMY_PRESETS:
+            self.label_input.addItem(label)
+        for label in _load_custom_presets():
             self.label_input.addItem(label)
         self.label_input.setEditText(self.project.draw_label)
         if self.label_input.lineEdit() is not None:
@@ -2721,6 +3142,9 @@ class MainWindow(QMainWindow):
         self.sam_panel.mode_changed.connect(self._set_sam_mode)
         self.sam_panel.delete_weights_requested.connect(self._delete_sam_weights)
         self.labels_panel.delete_requested.connect(self._delete_annotation)
+        self.labels_panel.duplicate_requested.connect(self._duplicate_annotation)
+        self.labels_panel.set_start_to_playhead.connect(self._set_annotation_start_to_playhead)
+        self.labels_panel.set_end_to_playhead.connect(self._set_annotation_end_to_playhead)
         self.labels_panel.seek_requested.connect(self._seek_global)
         self.labels_panel.preset_selected.connect(self._apply_label_preset)
         self.labels_panel.duration_changed.connect(self._update_annotation_duration)
@@ -3936,6 +4360,40 @@ class MainWindow(QMainWindow):
         if ann_id:
             self.project.selected_annotation_id = None
             self._delete_annotation(ann_id)
+
+    def _duplicate_annotation(self, annotation_id: str) -> None:
+        ann = self._find_annotation(annotation_id)
+        if ann is None:
+            return
+        new_ann = copy.deepcopy(ann)
+        new_ann.id = new_id()
+        new_ann.frame_time = self.project.current_time
+        self.project.annotations.append(new_ann)
+        self.project.selected_annotation_id = new_ann.id
+        self._mark_dirty()
+
+    def _duplicate_selected_annotation(self) -> None:
+        fw = QApplication.focusWidget()
+        if isinstance(fw, (QLineEdit, QTextEdit)):
+            return
+        ann_id = self.project.selected_annotation_id
+        if ann_id:
+            self._duplicate_annotation(ann_id)
+
+    def _set_annotation_start_to_playhead(self, annotation_id: str) -> None:
+        ann = self._find_annotation(annotation_id)
+        if ann is None:
+            return
+        ann.frame_time = self.project.current_time
+        self._mark_dirty()
+
+    def _set_annotation_end_to_playhead(self, annotation_id: str) -> None:
+        ann = self._find_annotation(annotation_id)
+        if ann is None:
+            return
+        new_duration = self.project.current_time - ann.frame_time
+        ann.ann_duration = max(0.1, new_duration)
+        self._mark_dirty()
 
     def _on_view_selection_changed(self, ann_id) -> None:
         self.project.selected_annotation_id = ann_id if isinstance(ann_id, str) else None

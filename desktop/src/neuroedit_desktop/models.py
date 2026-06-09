@@ -192,7 +192,7 @@ class ProjectState:
     sam_points: list[SamPoint] = field(default_factory=list)
     sam_mode: SamPointType = "positive"
     sam_points_enabled: bool = True
-    draw_color: str = "#22d3ee"
+    draw_color: str = "#00e5ff"
     draw_width: int = 6
     draw_opacity: float = 0.85
     draw_label: str = ""
