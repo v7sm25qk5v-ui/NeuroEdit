@@ -54,6 +54,14 @@ class SamBackend:
         self._device = "cpu"
         self._sam3_error: str | None = None
 
+    def is_weights_cached(self) -> bool:
+        snapshots = Path.home() / ".cache" / "huggingface" / "hub" / "models--facebook--sam3" / "snapshots"
+        return snapshots.exists() and any(snapshots.iterdir())
+
+    def login(self, token: str) -> None:
+        from huggingface_hub import login
+        login(token=token, add_to_git_credential=False)
+
     def probe(self) -> SamBackendInfo:
         try:
             import torch

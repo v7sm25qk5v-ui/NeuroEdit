@@ -1346,6 +1346,7 @@ class SamPanel(QWidget):
     undo_point_requested = Signal()
     points_enabled_changed = Signal(bool)
     mode_changed = Signal(str)  # "positive" | "negative"
+    delete_weights_requested = Signal()
 
     def __init__(self, project: ProjectState, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1397,6 +1398,15 @@ class SamPanel(QWidget):
         self.propagate_button.clicked.connect(self.propagate_requested)
         self.clear_button.clicked.connect(self.clear_points_requested)
 
+        self.delete_weights_button = QPushButton("Delete Cached Weights (3.2 GB)")
+        self.delete_weights_button.setProperty("variant", "danger")
+        self.delete_weights_button.setToolTip(
+            "Removes the SAM3 model weights from your cache (~/.cache/huggingface).\n"
+            "Useful before uninstalling the app. You can re-download them later."
+        )
+        self.delete_weights_button.clicked.connect(self.delete_weights_requested)
+        self.delete_weights_button.hide()
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
@@ -1418,6 +1428,7 @@ class SamPanel(QWidget):
         layout.addWidget(self.segment_button)
         layout.addWidget(self.propagate_button)
         layout.addWidget(self.clear_button)
+        layout.addWidget(self.delete_weights_button)
 
     def set_project(self, project: ProjectState) -> None:
         self.project = project
@@ -1432,6 +1443,9 @@ class SamPanel(QWidget):
 
     def set_status(self, text: str) -> None:
         self.status.setText(text)
+
+    def set_weights_cached(self, cached: bool) -> None:
+        self.delete_weights_button.setVisible(cached)
 
     def set_busy(self, busy: bool) -> None:
         self.progress.setVisible(busy)
@@ -1893,6 +1907,74 @@ class SamPropagationWorker(QObject):
             self.finished.emit(None, None)
         except Exception as exc:  # noqa: BLE001
             self.finished.emit(None, str(exc))
+
+
+class SamDownloadWorker(QObject):
+    """Authenticates with HuggingFace and downloads SAM3 weights via warmup()."""
+    finished = Signal(object)  # SamBackendInfo
+    progress = Signal(str)
+
+    def __init__(self, backend: SamBackend, token: str) -> None:
+        super().__init__()
+        self.backend = backend
+        self.token = token
+
+    def run(self) -> None:
+        from neuroedit_desktop.sam_backend import SamBackendInfo
+        try:
+            if self.token:
+                self.progress.emit("Authenticating with HuggingFace…")
+                self.backend.login(self.token)
+            self.progress.emit("Downloading SAM3 weights (~3.2 GB, this may take several minutes)…")
+            info = self.backend.warmup(self.progress.emit)
+            self.finished.emit(info)
+        except Exception as exc:  # noqa: BLE001
+            self.finished.emit(SamBackendInfo(status="missing", device="none", message=str(exc)))
+
+
+class SamSetupDialog(QDialog):
+    """Shown when SAM3 stack is installed but weights are not yet downloaded."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Set Up SAM3")
+        self.setMinimumWidth(480)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        intro = QLabel(
+            "SAM3 requires a one-time download of <b>~3.2 GB</b> from Meta / HuggingFace.<br><br>"
+            "1. <a href='https://huggingface.co/facebook/sam3'>Accept the SAM3 license</a> "
+            "&nbsp;(free HuggingFace account required).<br>"
+            "2. <a href='https://huggingface.co/settings/tokens'>Create a read token</a> "
+            "and paste it below."
+        )
+        intro.setOpenExternalLinks(True)
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        token_label = QLabel("HuggingFace token:")
+        self._token_edit = QLineEdit()
+        self._token_edit.setPlaceholderText("hf_…")
+        try:
+            from huggingface_hub import get_token
+            saved = get_token()
+            if saved:
+                self._token_edit.setText(saved)
+        except Exception:  # noqa: BLE001
+            pass
+        layout.addWidget(token_label)
+        layout.addWidget(self._token_edit)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Download")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def token(self) -> str:
+        return self._token_edit.text().strip()
 
 
 class ExportDialog(QDialog):
@@ -2637,6 +2719,7 @@ class MainWindow(QMainWindow):
         self.sam_panel.undo_point_requested.connect(self._undo_sam_point)
         self.sam_panel.points_enabled_changed.connect(self._set_sam_points_enabled)
         self.sam_panel.mode_changed.connect(self._set_sam_mode)
+        self.sam_panel.delete_weights_requested.connect(self._delete_sam_weights)
         self.labels_panel.delete_requested.connect(self._delete_annotation)
         self.labels_panel.seek_requested.connect(self._seek_global)
         self.labels_panel.preset_selected.connect(self._apply_label_preset)
@@ -3953,6 +4036,16 @@ class MainWindow(QMainWindow):
 
     def _on_sam_probe_finished(self, info) -> None:  # type: ignore[no-untyped-def]
         self._stop_sam_heartbeat()
+        self._sam_probe_thread = None
+        self._sam_probe_worker = None
+        cached = self.sam_backend.is_weights_cached()
+        self.sam_panel.set_weights_cached(cached)
+        if info.status == "ready" and not cached:
+            self.sam_panel.set_status("SAM3 weights not downloaded yet.")
+            self.sam_panel.set_busy(False)
+            self.statusBar().showMessage("SAM3 weights not downloaded", 4000)
+            self._show_sam_setup()
+            return
         label = {
             "ready": info.message or f"SAM ready ({info.device})",
             "unsupported": f"SAM on CPU — {info.message}",
@@ -3961,8 +4054,65 @@ class MainWindow(QMainWindow):
         self.sam_panel.set_status(label)
         self.sam_panel.set_busy(False)
         self.statusBar().showMessage(f"SAM backend: {info.status}", 4000)
-        self._sam_probe_thread = None
-        self._sam_probe_worker = None
+
+    def _show_sam_setup(self) -> None:
+        dlg = SamSetupDialog(self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            self.sam_panel.set_status("SAM3 setup cancelled. Reopen the SAM panel to try again.")
+            return
+        self._start_sam_download(dlg.token())
+
+    def _start_sam_download(self, token: str) -> None:
+        self.sam_panel.set_status("Downloading SAM3 weights…")
+        self.sam_panel.set_busy(True)
+        self.statusBar().showMessage("SAM3: downloading weights…")
+        self._sam_download_thread = QThread(self)
+        self._sam_download_worker = SamDownloadWorker(self.sam_backend, token)
+        self._sam_download_worker.moveToThread(self._sam_download_thread)
+        self._sam_download_thread.started.connect(self._sam_download_worker.run)
+        self._sam_download_worker.progress.connect(self._on_sam_probe_progress)
+        self._sam_download_worker.finished.connect(self._on_sam_download_finished)
+        self._sam_download_worker.finished.connect(self._sam_download_thread.quit)
+        self._sam_download_thread.finished.connect(self._sam_download_worker.deleteLater)
+        self._sam_download_thread.finished.connect(self._sam_download_thread.deleteLater)
+        self._sam_download_thread.start()
+
+    def _on_sam_download_finished(self, info) -> None:  # type: ignore[no-untyped-def]
+        self._stop_sam_heartbeat()
+        self._sam_download_thread = None
+        self._sam_download_worker = None
+        cached = self.sam_backend.is_weights_cached()
+        self.sam_panel.set_weights_cached(cached)
+        if info.status == "ready":
+            self.sam_panel.set_status(info.message or f"SAM3 ready ({info.device})")
+            self.statusBar().showMessage("SAM3 ready", 4000)
+        else:
+            self.sam_panel.set_status(f"Download failed: {info.message}")
+            self.statusBar().showMessage("SAM3 download failed", 5000)
+        self.sam_panel.set_busy(False)
+
+    def _delete_sam_weights(self) -> None:
+        import shutil
+        cache = Path.home() / ".cache" / "huggingface" / "hub" / "models--facebook--sam3"
+        reply = QMessageBox.question(
+            self,
+            "Delete SAM3 weights?",
+            "This will permanently delete ~3.2 GB of cached SAM3 model weights.\n\n"
+            "SAM3 features will stop working until you re-download them.\n\n"
+            "Delete the weights?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            shutil.rmtree(cache, ignore_errors=True)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Delete failed", str(exc))
+            return
+        self.sam_panel.set_weights_cached(False)
+        self.sam_panel.set_status("SAM3 weights deleted. Re-open the SAM panel to set up again.")
+        self.statusBar().showMessage("SAM3 weights deleted", 4000)
 
     def _run_segmentation(self) -> None:
         clip = self.project.active_clip
