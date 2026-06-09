@@ -8,10 +8,19 @@ import sys
 from pathlib import Path
 
 IS_MACOS = sys.platform == "darwin"
+IS_WINDOWS = sys.platform == "win32"
 
 ROOT = Path.cwd()
 SRC = ROOT / "src"
 RESOURCES = SRC / "neuroedit_desktop" / "resources"
+
+# App icon paths — set per platform
+if IS_MACOS:
+    APP_ICON = str(RESOURCES / "NeuroEdit.icns") if (RESOURCES / "NeuroEdit.icns").exists() else None
+elif IS_WINDOWS:
+    APP_ICON = str(RESOURCES / "NeuroEdit.ico") if (RESOURCES / "NeuroEdit.ico").exists() else None
+else:
+    APP_ICON = str(RESOURCES / "icon_256.png") if (RESOURCES / "icon_256.png").exists() else None
 
 datas = []
 if RESOURCES.exists():
@@ -78,6 +87,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=APP_ICON,
 )
 
 coll = COLLECT(
@@ -97,7 +107,7 @@ if IS_MACOS:
     app = BUNDLE(
         coll,
         name="NeuroEdit.app",
-        icon=None,
+        icon=APP_ICON,
         bundle_identifier="org.neuroedit.alpha",
         info_plist={
             "CFBundleName": "NeuroEdit",

@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QPointF, QRectF, QSize, QSizeF, Qt, QThread, QTimer, QUrl, Signal
-from PySide6.QtGui import QAction, QBrush, QColor, QDesktopServices, QFont, QFontMetricsF, QImage, QPainter, QPen, QPixmap, QPolygonF
+from PySide6.QtGui import QAction, QBrush, QColor, QDesktopServices, QFont, QFontMetricsF, QIcon, QImage, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 from PySide6.QtWidgets import (
@@ -70,6 +70,8 @@ from neuroedit_desktop.ui.editor_panels import (
 )
 from neuroedit_desktop.ui.tutorial import TutorialOverlay, build_default_steps
 from neuroedit_desktop.video_probe import probe_video
+
+_RESOURCES = Path(__file__).parent.parent / "resources"
 from neuroedit_desktop.ui.styles import (
     ACCENT_AMBER, ACCENT_CYAN, ACCENT_RED,
     BG_CARD, BG_HOVER,
@@ -2710,6 +2712,9 @@ class MainWindow(QMainWindow):
         self.tutorial_action.setShortcut("F1")
         self.tutorial_action.triggered.connect(self.start_tutorial)
 
+        self.about_action = QAction("About NeuroEdit", self)
+        self.about_action.triggered.connect(self._show_about)
+
         self.undo_action = QAction("Undo", self)
         self.undo_action.setShortcut("Ctrl+Z")
         self.undo_action.setEnabled(False)
@@ -2761,6 +2766,8 @@ class MainWindow(QMainWindow):
 
         help_menu = menubar.addMenu("Help")
         help_menu.addAction(self.tutorial_action)
+        help_menu.addSeparator()
+        help_menu.addAction(self.about_action)
 
     # ── Header bar (matches web app design) ──────────────────────────────
 
@@ -2785,20 +2792,30 @@ class MainWindow(QMainWindow):
         outer.addLayout(row2)
         layout = row1
 
-        # Logo
-        logo = QLabel("⬡")
+        # Logo icon
+        logo = QLabel()
         logo.setFixedSize(32, 32)
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo.setStyleSheet(f"""
-            QLabel {{
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
-                    stop:0 {PRIMARY}, stop:1 {ACCENT_CYAN});
-                border-radius: 8px;
-                color: white;
-                font-size: 16px;
-                font-weight: 900;
-            }}
-        """)
+        _icon_path = _RESOURCES / "icon_64.png"
+        if _icon_path.exists():
+            _pix = QPixmap(str(_icon_path)).scaled(
+                32, 32,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            logo.setPixmap(_pix)
+        else:
+            logo.setText("⬡")
+            logo.setStyleSheet(f"""
+                QLabel {{
+                    background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+                        stop:0 {PRIMARY}, stop:1 {ACCENT_CYAN});
+                    border-radius: 8px;
+                    color: white;
+                    font-size: 16px;
+                    font-weight: 900;
+                }}
+            """)
         layout.addWidget(logo)
 
         name_label = QLabel("NeuroEdit")
@@ -3401,6 +3418,67 @@ class MainWindow(QMainWindow):
             self.project.active_clip_id = clip.id
             self._load_active_clip()
             self._mark_dirty()
+
+    def _show_about(self) -> None:
+        dlg = QDialog(self)
+        dlg.setWindowTitle("About NeuroEdit")
+        dlg.setFixedWidth(420)
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(32, 32, 32, 24)
+        layout.setSpacing(16)
+
+        # Logo wordmark
+        _wm_path = _RESOURCES / "logo_wordmark.png"
+        if _wm_path.exists():
+            wm_label = QLabel()
+            pix = QPixmap(str(_wm_path)).scaledToWidth(
+                280, Qt.TransformationMode.SmoothTransformation
+            )
+            wm_label.setPixmap(pix)
+            wm_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(wm_label)
+        else:
+            title = QLabel("NeuroEdit")
+            title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            title.setStyleSheet(f"font-size: 22px; font-weight: 700; color: {TEXT_PRIMARY};")
+            layout.addWidget(title)
+
+        version_label = QLabel("v0.2.1-alpha")
+        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        version_label.setStyleSheet(f"font-size: 12px; color: {ACCENT_CYAN};")
+        layout.addWidget(version_label)
+
+        desc = QLabel(
+            "Standalone desktop video editor for preparing operative video\n"
+            "for conference, research, and educational use."
+        )
+        desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        desc.setWordWrap(True)
+        desc.setStyleSheet(f"font-size: 12px; color: {TEXT_SECONDARY}; line-height: 1.5;")
+        layout.addWidget(desc)
+
+        disclaimer = QLabel(
+            "Not a medical device. Not FDA-cleared. Not for clinical decision-making."
+        )
+        disclaimer.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        disclaimer.setWordWrap(True)
+        disclaimer.setStyleSheet(
+            f"font-size: 10px; color: {TEXT_MUTED}; font-style: italic;"
+        )
+        layout.addWidget(disclaimer)
+
+        layout.addSpacing(8)
+        btn = QPushButton("Close")
+        btn.setProperty("variant", "primary")
+        btn.setFixedWidth(100)
+        btn.clicked.connect(dlg.accept)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        dlg.exec()
 
     def start_tutorial(self) -> None:
         existing = getattr(self, "_tutorial_overlay", None)
