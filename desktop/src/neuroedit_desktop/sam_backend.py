@@ -114,6 +114,7 @@ class SamBackend:
         points: list[SamPoint],
         mask_dir: Path,
         progress: ProgressFn | None = None,
+        mask_color: tuple[int, int, int] | None = None,
     ) -> SamSegmentResult:
         if not points:
             raise ValueError("Place at least one SAM prompt point before running segmentation.")
@@ -136,7 +137,7 @@ class SamBackend:
 
         mask_dir.mkdir(parents=True, exist_ok=True)
         mask_path = mask_dir / f"mask_{backend.lower().replace(' ', '_')}_{int(time_s * 1000):08d}.png"
-        self._save_mask_rgba(mask, (h, w), mask_path)
+        self._save_mask_rgba(mask, (h, w), mask_path, color=mask_color)
         return SamSegmentResult(mask_path=mask_path, score=score, backend=backend)
 
     def propagate_video(
@@ -149,6 +150,7 @@ class SamBackend:
         progress: ProgressFn | None = None,
         sample_rate: float = 2.0,
         cancelled: CancelFn | None = None,
+        mask_color: tuple[int, int, int] | None = None,
     ) -> SamPropagationResult:
         if not points:
             raise ValueError("Place at least one SAM prompt point before running propagation.")
@@ -156,7 +158,7 @@ class SamBackend:
         try:
             return self._propagate_video_sam3(
                 video_path, start_time_s, duration_s, points, mask_dir,
-                progress=progress, cancelled=cancelled,
+                progress=progress, cancelled=cancelled, mask_color=mask_color,
             )
         except SamCancelled:
             raise
@@ -173,6 +175,7 @@ class SamBackend:
                 progress=progress,
                 sample_rate=sample_rate,
                 cancelled=cancelled,
+                mask_color=mask_color,
             )
 
     def _ensure_sam3_tracker_model(self) -> tuple[Any, Any, str]:
@@ -287,6 +290,7 @@ class SamBackend:
         mask_dir: Path,
         progress: ProgressFn | None = None,
         cancelled: CancelFn | None = None,
+        mask_color: tuple[int, int, int] | None = None,
     ) -> SamPropagationResult:
         import numpy as np
         import torch
@@ -338,7 +342,7 @@ class SamBackend:
                 )[0]
                 mask = self._first_binary_mask(masks)
                 path = mask_dir / f"track_sam3_{int(start_time_s * 1000):08d}_{frame_idx:04d}.png"
-                self._save_mask_rgba(mask, (h, w), path)
+                self._save_mask_rgba(mask, (h, w), path, color=mask_color)
                 score = self._score_from_outputs(output)
                 mask_frames.append({"time": float(times[frame_idx]), "mask_path": str(path), "score": score})
                 scores.append(score)
@@ -361,6 +365,7 @@ class SamBackend:
         progress: ProgressFn | None = None,
         sample_rate: float = 2.0,
         cancelled: CancelFn | None = None,
+        mask_color: tuple[int, int, int] | None = None,
     ) -> SamPropagationResult:
         import cv2
         import numpy as np
@@ -414,7 +419,7 @@ class SamBackend:
                     labels,
                 )
                 path = mask_dir / f"track_{int(start_time_s * 1000):08d}_{idx:04d}.png"
-                self._save_mask_rgba(mask, frame_rgb.shape[:2], path)
+                self._save_mask_rgba(mask, frame_rgb.shape[:2], path, color=mask_color)
                 mask_frames.append({"time": float(frame_time), "mask_path": str(path), "score": float(score)})
                 scores.append(float(score))
             return SamPropagationResult(
@@ -531,15 +536,22 @@ class SamBackend:
         frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0.0
         return frame_count / fps if fps > 0 else 0.0
 
-    def _save_mask_rgba(self, mask: Any, frame_shape: tuple[int, int], mask_path: Path) -> None:
+    def _save_mask_rgba(
+        self,
+        mask: Any,
+        frame_shape: tuple[int, int],
+        mask_path: Path,
+        color: tuple[int, int, int] | None = None,
+    ) -> None:
         import numpy as np
         from PIL import Image
 
+        r, g, b = color or (34, 211, 238)
         h, w = frame_shape
         rgba = np.zeros((h, w, 4), dtype=np.uint8)
-        rgba[..., 0] = 34
-        rgba[..., 1] = 211
-        rgba[..., 2] = 238
+        rgba[..., 0] = r
+        rgba[..., 1] = g
+        rgba[..., 2] = b
         rgba[..., 3] = mask.astype(np.uint8) * 200
         Image.fromarray(rgba).save(mask_path)
 
