@@ -8,6 +8,8 @@ Covers work completed across sessions (accumulated):
 4. **Licensing** — switched MIT → proprietary.
 5. **Resize-safe UI** — stop toolbar/panel clipping when the window is narrowed.
 6. **SAM3 first-run download flow** — in-app model download, weight cache management.
+7. **P1 timeline editing + P2 SAM mask workflow** — selection/snapping/rename,
+   clinician-style mask list, re-track, status, propagation window, and mask colors.
 
 Repo: https://github.com/v7sm25qk5v-ui/NeuroEdit. Default branch `main`.
 **Visibility: still PUBLIC** — recommended to make private (commercialization intent); pending owner action in GitHub settings.
@@ -396,34 +398,88 @@ torch/SAM stack) or install Python 3.12 and recreate the venv in place
 re-downloads everything). Then run the test suite to validate this session's
 changes.
 
-## Current state at handoff
+## 10. P1 + P2 feature implementation (2026-06-10)
 
-- All work committed and pushed to `main`. Commit order (condensed):
-  `e4850e9` initial → `85e6498` pipeline → `505c3c2` installer fix →
-  `600a55a` Windows UI fixes → `751fb97` proprietary license →
-  `030bbf6` UI polish baseline → `82c6768` resize-safe UI →
-  `1ce8c02` panel-content sizing → **`23e53b8` SAM3 first-run**.
-  Local and remote are in sync.
-- Tags: **`v0.2.0-alpha`** (`505c3c2`), **`v0.2.1-alpha`** (`600a55a`),
-  **`v0.2.2-alpha`** (`1ce8c02`). HEAD (`23e53b8`, SAM3 first-run) is
-  **not yet tagged** — cut `v0.2.3-alpha` to ship it.
-- Local working tree: `HANDOFF.md` and `TODO.md` untracked; `main_window.py` has the Project Library improvements (section 7) and annotation workflow improvements (section 8) — not yet committed.
-  macOS app builds; tests pass (6).
-- **Heads-up:** work is happening in more than one tool/session. Always `git fetch`
-  and check HEAD before editing (that's how `030bbf6` was caught).
-- **Completed since last handoff update:**
-  - ✅ `v0.2.2-alpha` tagged and released (resize-safe UI).
-  - ✅ Root `README.md` with download links exists.
-  - ✅ Windows `Setup.exe` installed and tested by owner — toolbar, panel sizing,
-    and resize behavior all confirmed good.
-  - ✅ SAM3 first-run download dialog + weight-cache cleanup (`23e53b8`).
-  - ✅ `TODO.md` created at repo root with full feature roadmap and a new
-    **Stryker Imaging / Video Integration** section (17 items covering DICOM
-    ingest/export, fluorescence multi-stream, MWL, FHIR, PACS publish targets).
-  - ✅ Project Library dialog overhaul (thumbnails, duration/media count, missing-file indicator, relative timestamps, Reveal in Finder/Explorer, status color coding).
-  - ✅ Annotation workflow: duplicate at playhead (Cmd+D), delete in inspector, custom label presets, default cyan color, set start/end to playhead.
-- **Outstanding / next steps:**
-  - Commit `main_window.py` and `models.py` annotation workflow changes and tag **`v0.2.3-alpha`** (or `v0.3.0-alpha`).
-  - Verify SAM3 download on a clean machine with a valid HF token.
-  - Owner to make the repo **private** if keeping control.
-  - Commit `HANDOFF.md` and `TODO.md` if you want them in version history.
+Both feature tracks were implemented in isolated git worktrees and merged
+to `main`. The venv (Python 3.13 revived by fresh installer) and all 27 tests
+pass; ruff clean.
+
+### P1 — Timeline editing (`editor_panels.py`, `styles.py`)
+
+- **Selection outline**: click any clip, audio block, slide, or marker → 2px
+  `#FFD60A` outline + `QColor.lighter(112)` brightness lift. Markers got a
+  proper ±12px hit area. `SELECTION_OUTLINE` constant added to `styles.py`.
+- **Marker edit/delete**: right-click → Edit / Delete / Delete All (confirm
+  dialog); double-click opens edit dialog. All mutations emit `project_changed`.
+- **Clip rename**: right-click → "Rename Clip…" via `QInputDialog.getText`.
+  Intentionally not on double-click (conflicts with seek).
+- **Zoom-to-fit**: "Fit" QPushButton + `Shift+Z` shortcut; second press
+  restores prior zoom + scroll (Resolve toggle-back pattern).
+  `fit_zoom = (viewport − LABEL_W − 24) / max(0.5, end_time)`, clamped [2, 300].
+- **Snapping**: 10-screen-px threshold scales with zoom so it never fights
+  frame-level nudges; snap targets are playhead, t=0, clip/audio/slide edges,
+  marker times; hold Shift to bypass; magnet toggle button (default on).
+  Playhead scrubbing never snaps.
+- 13 new tests in `desktop/tests/test_timeline_editing.py`.
+
+### P2 — SAM mask workflow (`main_window.py`, `sam_backend.py`, `models.py`)
+
+- **Mask list** in SamPanel: color swatch, inline rename, visibility checkbox,
+  frame-count suffix, right-click context menu.
+- **Delete + orphan cleanup**: PNGs swept at app close only; sweep respects
+  undo + redo stacks so nothing still reachable gets deleted.
+- **Re-track**: replays stored `prompt_points`, replaces `mask_frames`/
+  `mask_path`/`score`/`sample_rate` in place; explicit-only (never auto).
+- **`sam_last_run`** persisted in `ProjectState`; shown as a status row in
+  the SAM panel that survives project close/reopen.
+- **Missing-backend explainer**: plain-English panel with Install/Download
+  buttons replaces cryptic status line when SAM deps or weights are absent.
+- **Track window**: "To clip end" checkbox (default on) + 1–120 s spinbox.
+- **8-color mask palette** (`MASK_PALETTE`, no red) auto-assigned by index,
+  burned into saved PNGs so canvas and export match.
+- `Annotation.prompt_points` and `ProjectState.sam_last_run` added to
+  `models.py` with defaults; `_from_dict_tolerant` ensures old saves load.
+- 8 new tests in `desktop/tests/test_sam_workflow.py`.
+
+### Version and CI
+
+- `__version__` bumped to `"0.3.0-alpha"` in `neuroedit_desktop/__init__.py`.
+- `.github/workflows/quality.yml` added: runs ruff + pytest on every push to
+  `main` (Python 3.12, `QT_QPA_PLATFORM=offscreen`).
+- `.github/workflows/build.yml` added: builds macOS DMG + Windows EXE on
+  `v*` tag push, publishes GitHub Release.
+- Follow-up CI fix: `422674f` changed mask PNG saving to use OpenCV instead
+  of Pillow, because the quality workflow installs `.[dev]` and Pillow is only
+  in the optional `sam` extra.
+
+### Known deferred items (intentional — see TODO.md P2 section)
+
+- `sam_last_run` not stamped for single-frame segmentation yet.
+- Mask-list rows not disabled while a SAM job is running.
+- Startup with deps-but-no-weights shows both the new explainer *and* the
+  pre-existing `SamSetupDialog` — one of them should be removed.
+- Marker dragging, multi-select, keyboard-delete, snap guide line deferred.
+
+## Current state at handoff (updated 2026-06-10)
+
+- HEAD is `422674f` ("fix(sam): save mask PNGs without Pillow") on `main`.
+  Local and remote `origin/main` are in sync after the CI-quality fix.
+- Tags: `v0.2.0-alpha` through `v0.2.5-alpha` are pushed. `v0.3.0-alpha` is
+  also pushed and points at `ed44a6f`, the docs/version commit before the
+  follow-up quality fix.
+- Test suite: **27/27 passing** (`ruff` clean, `py_compile` clean).
+  6 original + 13 P1 timeline tests + 8 P2 SAM tests.
+- CI workflows added: `quality.yml` (ruff + pytest on push to main),
+  `build.yml` (macOS DMG + Windows EXE on `v*` tag, publishes GitHub Release).
+- **Immediate next steps:**
+  1. Confirm GitHub quality/build actions are green after `422674f`.
+  2. Consider whether to move/recreate `v0.3.0-alpha` if the release should
+     include the Pillow-free mask PNG fix; otherwise leave the tag as-is and
+     cut the next patch tag from `main`.
+  3. Smoke-test the app visually (P2 SamPanel structural change may affect
+     right-pane minimum width; duplicate explainer + SamSetupDialog on
+     deps-but-no-weights startup).
+  4. Next dev priority: **P3 — PHI review features** (configurable default
+     storage location is the safest starting point; was explicitly requested
+     and only added to roadmap, not implemented).
+- Heads-up: always `git fetch` and check HEAD before editing across sessions.
