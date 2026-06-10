@@ -18,6 +18,7 @@ ACCENT_CYAN = "#22d3ee"
 ACCENT_EMERALD = "#10b981"
 ACCENT_AMBER = "#f59e0b"
 ACCENT_RED = "#ef4444"
+SELECTION_OUTLINE = "#FFD60A"  # warm yellow outline for the timeline-selected block
 TEXT_PRIMARY = "#e2e8f0"
 TEXT_SECONDARY = "#94a3b8"
 TEXT_MUTED = "#64748b"

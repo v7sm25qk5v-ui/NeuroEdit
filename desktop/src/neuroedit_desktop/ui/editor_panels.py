@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Literal
 
 from PySide6.QtCore import QDir, QPointF, QRectF, QSize, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QKeySequence, QPainter, QPen, QPixmap, QShortcut
 from PySide6.QtMultimedia import (
     QAudioInput,
     QMediaCaptureSession,
@@ -33,6 +33,8 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSlider,
@@ -64,6 +66,7 @@ from neuroedit_desktop.ui.styles import (
     BORDER,
     BORDER_BRIGHT,
     PRIMARY,
+    SELECTION_OUTLINE,
     TEXT_DIM,
     TEXT_MUTED,
     TEXT_PRIMARY,
@@ -253,6 +256,8 @@ class TimelineCanvas(QWidget):
     ]
 
     HANDLE_PX = 6
+    MARKER_HIT_PX = 12
+    SNAP_PX = 10.0
 
     def __init__(self, project: ProjectState, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -260,26 +265,46 @@ class TimelineCanvas(QWidget):
         self._drag: tuple[str, str, float, float] | None = None
         self._slide_lanes_key: tuple | None = None
         self._slide_lanes_value: dict[str, int] = {}
+        # Widget-level selection only — never serialized or snapshotted.
+        self.selected_item: tuple[str, str] | None = None  # (kind, item_id)
+        self.snap_enabled = True
         self.setMouseTracking(True)
         self.refresh_geometry()
 
     def set_project(self, project: ProjectState) -> None:
         self.project = project
+        self._prune_selection()
         self.refresh_geometry()
         self.update()
 
     def refresh_geometry(self) -> None:
+        self._prune_selection()
         width = int(self.LABEL_W + project_end_time(self.project) * self.project.zoom + 420)
         height = self.RULER_H + sum(self._track_heights())
         self.setMinimumSize(max(width, 900), height)
         self.resize(max(width, 900), height)
+
+    def _prune_selection(self) -> None:
+        if self.selected_item is None:
+            return
+        kind, item_id = self.selected_item
+        pools = {
+            "clip": self.project.clips,
+            "audio": self.project.audio_tracks,
+            "slide": self.project.slides,
+            "marker": self.project.markers,
+        }
+        if not any(item.id == item_id for item in pools.get(kind, [])):
+            self.selected_item = None
 
     def paintEvent(self, _event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), QColor(BG_SECONDARY))
 
-        zoom = max(10.0, self.project.zoom)
+        # Floor must match the hit-test floor (1.0) or paint and clicks disagree
+        # once zoom-to-fit drops below the old 10 px/s minimum.
+        zoom = max(1.0, self.project.zoom)
         end_time = project_end_time(self.project)
         width = self.width()
 
@@ -380,12 +405,18 @@ class TimelineCanvas(QWidget):
         label: str,
         color: str,
         fill_alpha: int = 46,
+        *,
+        selected: bool = False,
     ) -> None:
-        fill = QColor(color)
+        fill = QColor(color).lighter(112) if selected else QColor(color)
         fill.setAlpha(fill_alpha)
         painter.setPen(QPen(QColor(color), 1.3))
         painter.setBrush(fill)
         painter.drawRoundedRect(rect, 8, 8)
+        if selected:
+            painter.setPen(QPen(QColor(SELECTION_OUTLINE), 2))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(rect, 8, 8)
         painter.setPen(QColor(TEXT_PRIMARY))
         text_rect = rect.adjusted(8, 0, -8, 0)
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter, label)
@@ -425,7 +456,8 @@ class TimelineCanvas(QWidget):
             rect = rect.adjusted(-4, -4, 4, 4)
         color = ACCENT_CYAN if dragging else PRIMARY
         fill_alpha = 110 if dragging else 70 if active else 46
-        self._paint_block(painter, rect, clip.name, color, fill_alpha)
+        selected = self.selected_item == ("clip", clip.id)
+        self._paint_block(painter, rect, clip.name, color, fill_alpha, selected=selected)
         max_clip_s, _guidance = recommended_continuous_clip_seconds(self.project)
         if clip.media_type == "video" and clip.display_duration > max_clip_s:
             painter.setPen(QPen(QColor(ACCENT_RED), 2))
@@ -453,7 +485,8 @@ class TimelineCanvas(QWidget):
     def _paint_audio_blocks(self, painter: QPainter, zoom: float) -> None:
         for track in self.project.audio_tracks:
             rect = self._block_rect(track.start_time, max(0.25, track.duration), 1, zoom)
-            self._paint_block(painter, rect, track.name, ACCENT_RED, 42)
+            selected = self.selected_item == ("audio", track.id)
+            self._paint_block(painter, rect, track.name, ACCENT_RED, 42, selected=selected)
             painter.setPen(QPen(QColor(ACCENT_RED), 1))
             bars = max(6, min(42, int(rect.width() / 8)))
             for idx in range(bars):
@@ -467,13 +500,21 @@ class TimelineCanvas(QWidget):
     def _paint_slide_blocks(self, painter: QPainter, zoom: float) -> None:
         for slide in self.project.slides:
             rect = self._slide_block_rect(slide, zoom)
-            self._paint_block(painter, rect, slide.title or "(untitled slide)", "#8b5cf6", 42)
+            selected = self.selected_item == ("slide", slide.id)
+            self._paint_block(
+                painter, rect, slide.title or "(untitled slide)", "#8b5cf6", 42, selected=selected
+            )
 
     def _paint_markers(self, painter: QPainter, zoom: float) -> None:
         y_top = self._track_y(3)
         for marker in self.project.markers:
             x = self.LABEL_W + marker.time * zoom
             color = QColor(marker.color)
+            if self.selected_item == ("marker", marker.id):
+                color = color.lighter(112)
+                painter.setPen(QPen(QColor(SELECTION_OUTLINE), 2))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRect(QRectF(x - 3, y_top + 2, 19, 16))
             painter.setPen(QPen(color, 2))
             painter.drawLine(QPointF(x, y_top + 6), QPointF(x, y_top + self.TRACK_H - 5))
             painter.setBrush(color)
@@ -503,17 +544,26 @@ class TimelineCanvas(QWidget):
         hit = self._hit_block(pos.x(), pos.y())
         if hit is not None:
             kind, item_id, offset = hit
+            self.selected_item = ("clip" if kind.startswith("clip") else kind, item_id)
             origin_start = self._item_start_time(kind, item_id)
             self._drag = (kind, item_id, offset, origin_start)
             if kind.startswith("clip"):
                 self.project.active_clip_id = item_id
                 self.project_changed.emit()
-                self.update()
+            self.update()
             if kind in ("clip-trim-start", "clip-trim-end"):
                 self.setCursor(Qt.CursorShape.SizeHorCursor)
             else:
                 self.setCursor(Qt.CursorShape.ClosedHandCursor)
             return
+        marker = self._hit_marker(pos.x(), pos.y())
+        if marker is not None:
+            self.selected_item = ("marker", marker.id)
+            self.update()
+            return
+        if self.selected_item is not None:
+            self.selected_item = None
+            self.update()
         self.seek_requested.emit(min(time_s, project_end_time(self.project)))
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
@@ -524,9 +574,14 @@ class TimelineCanvas(QWidget):
         zoom = max(1.0, self.project.zoom)
         time_at = max(0.0, (event.position().x() - self.LABEL_W) / zoom)
         insert_direction = None
+        # Shift bypasses snapping for the duration of the drag.
+        snap = not (event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+        base_kind = "clip" if kind.startswith("clip") else kind
 
         if kind == "clip":
             new_start = max(0.0, time_at - offset)
+            if snap:
+                new_start = self._snap_time(new_start, base_kind, item_id)
             if new_start < origin_start - 0.05:
                 insert_direction = "left"
             elif new_start > origin_start + 0.05:
@@ -536,23 +591,31 @@ class TimelineCanvas(QWidget):
                     clip.start_time = new_start
                     break
         elif kind == "clip-trim-start":
+            if snap:
+                time_at = self._snap_time(time_at, base_kind, item_id)
             for clip in self.project.clips:
                 if clip.id == item_id:
                     self._apply_trim_start(clip, time_at)
                     break
         elif kind == "clip-trim-end":
+            if snap:
+                time_at = self._snap_time(time_at, base_kind, item_id)
             for clip in self.project.clips:
                 if clip.id == item_id:
                     self._apply_trim_end(clip, time_at)
                     break
         elif kind == "audio":
             new_start = max(0.0, time_at - offset)
+            if snap:
+                new_start = self._snap_time(new_start, base_kind, item_id)
             for track in self.project.audio_tracks:
                 if track.id == item_id:
                     track.start_time = new_start
                     break
         elif kind == "slide":
             new_start = max(0.0, time_at - offset)
+            if snap:
+                new_start = self._snap_time(new_start, base_kind, item_id)
             for slide in self.project.slides:
                 if slide.id == item_id:
                     slide.start_time = new_start
@@ -589,13 +652,117 @@ class TimelineCanvas(QWidget):
             base_kind = "clip" if kind.startswith("clip") else kind
             self.item_activated.emit(base_kind, item_id)
             return
+        marker = self._hit_marker(pos.x(), pos.y())
+        if marker is not None:
+            # Premiere convention: double-click edits the marker. Seeking to it
+            # is still available by clicking the ruler at the marker position.
+            self._edit_marker(marker)
+
+    def _hit_marker(self, x: float, y: float) -> TimelineMarker | None:
         zoom = max(1.0, self.project.zoom)
         y_top = self._track_y(3)
+        if not (y_top <= y <= y_top + self.TRACK_H):
+            return None
         for marker in self.project.markers:
             mx = self.LABEL_W + marker.time * zoom
-            if abs(pos.x() - mx) <= 10 and y_top <= pos.y() <= y_top + self.TRACK_H:
-                self.item_activated.emit("marker", marker.id)
+            if abs(x - mx) <= self.MARKER_HIT_PX:
+                return marker
+        return None
+
+    def contextMenuEvent(self, event) -> None:  # noqa: N802
+        pos = event.pos()
+        marker = self._hit_marker(pos.x(), pos.y())
+        if marker is not None:
+            menu = QMenu(self)
+            edit_action = menu.addAction("Edit Marker…")
+            delete_action = menu.addAction("Delete Marker")
+            menu.addSeparator()
+            delete_all_action = menu.addAction("Delete All Markers")
+            chosen = menu.exec(event.globalPos())
+            if chosen == edit_action:
+                self._edit_marker(marker)
+            elif chosen == delete_action:
+                self._delete_marker(marker)
+            elif chosen == delete_all_action:
+                self._delete_all_markers()
+            return
+        hit = self._hit_block(pos.x(), pos.y())
+        if hit is not None and hit[0].startswith("clip"):
+            clip = next((c for c in self.project.clips if c.id == hit[1]), None)
+            if clip is None:
                 return
+            menu = QMenu(self)
+            rename_action = menu.addAction("Rename Clip…")
+            if menu.exec(event.globalPos()) == rename_action:
+                self._rename_clip(clip)
+
+    def _edit_marker(self, marker: TimelineMarker) -> None:
+        label, ok = QInputDialog.getText(self, "Edit Marker", "Marker label:", text=marker.label)
+        if not ok or not label.strip():
+            return
+        marker.label = label.strip()
+        self.update()
+        self.project_changed.emit()
+
+    def _delete_marker(self, marker: TimelineMarker) -> None:
+        self.project.markers = [m for m in self.project.markers if m.id != marker.id]
+        self._prune_selection()
+        self.update()
+        self.project_changed.emit()
+
+    def _delete_all_markers(self) -> None:
+        if not self.project.markers:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Delete All Markers",
+            f"Delete all {len(self.project.markers)} markers?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self.project.markers = []
+        self._prune_selection()
+        self.update()
+        self.project_changed.emit()
+
+    def _rename_clip(self, clip: VideoClip) -> None:
+        name, ok = QInputDialog.getText(self, "Rename Clip", "Clip name:", text=clip.name)
+        if not ok or not name.strip():
+            return
+        clip.name = name.strip()
+        self.update()
+        self.project_changed.emit()
+
+    def _snap_time(self, t: float, exclude_kind: str, exclude_id: str) -> float:
+        """Snap `t` to the nearest target within SNAP_PX screen pixels.
+
+        Targets: t=0, the playhead, clip/slide/audio edges, and marker times —
+        excluding the dragged item itself. Pixel-space threshold so snapping
+        does not fight fine adjustments at high zoom.
+        """
+        if not self.snap_enabled:
+            return t
+        threshold = self.SNAP_PX / max(1.0, self.project.zoom)
+        targets: list[float] = [0.0, self.project.current_time]
+        for clip in self.project.clips:
+            if exclude_kind == "clip" and clip.id == exclude_id:
+                continue
+            targets.append(clip.start_time)
+            targets.append(clip.start_time + clip.display_duration)
+        for track in self.project.audio_tracks:
+            if exclude_kind == "audio" and track.id == exclude_id:
+                continue
+            targets.append(track.start_time)
+            targets.append(track.start_time + max(0.1, track.duration))
+        for slide in self.project.slides:
+            if exclude_kind == "slide" and slide.id == exclude_id:
+                continue
+            targets.append(slide.start_time)
+            targets.append(slide.start_time + max(0.25, slide.duration))
+        targets.extend(marker.time for marker in self.project.markers)
+        best = min(targets, key=lambda target: abs(target - t))
+        return best if abs(best - t) <= threshold else t
 
     def _update_hover_cursor(self, pos: QPointF) -> None:
         hit = self._hit_block(pos.x(), pos.y())
@@ -677,9 +844,19 @@ class RichTimelineWidget(QWidget):
         zoom_in = QPushButton("+")
         zoom_out = QPushButton("-")
         self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
-        self.zoom_slider.setRange(20, 300)
+        self.zoom_slider.setRange(2, 300)
         self.zoom_slider.setFixedWidth(160)
         self.zoom_slider.setValue(int(project.zoom))
+        self.fit_btn = QPushButton("Fit")
+        self.fit_btn.setToolTip("Zoom so the whole timeline fits (Shift+Z). Press again to go back.")
+        self.snap_btn = QPushButton("Snap")
+        self.snap_btn.setCheckable(True)
+        self.snap_btn.setChecked(True)
+        self.snap_btn.setToolTip(
+            "Snap dragged blocks to the playhead, block edges, and markers "
+            "(hold Shift while dragging to bypass)."
+        )
+        self._pre_fit_state: tuple[float, int] | None = None
         self.marker_btn = QPushButton("Mark")
         self.cut_btn = QPushButton("Cut")
         self.marker_btn.setProperty("variant", "amber")
@@ -708,6 +885,11 @@ class RichTimelineWidget(QWidget):
         zoom_in.clicked.connect(lambda: self._set_zoom(self.project.zoom * 1.25))
         zoom_out.clicked.connect(lambda: self._set_zoom(self.project.zoom * 0.8))
         self.zoom_slider.valueChanged.connect(lambda value: self._set_zoom(float(value)))
+        self.fit_btn.clicked.connect(self._zoom_to_fit)
+        self._fit_shortcut = QShortcut(QKeySequence("Shift+Z"), self)
+        self._fit_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        self._fit_shortcut.activated.connect(self._zoom_to_fit)
+        self.snap_btn.toggled.connect(self._snap_toggled)
         self.marker_btn.clicked.connect(self._add_marker)
         self.cut_btn.clicked.connect(self._cut_active_clip)
 
@@ -726,6 +908,8 @@ class RichTimelineWidget(QWidget):
         toolbar.addWidget(zoom_out)
         toolbar.addWidget(self.zoom_slider)
         toolbar.addWidget(zoom_in)
+        toolbar.addWidget(self.fit_btn)
+        toolbar.addWidget(self.snap_btn)
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.VLine)
         sep.setFrameShadow(QFrame.Shadow.Plain)
@@ -782,7 +966,7 @@ class RichTimelineWidget(QWidget):
     def refresh(self) -> None:
         self.project.duration = project_end_time(self.project)
         self.zoom_slider.blockSignals(True)
-        self.zoom_slider.setValue(int(max(20.0, min(300.0, self.project.zoom))))
+        self.zoom_slider.setValue(int(max(2.0, min(300.0, self.project.zoom))))
         self.zoom_slider.blockSignals(False)
         self.time_label.setText(
             f"{fmt_time(self.project.current_time)} / {fmt_time(self.project.duration)}"
@@ -835,9 +1019,29 @@ class RichTimelineWidget(QWidget):
         self.canvas.update()
 
     def _set_zoom(self, value: float) -> None:
-        self.project.zoom = max(20.0, min(300.0, value))
+        self.project.zoom = max(2.0, min(300.0, value))
         self.project_changed.emit()
         self.refresh()
+
+    def _snap_toggled(self, checked: bool) -> None:
+        self.canvas.snap_enabled = bool(checked)
+
+    def _zoom_to_fit(self) -> None:
+        viewport_width = self.scroll.viewport().width()
+        fit_zoom = (viewport_width - TimelineCanvas.LABEL_W - 24) / max(
+            0.5, project_end_time(self.project)
+        )
+        fit_zoom = max(2.0, min(300.0, fit_zoom))
+        if self._pre_fit_state is not None and abs(self.project.zoom - fit_zoom) < 0.5:
+            # Already at fit: toggle back to the zoom/scroll from before fitting.
+            zoom, scroll_value = self._pre_fit_state
+            self._pre_fit_state = None
+            self._set_zoom(zoom)
+            self.scroll.horizontalScrollBar().setValue(scroll_value)
+            return
+        self._pre_fit_state = (self.project.zoom, self.scroll.horizontalScrollBar().value())
+        self._set_zoom(fit_zoom)
+        self.scroll.horizontalScrollBar().setValue(0)
 
     def _scroll_changed(self, value: int) -> None:
         self.project.scroll_left = float(value)
