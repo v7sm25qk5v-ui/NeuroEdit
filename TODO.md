@@ -34,35 +34,23 @@ bet and stays parked until sample data and a design pass exist.
 - [ ] Decide when to add Windows Authenticode signing and macOS Developer ID
   signing/notarization.
 
-## P1 — Timeline editing gaps (every-session friction)
+## P1 — Timeline editing gaps — ✅ SHIPPED 2026-06-10
 
-- [ ] Add a distinct selected-state outline in each of `_paint_video_blocks`,
-  `_paint_audio_blocks`, `_paint_slide_blocks`, and `_paint_markers`
-  (`editor_panels.py`); drive from a single `selected_track_item` state.
-- [ ] Add marker edit/delete support.
-- [ ] Add clip rename support.
-- [ ] Add zoom-to-fit for the whole timeline.
-- [ ] Add snap-to-playhead for clip, slide, marker, and audio positioning.
-- [ ] Acceptance: a user can trim, rename, mark, and navigate a simple case video
-  without needing hidden shortcuts.
+All five items implemented (selection outlines, marker edit/delete, clip
+rename, zoom-to-fit with Shift+Z toggle-back, snapping with Shift-bypass and
+magnet toggle); see Completed section. Follow-ups deliberately deferred:
+marker dragging, multi-select, keyboard-delete of timeline selection,
+snap-indicator guide line.
 
-## P2 — SAM and mask workflow (the differentiator)
+## P2 — SAM and mask workflow — ✅ SHIPPED 2026-06-10
 
-- [ ] Add named mask objects so users can distinguish multiple segmentations.
-- [ ] Add delete/regenerate controls for masks and propagated masks (orphaned
-  mask PNGs in `masks/` should be cleaned up when their annotation is deleted).
-- [ ] Add a status row in the SAM panel showing last propagation start, end, frames
-  processed, and result (success / canceled / error); persist last-run in the
-  project so it survives reopening.
-- [ ] When `SamBackend.probe()` returns missing, replace the SAM panel body with a
-  one-screen explainer plus 'Install Dependencies' / 'Download Weights' buttons
-  that route to the existing onboarding flow.
-- [ ] Let the user choose the propagation window (start/duration) instead of the
-  hardcoded 5 s from the playhead (`_run_propagation` in `main_window.py`).
-- [ ] Use the annotation's color for saved mask overlays — `_save_mask_rgba`
-  hardcodes cyan, so the SAM panel color choice currently has no effect on masks.
-- [ ] Acceptance: SAM results feel like editable project assets, not one-off
-  hidden outputs.
+All six items implemented (named mask list, delete + orphan cleanup, re-track,
+persisted status row, missing-backend explainer, propagation window,
+per-mask palette colors); see Completed section. Follow-ups deliberately
+deferred: record `sam_last_run` for single-frame segmentation too; persist the
+track-window UI prefs; disable mask-list rows while a SAM job is running;
+consider dropping the auto-shown SamSetupDialog now that the explainer covers
+ready-but-no-weights (currently both appear).
 
 ## P3 — Privacy and PHI review (trust-critical)
 
@@ -211,3 +199,20 @@ command-line tools.
   SAM3 frame-loading speedup + 4K downscale, mask-cache memory cap, undo-history
   noise from draw settings, forward-compatible project loading, HF token
   masking, env-aware weight-cache path.
+- [x] P1 timeline editing (2026-06-10): FCP-style selection outline
+  (`#FFD60A` + brightness lift) on clips/audio/slides/markers; marker
+  context-menu + double-click edit and delete (≥12px hit area); clip rename
+  via context menu; zoom-to-fit ("Fit" button + Shift+Z, second press restores
+  prior zoom/scroll); snapping to playhead/edges/markers/t=0 with 10-screen-px
+  threshold, Shift momentary bypass, magnet toggle (default on). Playhead
+  scrubbing never snaps. 13 new tests in `tests/test_timeline_editing.py`.
+- [x] P2 SAM mask workflow (2026-06-10): 3D-Slicer-style mask list in the SAM
+  panel (color swatch, inline rename, visibility checkbox, context menu);
+  delete routes through undo-safe `_delete_annotation`, orphan mask PNGs swept
+  at app close (undo/redo stacks respected); explicit Re-track replays stored
+  `prompt_points` and replaces frames in place; `sam_last_run` persisted in
+  the project and shown as a status row; missing-backend explainer with
+  Install/Download buttons; track window spinbox + "To clip end" default;
+  8-color mask palette (no red) burned into the saved PNGs. 8 new tests in
+  `tests/test_sam_workflow.py`. UX choices grounded in research on
+  Premiere/Resolve/FCP/Roto Brush/3D Slicer conventions and complaints.
