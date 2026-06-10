@@ -543,17 +543,21 @@ class SamBackend:
         mask_path: Path,
         color: tuple[int, int, int] | None = None,
     ) -> None:
+        import cv2
         import numpy as np
-        from PIL import Image
 
         r, g, b = color or (34, 211, 238)
         h, w = frame_shape
-        rgba = np.zeros((h, w, 4), dtype=np.uint8)
-        rgba[..., 0] = r
-        rgba[..., 1] = g
-        rgba[..., 2] = b
-        rgba[..., 3] = mask.astype(np.uint8) * 200
-        Image.fromarray(rgba).save(mask_path)
+        alpha = np.asarray(mask).astype(np.uint8) * 200
+        if alpha.shape != (h, w):
+            alpha = cv2.resize(alpha, (w, h), interpolation=cv2.INTER_NEAREST)
+        bgra = np.zeros((h, w, 4), dtype=np.uint8)
+        bgra[..., 0] = b
+        bgra[..., 1] = g
+        bgra[..., 2] = r
+        bgra[..., 3] = alpha
+        if not cv2.imwrite(str(mask_path), bgra):
+            raise RuntimeError(f"Failed to save mask PNG: {mask_path}")
 
     def _first_binary_mask(self, masks: Any) -> Any:
         import numpy as np
