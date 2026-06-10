@@ -139,6 +139,10 @@ class Annotation:
     sample_rate: float | None = None
     font_size: int = 15
     show_label: bool = True
+    # SAM prompt points used to create a mask/tracked-mask, as
+    # [{"x": float, "y": float, "type": "positive"|"negative"}] — lets Re-track
+    # regenerate the mask later. Empty for masks made before this field existed.
+    prompt_points: list[dict] = field(default_factory=list)
 
     def is_visible_at(self, time_s: float) -> bool:
         if not self.visible:
@@ -204,6 +208,10 @@ class ProjectState:
     draw_width: int = 6
     draw_opacity: float = 0.85
     draw_label: str = ""
+    # Last SAM propagation run, persisted so the status survives reopening.
+    # Keys: started_iso, duration_s, frames, result ("success"|"error"|"canceled"),
+    # backend, message.
+    sam_last_run: dict = field(default_factory=dict)
 
     @property
     def active_clip(self) -> VideoClip | None:
@@ -374,6 +382,7 @@ class ProjectState:
             draw_width=int(data.get("draw_width", 6)),
             draw_opacity=float(data.get("draw_opacity", 0.85)),
             draw_label=data.get("draw_label", ""),
+            sam_last_run=data.get("sam_last_run", {}) or {},
         )
         project.clips = [_from_dict_tolerant(VideoClip, clip) for clip in data.get("clips", [])]
         project.audio_tracks = [

@@ -5,13 +5,14 @@ import datetime
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QPointF, QRectF, QSize, QSizeF, Qt, QThread, QTimer, QUrl, Signal
-from PySide6.QtGui import QAction, QBrush, QColor, QDesktopServices, QFont, QFontMetricsF, QImage, QPainter, QPen, QPixmap, QPolygonF
+from PySide6.QtGui import QAction, QBrush, QColor, QDesktopServices, QFont, QFontMetricsF, QIcon, QImage, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 from PySide6.QtWidgets import (
@@ -109,6 +110,14 @@ PANELS: list[tuple[PanelType, str, str]] = [
 
 SWATCH_COLORS = ["#00e5ff", "#ef4444", "#f59e0b", "#10b981", "#8b5cf6", "#f43f5e", "#ffffff", "#fb923c"]
 
+# Auto-assigned SAM mask colors: cyan, magenta, yellow, green, orange, blue,
+# pink, lime. Colorblind-aware and deliberately without red — red reads as
+# blood/danger on surgical video.
+MASK_PALETTE = [
+    "#22d3ee", "#e879f9", "#facc15", "#4ade80",
+    "#fb923c", "#60a5fa", "#f472b6", "#a3e635",
+]
+
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".webm"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".heic", ".bmp", ".webp"}
 
@@ -175,6 +184,56 @@ def format_time(seconds: float) -> str:
     minutes = int(seconds // 60)
     remainder = seconds % 60
     return f"{minutes}:{remainder:04.1f}"
+
+
+def hex_to_rgb(color_hex: str) -> tuple[int, int, int]:
+    value = color_hex.lstrip("#")
+    return int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16)
+
+
+def propagation_window_s(remaining_s: float, to_clip_end: bool, window_s: float) -> float:
+    """Effective SAM propagation window: to the end of the clip, or the
+    user-chosen window clamped to the remaining clip length (never below 1 s)."""
+    if to_clip_end:
+        return max(1.0, remaining_s)
+    return max(1.0, min(window_s, remaining_s))
+
+
+def referenced_mask_paths(project_dicts: list[dict]) -> set[str]:
+    """Every mask PNG referenced by the given project dicts (current project
+    plus undo/redo snapshots), as resolved path strings."""
+    referenced: set[str] = set()
+    for data in project_dicts:
+        for ann in data.get("annotations") or []:
+            mask_path = ann.get("mask_path")
+            if mask_path:
+                referenced.add(str(Path(str(mask_path)).resolve()))
+            for frame in ann.get("mask_frames") or []:
+                frame_path = frame.get("mask_path")
+                if frame_path:
+                    referenced.add(str(Path(str(frame_path)).resolve()))
+    return referenced
+
+
+def delete_orphan_masks(masks_dir: Path, referenced: set[str]) -> int:
+    """Delete unreferenced files directly inside masks_dir. Never touches
+    anything outside that directory. Returns the number of files removed."""
+    if not masks_dir.is_dir():
+        return 0
+    masks_dir = masks_dir.resolve()
+    removed = 0
+    for path in masks_dir.iterdir():
+        resolved = path.resolve()
+        if not resolved.is_file() or resolved.parent != masks_dir:
+            continue
+        if str(resolved) in referenced:
+            continue
+        try:
+            resolved.unlink()
+            removed += 1
+        except OSError:
+            pass
+    return removed
 
 
 class AnnotationGraphicsItem(QGraphicsObject):
@@ -1389,13 +1448,26 @@ class SamPanel(QWidget):
     points_enabled_changed = Signal(bool)
     mode_changed = Signal(str)  # "positive" | "negative"
     delete_weights_requested = Signal()
+    mask_visibility_changed = Signal(str, bool)   # annotation id, visible
+    mask_renamed = Signal(str, str)               # annotation id, new label
+    mask_deleted = Signal(str)                    # annotation id
+    mask_selected = Signal(str)                   # annotation id
+    mask_retrack_requested = Signal(str)          # annotation id
+    install_deps_requested = Signal()
+    download_weights_requested = Signal()
 
     def __init__(self, project: ProjectState, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.project = project
+        self._refreshing_masks = False
         self.status = QLabel("Preparing SAM backend…")
         self.status.setProperty("role", "muted")
         self.status.setWordWrap(True)
+
+        self.last_run_label = QLabel()
+        self.last_run_label.setProperty("role", "muted")
+        self.last_run_label.setWordWrap(True)
+        self.last_run_label.hide()
 
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)  # indeterminate marquee
@@ -1440,6 +1512,55 @@ class SamPanel(QWidget):
         self.propagate_button.clicked.connect(self.propagate_requested)
         self.clear_button.clicked.connect(self.clear_points_requested)
 
+        # Propagation window: track to clip end by default (least confusing for
+        # novices), or a fixed number of seconds from the playhead.
+        self.track_window_spin = QDoubleSpinBox()
+        self.track_window_spin.setRange(1.0, 120.0)
+        self.track_window_spin.setDecimals(1)
+        self.track_window_spin.setSingleStep(1.0)
+        self.track_window_spin.setValue(5.0)
+        self.track_window_spin.setSuffix(" s")
+        self.track_to_end_check = QCheckBox("To clip end")
+        self.track_to_end_check.setToolTip(
+            "Track from the playhead to the end of the active clip."
+        )
+        self.track_to_end_check.setChecked(True)
+        self.track_window_spin.setEnabled(False)
+        self.track_to_end_check.toggled.connect(
+            lambda checked: self.track_window_spin.setEnabled(not checked)
+        )
+
+        # Mask list (3D Slicer "Segment Editor" pattern): one row per
+        # mask/tracked-mask annotation with visibility checkbox + inline rename.
+        self.masks_list = QListWidget()
+        self.masks_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.masks_list.customContextMenuRequested.connect(self._show_mask_menu)
+        self.masks_list.itemChanged.connect(self._mask_item_changed)
+        self.masks_list.currentItemChanged.connect(self._mask_selection_changed)
+
+        # Shown instead of the working controls when the SAM backend is missing.
+        self._explainer = QWidget()
+        explainer_layout = QVBoxLayout(self._explainer)
+        explainer_layout.setContentsMargins(0, 0, 0, 0)
+        explainer_layout.setSpacing(8)
+        explainer_text = QLabel(
+            "SAM (Segment Anything) outlines an anatomical structure from a few "
+            "clicks and can track it through the video. It runs entirely on this "
+            "computer — no video ever leaves the machine. Using it needs a "
+            "one-time setup: installing the AI components and downloading the "
+            "model weights (~3.2 GB)."
+        )
+        explainer_text.setWordWrap(True)
+        self.install_deps_button = QPushButton("Install Dependencies")
+        self.install_deps_button.clicked.connect(self.install_deps_requested)
+        self.download_weights_button = QPushButton("Download Weights")
+        self.download_weights_button.setProperty("variant", "cyan")
+        self.download_weights_button.clicked.connect(self.download_weights_requested)
+        explainer_layout.addWidget(explainer_text)
+        explainer_layout.addWidget(self.install_deps_button)
+        explainer_layout.addWidget(self.download_weights_button)
+        self._explainer.hide()
+
         self.delete_weights_button = QPushButton("Delete Cached Weights (3.2 GB)")
         self.delete_weights_button.setProperty("variant", "danger")
         self.delete_weights_button.setToolTip(
@@ -1449,6 +1570,34 @@ class SamPanel(QWidget):
         self.delete_weights_button.clicked.connect(self.delete_weights_requested)
         self.delete_weights_button.hide()
 
+        # Working controls live in one container so the missing-backend
+        # explainer can swap them out with a single show/hide.
+        self._controls = QWidget()
+        controls_layout = QVBoxLayout(self._controls)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.setSpacing(10)
+        mode_label = QLabel("Prompt mode")
+        mode_label.setProperty("role", "muted")
+        controls_layout.addWidget(mode_label)
+        controls_layout.addLayout(mode_row)
+        controls_layout.addWidget(self.point_toggle)
+        points_label = QLabel("Prompt points")
+        points_label.setProperty("role", "muted")
+        controls_layout.addWidget(points_label)
+        controls_layout.addWidget(self.points, 1)
+        controls_layout.addWidget(self.undo_button)
+        controls_layout.addWidget(self.segment_button)
+        track_row = QHBoxLayout()
+        track_row.setSpacing(6)
+        track_label = QLabel("Track window")
+        track_label.setProperty("role", "muted")
+        track_row.addWidget(track_label)
+        track_row.addWidget(self.track_window_spin, 1)
+        track_row.addWidget(self.track_to_end_check)
+        controls_layout.addLayout(track_row)
+        controls_layout.addWidget(self.propagate_button)
+        controls_layout.addWidget(self.clear_button)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
@@ -1457,19 +1606,13 @@ class SamPanel(QWidget):
         layout.addWidget(title)
         layout.addWidget(self.status)
         layout.addWidget(self.progress)
-        mode_label = QLabel("Prompt mode")
-        mode_label.setProperty("role", "muted")
-        layout.addWidget(mode_label)
-        layout.addLayout(mode_row)
-        layout.addWidget(self.point_toggle)
-        points_label = QLabel("Prompt points")
-        points_label.setProperty("role", "muted")
-        layout.addWidget(points_label)
-        layout.addWidget(self.points, 1)
-        layout.addWidget(self.undo_button)
-        layout.addWidget(self.segment_button)
-        layout.addWidget(self.propagate_button)
-        layout.addWidget(self.clear_button)
+        layout.addWidget(self.last_run_label)
+        layout.addWidget(self._explainer)
+        layout.addWidget(self._controls, 2)
+        masks_label = QLabel("Masks")
+        masks_label.setProperty("role", "muted")
+        layout.addWidget(masks_label)
+        layout.addWidget(self.masks_list, 1)
         layout.addWidget(self.delete_weights_button)
 
     def set_project(self, project: ProjectState) -> None:
@@ -1505,6 +1648,123 @@ class SamPanel(QWidget):
             )
         self.undo_button.setEnabled(bool(self.project.sam_points))
         self._apply_point_toggle_style()
+        self._refresh_masks()
+        self._refresh_last_run()
+
+    def show_backend_explainer(self, deps_missing: bool) -> None:
+        """Backend probe failed: replace the working controls with a plain
+        explanation and the relevant setup action(s)."""
+        self._controls.hide()
+        self.install_deps_button.setVisible(deps_missing)
+        self._explainer.show()
+
+    def show_backend_ready(self) -> None:
+        self._explainer.hide()
+        self._controls.show()
+
+    # ── Mask list ─────────────────────────────────────────────────────────
+
+    def _mask_annotations(self) -> list[Annotation]:
+        return [a for a in self.project.annotations if a.type in ("mask", "tracked-mask")]
+
+    @staticmethod
+    def _mask_item_text(ann: Annotation) -> str:
+        text = ann.label or "(unlabeled)"
+        if ann.type == "tracked-mask" and ann.mask_frames:
+            text += f" · {len(ann.mask_frames)} frames"
+        return text
+
+    def _selected_mask_id(self) -> str | None:
+        item = self.masks_list.currentItem()
+        return str(item.data(Qt.ItemDataRole.UserRole)) if item else None
+
+    def _refresh_masks(self) -> None:
+        self._refreshing_masks = True
+        self.masks_list.blockSignals(True)
+        selected_id = self.project.selected_annotation_id or self._selected_mask_id()
+        self.masks_list.clear()
+        for ann in self._mask_annotations():
+            item = QListWidgetItem(self._mask_item_text(ann))
+            item.setData(Qt.ItemDataRole.UserRole, ann.id)
+            item.setFlags(
+                item.flags() | Qt.ItemFlag.ItemIsEditable | Qt.ItemFlag.ItemIsUserCheckable
+            )
+            item.setCheckState(
+                Qt.CheckState.Checked if ann.visible else Qt.CheckState.Unchecked
+            )
+            swatch = QPixmap(12, 12)
+            swatch.fill(QColor(ann.color))
+            item.setIcon(QIcon(swatch))
+            self.masks_list.addItem(item)
+            if ann.id == selected_id:
+                self.masks_list.setCurrentItem(item)
+        self.masks_list.blockSignals(False)
+        self._refreshing_masks = False
+
+    def _mask_item_changed(self, item: QListWidgetItem) -> None:
+        if self._refreshing_masks:
+            return
+        # Read everything off the item before emitting: a connected handler may
+        # trigger a refresh that rebuilds the list and deletes this item.
+        ann_id = str(item.data(Qt.ItemDataRole.UserRole))
+        visible = item.checkState() == Qt.CheckState.Checked
+        label = re.sub(r"\s*·\s*\d+ frames$", "", item.text()).strip()
+        ann = next((a for a in self._mask_annotations() if a.id == ann_id), None)
+        if ann is None:
+            return
+        if visible != ann.visible:
+            ann.visible = visible
+            self.mask_visibility_changed.emit(ann_id, visible)
+        elif label != (ann.label or "(unlabeled)"):
+            ann.label = label
+            self.mask_renamed.emit(ann_id, label)
+
+    def _mask_selection_changed(self) -> None:
+        if self._refreshing_masks:
+            return
+        ann_id = self._selected_mask_id()
+        if ann_id:
+            self.mask_selected.emit(ann_id)
+
+    def _show_mask_menu(self, pos) -> None:  # type: ignore[no-untyped-def]
+        item = self.masks_list.itemAt(pos)
+        if item is None:
+            return
+        ann_id = str(item.data(Qt.ItemDataRole.UserRole))
+        ann = next((a for a in self._mask_annotations() if a.id == ann_id), None)
+        menu = QMenu(self)
+        rename_action = menu.addAction("Rename")
+        retrack_action = (
+            menu.addAction("Re-track") if ann is not None and ann.type == "tracked-mask" else None
+        )
+        delete_action = menu.addAction("Delete Mask")
+        chosen = menu.exec(self.masks_list.mapToGlobal(pos))
+        if chosen is rename_action:
+            self.masks_list.editItem(item)
+        elif retrack_action is not None and chosen is retrack_action:
+            self.mask_retrack_requested.emit(ann_id)
+        elif chosen is delete_action:
+            self.mask_deleted.emit(ann_id)
+
+    def _refresh_last_run(self) -> None:
+        data = getattr(self.project, "sam_last_run", {}) or {}
+        if not data:
+            self.last_run_label.hide()
+            return
+        started = str(data.get("started_iso", "")).replace("T", " ")[:16]
+        duration = float(data.get("duration_s", 0.0) or 0.0)
+        result = data.get("result", "")
+        if result == "success":
+            line = (
+                f"✓ {int(data.get('frames', 0) or 0)} frames · {data.get('backend', '')}"
+                f" · {started} · {duration:.0f}s"
+            )
+        elif result == "canceled":
+            line = f"⚠ canceled · {started}"
+        else:
+            line = f"✗ failed: {data.get('message', '')}"
+        self.last_run_label.setText(f"Last run\n{line}")
+        self.last_run_label.show()
 
     def _set_mode(self, mode: str) -> None:
         self.include_btn.setChecked(mode == "positive")
@@ -2026,6 +2286,7 @@ class SamSegmentWorker(QObject):
         time_s: float,
         points: list[SamPoint],
         mask_dir: Path,
+        mask_color: tuple[int, int, int] | None = None,
     ) -> None:
         super().__init__()
         self.backend = backend
@@ -2033,6 +2294,7 @@ class SamSegmentWorker(QObject):
         self.time_s = time_s
         self.points = points
         self.mask_dir = mask_dir
+        self.mask_color = mask_color
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -2043,6 +2305,7 @@ class SamSegmentWorker(QObject):
             result = self.backend.segment_frame(
                 self.video_path, self.time_s, self.points, self.mask_dir,
                 progress=self.progress.emit,
+                mask_color=self.mask_color,
             )
             self.finished.emit(result, None)
         except Exception as exc:  # noqa: BLE001
@@ -2062,6 +2325,7 @@ class SamPropagationWorker(QObject):
         points: list[SamPoint],
         mask_dir: Path,
         sample_rate: float = 2.0,
+        mask_color: tuple[int, int, int] | None = None,
     ) -> None:
         super().__init__()
         self.backend = backend
@@ -2071,6 +2335,7 @@ class SamPropagationWorker(QObject):
         self.points = points
         self.mask_dir = mask_dir
         self.sample_rate = sample_rate
+        self.mask_color = mask_color
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -2087,6 +2352,7 @@ class SamPropagationWorker(QObject):
                 progress=self.progress.emit,
                 sample_rate=self.sample_rate,
                 cancelled=lambda: self._cancelled,
+                mask_color=self.mask_color,
             )
             self.finished.emit(result, None)
         except SamCancelled:
@@ -3175,6 +3441,13 @@ class MainWindow(QMainWindow):
         self.sam_panel.points_enabled_changed.connect(self._set_sam_points_enabled)
         self.sam_panel.mode_changed.connect(self._set_sam_mode)
         self.sam_panel.delete_weights_requested.connect(self._delete_sam_weights)
+        self.sam_panel.mask_visibility_changed.connect(self._set_annotation_visibility)
+        self.sam_panel.mask_renamed.connect(self._update_annotation_label)
+        self.sam_panel.mask_deleted.connect(self._delete_annotation)
+        self.sam_panel.mask_selected.connect(self._on_panel_selection_changed)
+        self.sam_panel.mask_retrack_requested.connect(self._retrack_mask)
+        self.sam_panel.install_deps_requested.connect(self._show_sam_install_help)
+        self.sam_panel.download_weights_requested.connect(self._show_sam_setup)
         self.labels_panel.delete_requested.connect(self._delete_annotation)
         self.labels_panel.duplicate_requested.connect(self._duplicate_annotation)
         self.labels_panel.set_start_to_playhead.connect(self._set_annotation_start_to_playhead)
@@ -4438,6 +4711,12 @@ class MainWindow(QMainWindow):
             ann.color = color
             self._mark_dirty()
 
+    def _set_annotation_visibility(self, annotation_id: str, visible: bool) -> None:
+        ann = self._find_annotation(annotation_id)
+        if ann is not None:
+            ann.visible = bool(visible)
+            self._mark_dirty()
+
     def _update_annotation_font_size(self, annotation_id: str, size: int) -> None:
         ann = self._find_annotation(annotation_id)
         if ann is not None:
@@ -4606,6 +4885,14 @@ class MainWindow(QMainWindow):
         self._sam_probe_worker = None
         cached = self.sam_backend.is_weights_cached()
         self.sam_panel.set_weights_cached(cached)
+        if info.status == "missing":
+            # Torch / transformers not importable: explain SAM instead of only
+            # showing the raw import error.
+            self.sam_panel.show_backend_explainer(deps_missing=True)
+        elif info.status == "ready" and not cached:
+            self.sam_panel.show_backend_explainer(deps_missing=False)
+        else:
+            self.sam_panel.show_backend_ready()
         if info.status == "ready" and not cached:
             self.sam_panel.set_status("SAM3 weights not downloaded yet.")
             self.sam_panel.set_busy(False)
@@ -4620,6 +4907,20 @@ class MainWindow(QMainWindow):
         self.sam_panel.set_status(label)
         self.sam_panel.set_busy(False)
         self.statusBar().showMessage(f"SAM backend: {info.status}", 4000)
+
+    def _show_sam_install_help(self) -> None:
+        # There is no in-app installer for the optional SAM stack; point the
+        # user at the documented one-line install instead.
+        QMessageBox.information(
+            self,
+            "Install SAM dependencies",
+            "The AI components SAM needs (PyTorch + Transformers) are not "
+            "installed in this copy of NeuroEdit.\n\n"
+            "From a terminal, run:\n\n"
+            '    pip install -e ".[sam]"\n\n'
+            "from the NeuroEdit desktop folder, then restart NeuroEdit and "
+            "reopen the SAM panel.",
+        )
 
     def _show_sam_setup(self) -> None:
         dlg = SamSetupDialog(self)
@@ -4650,6 +4951,7 @@ class MainWindow(QMainWindow):
         cached = self.sam_backend.is_weights_cached()
         self.sam_panel.set_weights_cached(cached)
         if info.status == "ready":
+            self.sam_panel.show_backend_ready()
             self.sam_panel.set_status(info.message or f"SAM3 ready ({info.device})")
             self.statusBar().showMessage("SAM3 ready", 4000)
         else:
@@ -4699,6 +5001,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("SAM: running segmentation…")
 
         mask_dir = self.store.project_path.parent / "masks"
+        self._pending_mask_color = self._next_mask_color()
+        self._pending_prompt_points = self._current_prompt_points()
         self._sam_segment_thread = QThread(self)
         self._sam_segment_worker = SamSegmentWorker(
             self.sam_backend,
@@ -4706,6 +5010,7 @@ class MainWindow(QMainWindow):
             self.project.current_time,
             list(self.project.sam_points),
             mask_dir,
+            mask_color=hex_to_rgb(self._pending_mask_color),
         )
         self._sam_segment_worker.moveToThread(self._sam_segment_thread)
         self._sam_segment_thread.started.connect(self._sam_segment_worker.run)
@@ -4737,13 +5042,14 @@ class MainWindow(QMainWindow):
             frame_time=self.project.current_time,
             ann_duration=0.0,
             type="mask",
-            label=self.project.draw_label or "SAM mask",
-            color=self.project.draw_color,
+            label=self.project.draw_label or f"Mask {self._mask_count() + 1}",
+            color=getattr(self, "_pending_mask_color", self.project.draw_color),
             visible=True,
             opacity=0.55,
             geometry={},
             mask_path=str(result.mask_path),
             score=float(result.score),
+            prompt_points=list(getattr(self, "_pending_prompt_points", [])),
         )
         self.project.annotations.append(annotation)
         self.video_view.annotation_item.invalidate_mask_cache()
@@ -4753,6 +5059,18 @@ class MainWindow(QMainWindow):
             4000,
         )
         self._mark_dirty()
+
+    def _mask_count(self) -> int:
+        return sum(1 for a in self.project.annotations if a.type in ("mask", "tracked-mask"))
+
+    def _next_mask_color(self) -> str:
+        return MASK_PALETTE[self._mask_count() % len(MASK_PALETTE)]
+
+    def _current_prompt_points(self) -> list[dict]:
+        return [
+            {"x": float(p.x), "y": float(p.y), "type": p.type}
+            for p in self.project.sam_points
+        ]
 
     def _run_propagation(self) -> None:
         clip = self.project.active_clip
@@ -4768,7 +5086,74 @@ class MainWindow(QMainWindow):
         if getattr(self, "_sam_propagation_thread", None) is not None:
             return
 
-        self.sam_panel.set_status("Running video propagation…")
+        remaining = clip.start_time + clip.display_duration - self.project.current_time
+        duration_s = propagation_window_s(
+            remaining,
+            self.sam_panel.track_to_end_check.isChecked(),
+            float(self.sam_panel.track_window_spin.value()),
+        )
+        self._retrack_target_id = None
+        self._pending_prompt_points = self._current_prompt_points()
+        self._start_propagation(
+            Path(clip.path),
+            self.project.current_time,
+            duration_s,
+            list(self.project.sam_points),
+            self._next_mask_color(),
+        )
+
+    def _retrack_mask(self, annotation_id: str) -> None:
+        """Explicit re-run of propagation for an existing tracked mask, replacing
+        its frames in place. Never triggered automatically."""
+        ann = self._find_annotation(annotation_id)
+        if ann is None or ann.type != "tracked-mask":
+            return
+        if not ann.prompt_points:
+            QMessageBox.information(
+                self, "Re-track unavailable",
+                "This mask was created before NeuroEdit saved prompt points with "
+                "masks, so it cannot be re-tracked. Place new SAM points and run "
+                "Video Propagation instead.",
+            )
+            return
+        clip = self.project.active_clip
+        if not clip:
+            QMessageBox.information(self, "No video", "Import a video before re-tracking.")
+            return
+        if getattr(self, "_sam_propagation_thread", None) is not None:
+            return
+        points = [
+            SamPoint(
+                x=float(p.get("x", 0.0)),
+                y=float(p.get("y", 0.0)),
+                type="negative" if p.get("type") == "negative" else "positive",
+            )
+            for p in ann.prompt_points
+        ]
+        self._retrack_target_id = ann.id
+        self._pending_prompt_points = list(ann.prompt_points)
+        self._start_propagation(
+            Path(clip.path),
+            ann.frame_time,
+            max(1.0, ann.ann_duration or 5.0),
+            points,
+            ann.color,
+        )
+
+    def _start_propagation(
+        self,
+        video_path: Path,
+        start_time_s: float,
+        duration_s: float,
+        points: list[SamPoint],
+        mask_color_hex: str,
+    ) -> None:
+        self._pending_mask_color = mask_color_hex
+        self._sam_run_started_iso = datetime.datetime.now().isoformat(timespec="seconds")
+        self._sam_run_start_monotonic = time.monotonic()
+        self.sam_panel.set_status(
+            f"Tracking {format_time(start_time_s)} → {format_time(start_time_s + duration_s)}…"
+        )
         self.sam_panel.set_busy(True)
         self.statusBar().showMessage("SAM: running video propagation…")
 
@@ -4776,12 +5161,13 @@ class MainWindow(QMainWindow):
         self._sam_propagation_thread = QThread(self)
         self._sam_propagation_worker = SamPropagationWorker(
             self.sam_backend,
-            Path(clip.path),
-            self.project.current_time,
-            duration_s=5.0,
-            points=list(self.project.sam_points),
+            video_path,
+            start_time_s,
+            duration_s=duration_s,
+            points=points,
             mask_dir=mask_dir,
             sample_rate=2.0,
+            mask_color=hex_to_rgb(mask_color_hex),
         )
         self._sam_propagation_worker.moveToThread(self._sam_propagation_thread)
         self._sam_propagation_thread.started.connect(self._sam_propagation_worker.run)
@@ -4796,42 +5182,76 @@ class MainWindow(QMainWindow):
         self._start_sam_heartbeat(message)
         self.statusBar().showMessage(f"SAM: {message}")
 
+    def _sam_run_record(self, result: str, frames: int, backend: str, message: str) -> dict:
+        elapsed = time.monotonic() - getattr(self, "_sam_run_start_monotonic", time.monotonic())
+        return {
+            "started_iso": getattr(self, "_sam_run_started_iso", ""),
+            "duration_s": round(elapsed, 1),
+            "frames": frames,
+            "result": result,
+            "backend": backend,
+            "message": message,
+        }
+
     def _on_propagation_finished(self, result, error) -> None:  # type: ignore[no-untyped-def]
         self._stop_sam_heartbeat()
         self._sam_propagation_thread = None
         self._sam_propagation_worker = None
         self.sam_panel.set_busy(False)
+        retrack_id = getattr(self, "_retrack_target_id", None)
+        self._retrack_target_id = None
 
         if error:
+            self.project.sam_last_run = self._sam_run_record("error", 0, "", str(error))
             self.sam_panel.set_status(f"Propagation failed: {error}")
             self.statusBar().showMessage("SAM: propagation failed", 5000)
+            self._mark_dirty(history=False)
             QMessageBox.critical(self, "SAM propagation failed", str(error))
             return
         if result is None or not result.mask_frames:
+            self.project.sam_last_run = self._sam_run_record(
+                "canceled", 0, "", "Propagation canceled."
+            )
+            self._mark_dirty(history=False)
             return
 
         first_time = float(result.mask_frames[0]["time"])
         last_time = float(result.mask_frames[-1]["time"])
         frame_step = 1.0 / result.sample_rate
         ann_duration = max(frame_step, last_time - first_time + frame_step)
-        annotation = Annotation(
-            id=new_id(),
-            frame_time=first_time,
-            ann_duration=ann_duration,
-            type="tracked-mask",
-            label=self.project.draw_label or "SAM propagation",
-            color=self.project.draw_color,
-            visible=True,
-            opacity=0.55,
-            geometry={},
-            mask_path=str(result.mask_frames[0]["mask_path"]),
-            mask_frames=result.mask_frames,
-            score=float(result.score),
-            sample_rate=float(result.sample_rate),
+        target = self._find_annotation(retrack_id) if retrack_id else None
+        if target is not None:
+            # Re-track: regenerate the existing annotation's frames in place,
+            # keeping its id, label, and color.
+            target.frame_time = first_time
+            target.ann_duration = ann_duration
+            target.mask_path = str(result.mask_frames[0]["mask_path"])
+            target.mask_frames = result.mask_frames
+            target.score = float(result.score)
+            target.sample_rate = float(result.sample_rate)
+        else:
+            annotation = Annotation(
+                id=new_id(),
+                frame_time=first_time,
+                ann_duration=ann_duration,
+                type="tracked-mask",
+                label=self.project.draw_label or f"Mask {self._mask_count() + 1}",
+                color=getattr(self, "_pending_mask_color", self.project.draw_color),
+                visible=True,
+                opacity=0.55,
+                geometry={},
+                mask_path=str(result.mask_frames[0]["mask_path"]),
+                mask_frames=result.mask_frames,
+                score=float(result.score),
+                sample_rate=float(result.sample_rate),
+                prompt_points=list(getattr(self, "_pending_prompt_points", [])),
+            )
+            self.project.annotations.append(annotation)
+            self.project.sam_points.clear()
+            self.project.active_panel = "labels"
+        self.project.sam_last_run = self._sam_run_record(
+            "success", len(result.mask_frames), result.backend, ""
         )
-        self.project.annotations.append(annotation)
-        self.project.sam_points.clear()
-        self.project.active_panel = "labels"
         self.video_view.annotation_item.invalidate_mask_cache()
         self.sam_panel.set_status(
             f"{result.backend} propagation saved {len(result.mask_frames)} frames "
@@ -4842,6 +5262,14 @@ class MainWindow(QMainWindow):
             4000,
         )
         self._mark_dirty()
+
+    def _cleanup_orphan_masks(self) -> None:
+        """Delete mask PNGs no longer referenced by the project or any undo/redo
+        snapshot. Runs only at close so deleting a mask annotation stays undoable
+        for the whole session."""
+        masks_dir = self.store.project_path.parent / "masks"
+        snapshots = [self.project.to_dict(), *self._undo_stack, *self._redo_stack]
+        delete_orphan_masks(masks_dir, referenced_mask_paths(snapshots))
 
     def _shutdown_threads(self) -> bool:
         """Stop background workers so Qt does not abort with 'QThread: Destroyed
@@ -4899,4 +5327,9 @@ class MainWindow(QMainWindow):
             # torch/Metal or ffmpeg allocator). Skip graceful Qt teardown, which
             # could deadlock or segfault on the corrupted state, and exit now.
             os._exit(0)
+        # Workers are stopped, so no new mask files can appear mid-scan.
+        try:
+            self._cleanup_orphan_masks()
+        except Exception:  # noqa: BLE001
+            pass
         super().closeEvent(event)
