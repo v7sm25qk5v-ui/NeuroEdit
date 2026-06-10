@@ -332,6 +332,70 @@ All changes in `desktop/src/neuroedit_desktop/ui/main_window.py` and `desktop/sr
 
 ---
 
+## 9. Codebase review + optimization pass (2026-06-09, uncommitted)
+
+A full-codebase review fixed these bugs (all in `desktop/src/neuroedit_desktop/`):
+
+- **`editor_panels.py` `AudioPanel._delete_selected`** — deleting any audio track
+  also deleted every *unattached* transcript segment (`audio_track_id is None`).
+- **`editor_panels.py` `_cut_active_clip`** — the right piece of a Cut dropped
+  `media_type` (cut image clips became unloadable "videos") and fade fields;
+  fade-out now moves to the right piece.
+- **Export duration ratchet** — `project_end_time` fed `project.duration` and
+  `current_time + 1` back into itself, so each seek-to-end grew the timeline by
+  1 s and exports gained a black/silent tail. Both it and
+  `ProjectExporter._duration` now derive from content ends only.
+- **`exporter.py` ffmpeg pipe deadlocks** — `_run_ffmpeg` polled without
+  draining stdout/stderr (hard hang once the pipe buffer filled); render
+  segments now survive ffmpeg dying mid-stream (BrokenPipeError handled).
+- **Windows bugs** — `ThumbnailWorker` wrapped paths in literal quote chars
+  (broke any path with spaces); `_relative_time` used `strftime("%-d")` which
+  raises on Windows.
+- **`models.py`** — `from_dict` draw_color default didn't match the dataclass
+  default; nested dataclasses now drop unknown keys so newer saves open in
+  older builds (`_from_dict_tolerant`).
+- **Half-open intervals** — `MainWindow._clip_at_time`/`_slide_at_time` now use
+  `start <= t < end` to match the exporter at boundary frames.
+- **SAM3 setup dialog** — HF token field now uses Password echo mode.
+- **Thumbnail thread teardown** — closing the Project Library mid-thumbnail
+  could destroy a running QThread; stuck threads are parked until finished.
+- **Weight cache path** — `SamBackend.weights_cache_dir()` respects
+  HF_HOME/HF_HUB_CACHE and is shared by the cache check and the delete action.
+
+Optimizations:
+
+- **SAM3 propagation frame loading** (`sam_backend._load_video_window`): one
+  seek + sequential `read()`/`grab()` instead of a decoder seek per frame
+  (large speedup on long-GOP H.264), and frames are downscaled to ≤1920 long
+  side (4K propagation no longer holds ~6 GB of frames in RAM).
+- **Mask overlay cache** capped at 48 pixmaps (LRU) — long tracked-mask
+  playback used to pin ~8 MB per propagated frame indefinitely.
+- **Canvas drags** no longer rebuild the Labels list + timeline per mouse-move
+  (`_on_annotation_mutated` is now dirty-flag only; full refresh on commit).
+- **Undo history** — draw-tool settings (color/width/label/opacity) are now
+  transient like tool/panel state: the width slider used to push one snapshot
+  per drag tick and flush real edits out of the 50-entry history.
+- **Timeline slide lanes** memoized (paints were O(slides²)).
+- **Project Library** reads each `project.json` once (was twice).
+- **Imported audio duration** (m4a/mp3) is now probed via bundled ffmpeg — the
+  hardcoded 5.0 s guess silently truncated imported audio in the export mix.
+- `neuroedit_desktop.__version__` added ("0.2.3-alpha"); About dialog uses it.
+
+Verification: `ruff check src tests` clean; all files `py_compile` clean.
+**pytest could NOT run** — see the environment warning below.
+
+### ⚠ Dev environment broken (action required)
+
+`~/Documents/Claude/venv` (the `desktop/.venv` symlink target) points at a
+Python 3.13 framework that has been **uninstalled** from this Mac
+(`/Library/Frameworks/Python.framework/Versions/3.13` no longer exists). The
+app and the test suite cannot run; only system Python 3.9.6 remains. Either
+reinstall Python 3.13 (revives the existing venv, including the installed
+torch/SAM stack) or install Python 3.12 and recreate the venv in place
+(`python3.12 -m venv ~/Documents/Claude/venv && pip install -e ".[sam]"` —
+re-downloads everything). Then run the test suite to validate this session's
+changes.
+
 ## Current state at handoff
 
 - All work committed and pushed to `main`. Commit order (condensed):

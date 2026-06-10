@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+import subprocess
 import time
 import wave
 from pathlib import Path
@@ -78,7 +79,10 @@ def fmt_time(seconds: float) -> str:
 
 
 def project_end_time(project: ProjectState) -> float:
-    ends = [project.duration, project.current_time + 1.0]
+    # Content ends only. Feeding project.duration or current_time back in here
+    # let the timeline end ratchet upward one second per seek-to-end (the seek
+    # clamp uses this value), which then padded exports with a black tail.
+    ends: list[float] = []
     ends.extend(clip.start_time + clip.display_duration for clip in project.clips)
     ends.extend(track.start_time + max(0.1, track.duration) for track in project.audio_tracks)
     ends.extend(slide.start_time + max(0.1, slide.duration) for slide in project.slides)
@@ -254,6 +258,8 @@ class TimelineCanvas(QWidget):
         super().__init__(parent)
         self.project = project
         self._drag: tuple[str, str, float, float] | None = None
+        self._slide_lanes_key: tuple | None = None
+        self._slide_lanes_value: dict[str, int] = {}
         self.setMouseTracking(True)
         self.refresh_geometry()
 
@@ -331,6 +337,14 @@ class TimelineCanvas(QWidget):
         return self.RULER_H + sum(heights[:track_idx])
 
     def _slide_lanes(self) -> dict[str, int]:
+        # Memoized on slide geometry: paint and hit-testing call this once per
+        # slide, which made each repaint O(slides^2) without the cache.
+        key = tuple(
+            (slide.id, round(slide.start_time, 3), round(slide.duration, 3))
+            for slide in self.project.slides
+        )
+        if key == self._slide_lanes_key:
+            return self._slide_lanes_value
         lanes: list[float] = []
         assigned: dict[str, int] = {}
         ordered = sorted(self.project.slides, key=lambda slide: (slide.start_time, slide.id))
@@ -345,6 +359,8 @@ class TimelineCanvas(QWidget):
             else:
                 assigned[slide.id] = len(lanes)
                 lanes.append(end)
+        self._slide_lanes_key = key
+        self._slide_lanes_value = assigned
         return assigned
 
     def _slide_lane_count(self) -> int:
@@ -863,10 +879,14 @@ class RichTimelineWidget(QWidget):
         if original_trim_end - split_trim < 0.05:
             return
 
-        # Trim the first piece.
+        # Trim the first piece. Its fade-out moves to the new right piece, since
+        # the cut point is no longer the end of the source material.
         target.trim_end = split_trim
+        right_fade_out = target.fade_out
+        target.fade_out = 0.0
 
-        # Build the second piece, referencing the same source media.
+        # Build the second piece, referencing the same source media. media_type
+        # must carry over or a cut image clip turns into an unloadable "video".
         right = VideoClip(
             id=new_id(),
             path=target.path,
@@ -878,6 +898,10 @@ class RichTimelineWidget(QWidget):
             width=target.width,
             height=target.height,
             thumbnail_path=target.thumbnail_path,
+            media_type=target.media_type,
+            fade_in=0.0,
+            fade_out=right_fade_out,
+            fade_color=target.fade_color,
         )
         idx = self.project.clips.index(target)
         self.project.clips.insert(idx + 1, right)
@@ -1601,7 +1625,30 @@ class AudioPanel(QWidget):
                     return max(0.1, wav.getnframes() / float(wav.getframerate()))
             except Exception:  # noqa: BLE001
                 pass
-        return 5.0
+        # Non-wav (m4a/mp3/aac): probe with the bundled ffmpeg. Falling back to
+        # a guessed 5.0 s silently truncated imported audio in the export mix.
+        duration = self._ffmpeg_audio_duration(path)
+        return duration if duration > 0 else 5.0
+
+    def _ffmpeg_audio_duration(self, path: Path) -> float:
+        try:
+            import imageio_ffmpeg  # noqa: PLC0415
+
+            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+            proc = subprocess.run(
+                [ffmpeg, "-hide_banner", "-i", str(path)],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            match = re.search(r"Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)", proc.stderr)
+            if match:
+                hours, minutes, seconds = match.groups()
+                return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+        except Exception:  # noqa: BLE001
+            pass
+        return 0.0
 
     def _apply_track_fields(self) -> None:
         if self._refreshing:
@@ -1875,9 +1922,11 @@ class AudioPanel(QWidget):
         if track_id is None:
             return
         self.project.audio_tracks = [track for track in self.project.audio_tracks if track.id != track_id]
+        # Keep unattached segments (audio_track_id is None); only drop the
+        # deleted track's own segments.
         self.project.transcript_segments = [
             segment for segment in self.project.transcript_segments
-            if segment.audio_track_id not in (None, track_id)
+            if segment.audio_track_id != track_id
         ]
         self.project.duration = project_end_time(self.project)
         self.project_changed.emit()

@@ -26,6 +26,14 @@ def new_id() -> str:
     return str(uuid4())
 
 
+def _from_dict_tolerant(cls, data: dict[str, Any]):
+    """Build a dataclass from a dict, dropping unknown keys so projects saved by
+    a newer app version still open here. Missing fields without defaults still
+    raise — that contract (loud failure) is intentional."""
+    fields = cls.__dataclass_fields__
+    return cls(**{key: value for key, value in data.items() if key in fields})
+
+
 @dataclass
 class SamPoint:
     x: float
@@ -362,18 +370,27 @@ class ProjectState:
             selected_annotation_id=data.get("selected_annotation_id"),
             sam_mode=data.get("sam_mode", "positive"),
             sam_points_enabled=bool(data.get("sam_points_enabled", True)),
-            draw_color=data.get("draw_color", "#22d3ee"),
+            draw_color=data.get("draw_color", "#00e5ff"),
             draw_width=int(data.get("draw_width", 6)),
             draw_opacity=float(data.get("draw_opacity", 0.85)),
             draw_label=data.get("draw_label", ""),
         )
-        project.clips = [VideoClip(**clip) for clip in data.get("clips", [])]
-        project.audio_tracks = [AudioTrack(**track) for track in data.get("audio_tracks", [])]
-        project.transcript_segments = [
-            TranscriptSegment(**segment) for segment in data.get("transcript_segments", [])
+        project.clips = [_from_dict_tolerant(VideoClip, clip) for clip in data.get("clips", [])]
+        project.audio_tracks = [
+            _from_dict_tolerant(AudioTrack, track) for track in data.get("audio_tracks", [])
         ]
-        project.slides = [Slide(**slide) for slide in data.get("slides", [])]
-        project.markers = [TimelineMarker(**marker) for marker in data.get("markers", [])]
-        project.annotations = [Annotation(**annotation) for annotation in data.get("annotations", [])]
-        project.sam_points = [SamPoint(**point) for point in data.get("sam_points", [])]
+        project.transcript_segments = [
+            _from_dict_tolerant(TranscriptSegment, segment)
+            for segment in data.get("transcript_segments", [])
+        ]
+        project.slides = [_from_dict_tolerant(Slide, slide) for slide in data.get("slides", [])]
+        project.markers = [
+            _from_dict_tolerant(TimelineMarker, marker) for marker in data.get("markers", [])
+        ]
+        project.annotations = [
+            _from_dict_tolerant(Annotation, annotation) for annotation in data.get("annotations", [])
+        ]
+        project.sam_points = [
+            _from_dict_tolerant(SamPoint, point) for point in data.get("sam_points", [])
+        ]
         return project

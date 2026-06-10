@@ -5,7 +5,6 @@ import os
 import shutil
 import subprocess
 import tempfile
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Literal
@@ -114,7 +113,10 @@ class ProjectExporter:
             self._release_captures()
 
     def _duration(self) -> float:
-        ends = [self.project.duration]
+        # Derived from actual content ends only — project.duration is a display
+        # value that can ratchet past the real content (playhead padding) and
+        # would add a black/silent tail to the export.
+        ends: list[float] = []
         ends.extend(clip.start_time + clip.display_duration for clip in self.project.clips)
         ends.extend(slide.start_time + max(0.1, slide.duration) for slide in self.project.slides)
         ends.extend(track.start_time + max(0.1, track.duration) for track in self.project.audio_tracks)
@@ -365,24 +367,35 @@ class ProjectExporter:
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
         assert proc.stdin is not None
         frame_count = max(1, int(math.ceil(segment.duration * self.settings.fps)))
+        encoder_died = False
         try:
             for index in range(frame_count):
                 if self.cancelled():
                     raise ExportCancelled()
                 time_s = min(segment.end - 0.000001, segment.start + index / self.settings.fps)
                 frame = np.ascontiguousarray(self._render_frame(time_s), dtype=np.uint8)
-                proc.stdin.write(frame.tobytes())
+                try:
+                    proc.stdin.write(frame.tobytes())
+                except (BrokenPipeError, OSError):
+                    # ffmpeg exited early — stop feeding frames and surface its
+                    # stderr below instead of crashing on the pipe write.
+                    encoder_died = True
+                    break
                 if index % max(1, self.settings.fps) == 0:
                     ratio = index / frame_count
                     pct = int((progress_start + (progress_end - progress_start) * ratio) * 88)
                     self.progress(pct, f"Rendering segment frame {index + 1} of {frame_count}...")
-            proc.stdin.close()
+            try:
+                proc.stdin.close()
+            except (BrokenPipeError, OSError):
+                encoder_died = True
             stderr = proc.stderr.read().decode("utf-8", errors="replace") if proc.stderr else ""
             ret = proc.wait()
         except ExportCancelled:
             proc.terminate()
+            proc.wait()
             raise
-        if ret != 0:
+        if ret != 0 or encoder_died:
             raise RuntimeError(f"FFmpeg video export failed: {stderr.strip() or 'unknown error'}")
 
     def _concat_video_segments(
@@ -451,13 +464,18 @@ class ProjectExporter:
         return available
 
     def _run_ffmpeg(self, cmd: list[str], failure_prefix: str) -> None:
+        # communicate() drains stdout/stderr while waiting — polling without
+        # reading can deadlock once ffmpeg fills the OS pipe buffer.
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        while proc.poll() is None:
-            if self.cancelled():
-                proc.terminate()
-                raise ExportCancelled()
-            time.sleep(0.1)
-        stdout, stderr = proc.communicate()
+        while True:
+            try:
+                stdout, stderr = proc.communicate(timeout=0.1)
+                break
+            except subprocess.TimeoutExpired:
+                if self.cancelled():
+                    proc.terminate()
+                    proc.wait()
+                    raise ExportCancelled() from None
         if proc.returncode != 0:
             details = (stderr or stdout or "unknown error").strip()
             raise RuntimeError(f"{failure_prefix}: {details}")

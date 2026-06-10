@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QPointF, QRectF, QSize, QSizeF, Qt, QThread, QTimer, QUrl, Signal
-from PySide6.QtGui import QAction, QBrush, QColor, QDesktopServices, QFont, QFontMetricsF, QIcon, QImage, QPainter, QPen, QPixmap, QPolygonF
+from PySide6.QtGui import QAction, QBrush, QColor, QDesktopServices, QFont, QFontMetricsF, QImage, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 from PySide6.QtWidgets import (
@@ -55,6 +55,7 @@ from PySide6.QtWidgets import (
 
 from PySide6.QtCore import QSettings
 
+from neuroedit_desktop import __version__
 from neuroedit_desktop.exporter import ExportCancelled, ExportSettings, ProjectExporter
 from neuroedit_desktop.models import Annotation, PanelType, ProjectState, SamPoint, Slide, VideoClip, new_id
 from neuroedit_desktop.project_store import ProjectStore
@@ -68,15 +69,15 @@ from neuroedit_desktop.ui.editor_panels import (
     project_preflight_warnings,
     project_end_time,
 )
-from neuroedit_desktop.ui.tutorial import TutorialOverlay, build_default_steps
-from neuroedit_desktop.video_probe import probe_video
-
-_RESOURCES = Path(__file__).parent.parent / "resources"
 from neuroedit_desktop.ui.styles import (
     ACCENT_AMBER, ACCENT_CYAN, ACCENT_RED,
     BG_CARD, BG_HOVER,
     BORDER, BORDER_BRIGHT, PRIMARY, TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY,
 )
+from neuroedit_desktop.ui.tutorial import TutorialOverlay, build_default_steps
+from neuroedit_desktop.video_probe import probe_video
+
+_RESOURCES = Path(__file__).parent.parent / "resources"
 
 VIDEO_TYPES = [
     ("educational", "Educational"),
@@ -181,6 +182,11 @@ class AnnotationGraphicsItem(QGraphicsObject):
     the QGraphicsVideoItem. This avoids the macOS bug where a widget overlay
     on top of QVideoWidget is hidden by the native Metal surface."""
 
+    # Tracked-mask playback loads one full-frame RGBA pixmap per propagated
+    # frame (~8 MB each at 1080p); an unbounded cache pins gigabytes on long
+    # propagations. 48 frames ≈ 24 s of lookback at the 2 Hz sample rate.
+    _MASK_CACHE_LIMIT = 48
+
     def __init__(self, project: ProjectState, video_item: QGraphicsVideoItem) -> None:
         super().__init__()
         self.project = project
@@ -246,12 +252,15 @@ class AnnotationGraphicsItem(QGraphicsObject):
 
             mask_path = ann.mask_path_at(self.project.current_time)
             if ann.type in ("mask", "tracked-mask") and mask_path:
-                pix = self._mask_cache.get(mask_path)
+                pix = self._mask_cache.pop(mask_path, None)
                 if pix is None:
                     pix = QPixmap(mask_path)
-                    if not pix.isNull():
-                        self._mask_cache[mask_path] = pix
-                if pix is None or pix.isNull():
+                if not pix.isNull():
+                    # Re-insert on use → dict order doubles as LRU order.
+                    self._mask_cache[mask_path] = pix
+                    while len(self._mask_cache) > self._MASK_CACHE_LIMIT:
+                        self._mask_cache.pop(next(iter(self._mask_cache)))
+                if pix.isNull():
                     continue
                 painter.setOpacity(max(0.05, min(1.0, ann.opacity)))
                 painter.drawPixmap(QRectF(0, 0, w, h), pix, QRectF(pix.rect()))
@@ -2134,6 +2143,8 @@ class SamSetupDialog(QDialog):
         token_label = QLabel("HuggingFace token:")
         self._token_edit = QLineEdit()
         self._token_edit.setPlaceholderText("hf_…")
+        # The token is a credential — mask it like a password field.
+        self._token_edit.setEchoMode(QLineEdit.EchoMode.Password)
         try:
             from huggingface_hub import get_token
             saved = get_token()
@@ -2309,7 +2320,8 @@ def _relative_time(ts: float) -> str:
     if days < 28:
         weeks = days // 7
         return f"Opened {weeks} weeks ago"
-    return dt.strftime("%b %-d, %Y")
+    # No strftime "%-d": that flag is platform-specific and raises on Windows.
+    return f"{dt.strftime('%b')} {dt.day}, {dt.year}"
 
 
 def _read_project_meta(path: Path) -> dict:
@@ -2317,6 +2329,9 @@ def _read_project_meta(path: Path) -> dict:
         "project_name": None,
         "total_duration": 0.0,
         "media_count": 0,
+        "clip_count": 0,
+        "audio_count": 0,
+        "slide_count": 0,
         "missing_count": 0,
         "first_source_path": None,
         "first_clip_duration": 0.0,
@@ -2336,11 +2351,12 @@ def _read_project_meta(path: Path) -> dict:
             if src and result["first_source_path"] is None:
                 result["first_source_path"] = src
                 result["first_clip_duration"] = float(dur)
-        result["media_count"] = len(clips) + len(audio) + len(slides)
-        for clip in clips:
-            src = clip.get("path") or clip.get("source_path")
             if src and not Path(src).exists():
                 result["missing_count"] += 1
+        result["clip_count"] = len(clips)
+        result["audio_count"] = len(audio)
+        result["slide_count"] = len(slides)
+        result["media_count"] = len(clips) + len(audio) + len(slides)
         for track in audio:
             src = track.get("path") or track.get("source_path")
             if src and not Path(src).exists():
@@ -2388,10 +2404,11 @@ class ThumbnailWorker(QObject):
                     self.thumbnail_ready.emit(project_path, str(thumb))
                     continue
                 offset = clip_dur * 0.15 if clip_dur > 0 else 5.0
-                src = f'"{source_path}"' if sys.platform in ("win32",) and " " in source_path else source_path
+                # No manual quoting: subprocess passes list args verbatim, so
+                # wrapping the path in quote characters breaks paths with spaces.
                 cmd = [
                     ffmpeg, "-y", "-ss", str(offset),
-                    "-i", src,
+                    "-i", source_path,
                     "-frames:v", "1", "-q:v", "2",
                     str(thumb),
                 ]
@@ -2411,6 +2428,9 @@ class ProjectLibraryDialog(QDialog):
         self.setMinimumSize(640, 420)
         self._thumb_thread = None
         self._thumb_worker = None
+        # Threads that outlived a quick shutdown wait; kept referenced so the
+        # QThread C++ object is not garbage-collected while still running.
+        self._orphan_threads: list[tuple[QThread, ThumbnailWorker]] = []
         self._build_ui()
         self._populate()
 
@@ -2479,25 +2499,13 @@ class ProjectLibraryDialog(QDialog):
             else:
                 dur_str = ""
 
-            clips_data = []
-            try:
-                with p.open(encoding="utf-8") as f:
-                    _d = json.load(f)
-                clips_data = _d.get("clips") or []
-                audio_data = _d.get("audio_tracks") or _d.get("audio") or []
-                slides_data = _d.get("slides") or []
-            except Exception:  # noqa: BLE001
-                clips_data = []
-                audio_data = []
-                slides_data = []
-
             parts = []
-            if clips_data:
-                parts.append(f"{len(clips_data)} clip{'s' if len(clips_data) != 1 else ''}")
-            if audio_data:
-                parts.append(f"{len(audio_data)} audio")
-            if slides_data:
-                parts.append(f"{len(slides_data)} slide{'s' if len(slides_data) != 1 else ''}")
+            if meta["clip_count"]:
+                parts.append(f"{meta['clip_count']} clip{'s' if meta['clip_count'] != 1 else ''}")
+            if meta["audio_count"]:
+                parts.append(f"{meta['audio_count']} audio")
+            if meta["slide_count"]:
+                parts.append(f"{meta['slide_count']} slide{'s' if meta['slide_count'] != 1 else ''}")
             media_str = ", ".join(parts) if parts else ""
 
             detail_line = ""
@@ -2558,13 +2566,22 @@ class ProjectLibraryDialog(QDialog):
         self._thumb_thread.start()
 
     def _stop_thumb_thread(self) -> None:
-        if self._thumb_worker is not None:
-            self._thumb_worker.stop()
-        if self._thumb_thread is not None:
-            self._thumb_thread.quit()
-            self._thumb_thread.wait(500)
+        thread, worker = self._thumb_thread, self._thumb_worker
         self._thumb_thread = None
         self._thumb_worker = None
+        if worker is not None:
+            worker.stop()
+        if thread is None:
+            return
+        thread.quit()
+        if not thread.wait(500):
+            # Worker is mid-ffmpeg (bounded by its 15 s subprocess timeout).
+            # Dropping the Python reference now could destroy a running QThread
+            # and crash; park it instead and dispose when it finishes.
+            self._orphan_threads.append((thread, worker))
+            thread.finished.connect(
+                lambda t=thread, w=worker: self._orphan_threads.remove((t, w))
+            )
 
     def _on_thumbnail_ready(self, project_path: str, thumb_path: str) -> None:
         for i in range(self.list_widget.count()):
@@ -3330,16 +3347,26 @@ class MainWindow(QMainWindow):
 
     # ── Undo/redo ─────────────────────────────────────────────────────────
 
+    # Transient UI state: excluded from undo snapshots and carried across
+    # snapshot restores. draw_* are tool settings, not document content — the
+    # width slider alone would otherwise push one snapshot per drag tick and
+    # flush real edits out of the 50-entry history.
+    _TRANSIENT_SNAPSHOT_KEYS = (
+        "active_panel",
+        "active_tool",
+        "current_time",
+        "scroll_left",
+        "selected_annotation_id",
+        "zoom",
+        "draw_color",
+        "draw_width",
+        "draw_opacity",
+        "draw_label",
+    )
+
     def _snapshot(self) -> dict:
         snapshot = self.project.to_dict()
-        for key in (
-            "active_panel",
-            "active_tool",
-            "current_time",
-            "scroll_left",
-            "selected_annotation_id",
-            "zoom",
-        ):
+        for key in self._TRANSIENT_SNAPSHOT_KEYS:
             snapshot.pop(key, None)
         return snapshot
 
@@ -3378,22 +3405,19 @@ class MainWindow(QMainWindow):
     def _apply_snapshot(self, snapshot: dict) -> None:
         self._restoring = True
         try:
-            active_panel = self.project.active_panel
-            active_tool = self.project.active_tool
-            current_time = self.project.current_time
-            scroll_left = self.project.scroll_left
-            selected_annotation_id = self.project.selected_annotation_id
-            zoom = self.project.zoom
+            transient = {
+                key: getattr(self.project, key) for key in self._TRANSIENT_SNAPSHOT_KEYS
+            }
             old_clip = self.project.active_clip
             old_path = old_clip.path if old_clip else None
             self.project = ProjectState.from_dict(snapshot)
-            self.project.active_panel = active_panel
-            self.project.active_tool = active_tool
-            self.project.current_time = current_time
-            self.project.scroll_left = scroll_left
-            if any(ann.id == selected_annotation_id for ann in self.project.annotations):
-                self.project.selected_annotation_id = selected_annotation_id
-            self.project.zoom = zoom
+            for key, value in transient.items():
+                if key == "selected_annotation_id":
+                    # Only carry the selection over if the annotation survived.
+                    if any(ann.id == value for ann in self.project.annotations):
+                        self.project.selected_annotation_id = value
+                    continue
+                setattr(self.project, key, value)
             self.dirty = True
             new_clip = self.project.active_clip
             new_path = new_clip.path if new_clip else None
@@ -3443,7 +3467,7 @@ class MainWindow(QMainWindow):
             title.setStyleSheet(f"font-size: 22px; font-weight: 700; color: {TEXT_PRIMARY};")
             layout.addWidget(title)
 
-        version_label = QLabel("v0.2.1-alpha")
+        version_label = QLabel(f"v{__version__}")
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         version_label.setStyleSheet(f"font-size: 12px; color: {ACCENT_CYAN};")
         layout.addWidget(version_label)
@@ -4159,16 +4183,18 @@ class MainWindow(QMainWindow):
         self._seek_global(self.project.current_time)
 
     def _clip_at_time(self, time_s: float):
+        # Half-open interval to match the exporter, so preview and export agree
+        # on which clip owns a boundary frame.
         for clip in self.project.clips:
             start = clip.start_time
             end = clip.start_time + clip.display_duration
-            if start <= time_s <= end:
+            if start <= time_s < end:
                 return clip
         return None
 
     def _slide_at_time(self, time_s: float):
         for slide in reversed(self.project.slides):
-            if slide.start_time <= time_s <= slide.start_time + slide.duration:
+            if slide.start_time <= time_s < slide.start_time + slide.duration:
                 return slide
         return None
 
@@ -4190,15 +4216,18 @@ class MainWindow(QMainWindow):
         self.project.active_panel = panel
         self._mark_dirty(history=False)
 
+    # Draw-tool settings are transient UI state (see _TRANSIENT_SNAPSHOT_KEYS):
+    # mark dirty for autosave, but never create or clobber undo history.
+
     def _set_color_from_swatch(self, color: str) -> None:
         self.project.draw_color = color
-        self._mark_dirty()
+        self._mark_dirty(history=False)
 
     def _choose_color(self) -> None:
         color = QColorDialog.getColor(QColor(self.project.draw_color), self, "Annotation Color")
         if color.isValid():
             self.project.draw_color = color.name()
-            self._mark_dirty()
+            self._mark_dirty(history=False)
 
     def _label_changed(self, value: str) -> None:
         self.project.draw_label = value
@@ -4206,19 +4235,19 @@ class MainWindow(QMainWindow):
         if preset_color is not None:
             self.project.draw_color = preset_color
             self.project.active_tool = "arrow"
-        self._mark_dirty()
+        self._mark_dirty(history=False)
 
     def _apply_label_preset(self, label: str, color: str) -> None:
         self.project.draw_label = label
         self.project.draw_color = color
         self.project.active_tool = "arrow"
         self.project.active_panel = "labels"
-        self._mark_dirty()
+        self._mark_dirty(history=False)
 
     def _width_changed(self, value: int) -> None:
         self.project.draw_width = value
         self.width_label.setText(f"{value}px")
-        self._mark_dirty()
+        self._mark_dirty(history=False)
 
     # ── Playback ──────────────────────────────────────────────────────────
 
@@ -4488,9 +4517,12 @@ class MainWindow(QMainWindow):
         self.video_view.update_annotations()
 
     def _on_annotation_mutated(self) -> None:
+        # Fires on every mouse-move of a canvas drag — keep it cheap. The canvas
+        # repaints itself, and neither the Labels list nor the timeline renders
+        # annotation geometry, so rebuilding them per move only made drags
+        # stutter. The full refresh happens once on edit_committed.
         self.dirty = True
-        self.labels_panel.refresh()
-        self.timeline.refresh()
+        self._update_title()
 
     def _commit_canvas_edit(self) -> None:
         # A move/resize drag on the canvas just finished. The in-progress drag
@@ -4522,7 +4554,6 @@ class MainWindow(QMainWindow):
         self._mark_dirty()
 
     def _start_sam_heartbeat(self, stage: str) -> None:
-        import time
         self._sam_stage = stage
         self._sam_stage_start = time.monotonic()
         self.sam_panel.set_status(f"{stage} (0s)")
@@ -4533,7 +4564,6 @@ class MainWindow(QMainWindow):
         self._sam_heartbeat_timer.start()
 
     def _tick_sam_heartbeat(self) -> None:
-        import time
         elapsed = int(time.monotonic() - self._sam_stage_start)
         self.sam_panel.set_status(f"{self._sam_stage} ({elapsed}s)")
 
@@ -4629,7 +4659,7 @@ class MainWindow(QMainWindow):
 
     def _delete_sam_weights(self) -> None:
         import shutil
-        cache = Path.home() / ".cache" / "huggingface" / "hub" / "models--facebook--sam3"
+        cache = self.sam_backend.weights_cache_dir()
         reply = QMessageBox.question(
             self,
             "Delete SAM3 weights?",

@@ -54,8 +54,19 @@ class SamBackend:
         self._device = "cpu"
         self._sam3_error: str | None = None
 
+    def weights_cache_dir(self) -> Path:
+        """Directory the SAM3 weights are cached in. Respects HF_HOME /
+        HF_HUB_CACHE overrides so cache checks and deletion stay in sync with
+        wherever huggingface_hub actually downloads to."""
+        hub_cache = os.environ.get("HF_HUB_CACHE")
+        if hub_cache:
+            base = Path(hub_cache)
+        else:
+            base = Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface")) / "hub"
+        return base / "models--facebook--sam3"
+
     def is_weights_cached(self) -> bool:
-        snapshots = Path.home() / ".cache" / "huggingface" / "hub" / "models--facebook--sam3" / "snapshots"
+        snapshots = self.weights_cache_dir() / "snapshots"
         return snapshots.exists() and any(snapshots.iterdir())
 
     def login(self, token: str) -> None:
@@ -429,19 +440,50 @@ class SamBackend:
             end_frame = min(start_frame + requested, frame_count) if frame_count > 0 else start_frame + requested
             max_frames = max(1, int(os.environ.get(self.SAM3_MAX_FRAMES_ENV, "240")))
             stride = max(1, math.ceil((end_frame - start_frame) / max_frames))
+            # Seek once, then read sequentially — a seek per frame forces the
+            # decoder to re-enter the GOP each time and is dramatically slower
+            # on long-GOP H.264 sources. Skipped frames use grab(), which
+            # decodes without converting/copying the pixels out.
+            cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
             frames, times = [], []
-            for frame_idx in range(start_frame, end_frame, stride):
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            frame_idx = start_frame
+            while frame_idx < end_frame:
                 ok, frame_bgr = cap.read()
                 if not ok or frame_bgr is None:
                     break
-                frames.append(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
+                frames.append(self._downscale_frame(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)))
                 times.append(frame_idx / fps)
+                skipped_ok = True
+                for _ in range(stride - 1):
+                    if not cap.grab():
+                        skipped_ok = False
+                        break
+                if not skipped_ok:
+                    break
+                frame_idx += stride
             if not frames:
                 raise RuntimeError("Failed to read frames from video for SAM3 propagation.")
             return frames, times, fps / stride
         finally:
             cap.release()
+
+    def _downscale_frame(self, frame_rgb: Any, max_side: int = 1920):
+        """Cap the long side of a propagation frame. SAM3 resizes internally
+        anyway, and holding 240 raw 4K frames in RAM (~6 GB) is what made
+        propagation on 4K sources blow up; 1080p-class frames keep mask quality
+        while cutting memory 4x."""
+        import cv2
+
+        h, w = frame_rgb.shape[:2]
+        long_side = max(h, w)
+        if long_side <= max_side:
+            return frame_rgb
+        scale = max_side / long_side
+        return cv2.resize(
+            frame_rgb,
+            (max(1, int(round(w * scale))), max(1, int(round(h * scale)))),
+            interpolation=cv2.INTER_AREA,
+        )
 
     def _model_inputs(self, model: Any, inputs: Any, device: str) -> dict[str, Any]:
         import inspect

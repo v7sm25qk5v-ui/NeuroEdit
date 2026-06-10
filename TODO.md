@@ -4,27 +4,37 @@ This roadmap tracks product work after the current alpha baseline. Keep items
 small enough to verify, and move completed implementation details into release
 notes or docs instead of expanding this file indefinitely.
 
-## Release Readiness
+Ordering rationale: ship a verified alpha first (P0), then close the editing
+gaps users hit in every session (P1), then make SAM results feel like real
+project assets (P2) since SAM is the differentiating feature, then deepen the
+PHI story (P3) which is the trust-critical feature for clinical users. Captions
+and export polish (P4) widen the audience. Stryker/DICOM (P5) is the largest
+bet and stays parked until sample data and a design pass exist.
 
+## P0 — Unblock and ship the current alpha
+
+- [ ] **Fix the dev environment (blocker).** `desktop/.venv` →
+  `~/Documents/Claude/venv` is broken: its interpreter symlinks point at a
+  Python 3.13 framework that has been uninstalled
+  (`/Library/Frameworks/Python.framework/Versions/3.13` is gone). The app and
+  test suite cannot run. Reinstall Python 3.12 (preferred per CLAUDE.md) or
+  3.13, then recreate the venv at the same location and
+  `pip install -e ".[sam]"`. Do not relocate the venv (intentional iCloud
+  placement).
+- [ ] Run `ruff check src tests` and `python -m pytest tests/ -q` once the venv
+  is restored — the 2026-06-09 review session changed exporter/undo/SAM paths
+  and was verified by lint + syntax check only.
+- [ ] Commit the working-tree changes (review-session fixes + Project Library +
+  annotation workflow) and tag `v0.2.3-alpha` (bump
+  `neuroedit_desktop.__version__` if the tag name differs).
 - [ ] Verify the generated macOS DMG launches, imports media, plays/scrubs, and
   exports an MP4 plus `.export-report.txt`.
-- [ ] Decide when to make the GitHub repository private.
+- [ ] Decide when to make the GitHub repository private (recommended —
+  commercialization intent; see HANDOFF).
 - [ ] Decide when to add Windows Authenticode signing and macOS Developer ID
   signing/notarization.
 
-## Project Library
-
-- [ ] Add `duration` (sum of clip durations) and `media_count` (clip + audio +
-  slide count) to each row in the recent-projects dialog.
-- [ ] Add project thumbnails from the active clip or first still.
-- [ ] Walk each project's clip/audio/slide source paths on dialog open and show
-  a per-project indicator if any referenced media file is missing.
-- [ ] Add a 'Reveal in Finder/Explorer' action that opens the project's parent
-  folder via `QDesktopServices.openUrl(QUrl.fromLocalFile(...))`.
-- [ ] Acceptance: a returning user can identify the right project without opening
-  multiple `project.json` files.
-
-## Timeline Editing
+## P1 — Timeline editing gaps (every-session friction)
 
 - [ ] Add a distinct selected-state outline in each of `_paint_video_blocks`,
   `_paint_audio_blocks`, `_paint_slide_blocks`, and `_paint_markers`
@@ -36,18 +46,25 @@ notes or docs instead of expanding this file indefinitely.
 - [ ] Acceptance: a user can trim, rename, mark, and navigate a simple case video
   without needing hidden shortcuts.
 
-## Annotation Workflow
+## P2 — SAM and mask workflow (the differentiator)
 
-- [ ] Add duplicate annotation support.
-- [ ] Add a Delete button to the annotation inspector and bind the Delete/Backspace
-  shortcut to remove the currently selected annotation.
-- [ ] Allow users to add, remove, and reorder custom label presets. Persist to a
-  user-config JSON; load at startup. (Read-only `ANATOMY_PRESETS` already exist in
-  `editor_panels.py`.)
-- [ ] Acceptance: users can create, adjust, reuse, and clean up annotations
-  without hunting across the canvas and Labels panel.
+- [ ] Add named mask objects so users can distinguish multiple segmentations.
+- [ ] Add delete/regenerate controls for masks and propagated masks (orphaned
+  mask PNGs in `masks/` should be cleaned up when their annotation is deleted).
+- [ ] Add a status row in the SAM panel showing last propagation start, end, frames
+  processed, and result (success / canceled / error); persist last-run in the
+  project so it survives reopening.
+- [ ] When `SamBackend.probe()` returns missing, replace the SAM panel body with a
+  one-screen explainer plus 'Install Dependencies' / 'Download Weights' buttons
+  that route to the existing onboarding flow.
+- [ ] Let the user choose the propagation window (start/duration) instead of the
+  hardcoded 5 s from the playhead (`_run_propagation` in `main_window.py`).
+- [ ] Use the annotation's color for saved mask overlays — `_save_mask_rgba`
+  hardcodes cyan, so the SAM panel color choice currently has no effect on masks.
+- [ ] Acceptance: SAM results feel like editable project assets, not one-off
+  hidden outputs.
 
-## Privacy And PHI Review
+## P3 — Privacy and PHI review (trust-critical)
 
 - [ ] Add a guided PHI review mode that steps through timeline sections needing
   review.
@@ -61,41 +78,28 @@ notes or docs instead of expanding this file indefinitely.
 - [ ] Acceptance: before export, the app makes unresolved visual/audio PHI risks
   visible and hard to miss.
 
-## Captions And Transcript
+## P4 — Captions, transcript, and export polish
 
 - [ ] Generate captions from transcript segments.
 - [ ] Add caption preview on the video canvas.
 - [ ] Add caption style controls that are simple and export-safe.
 - [ ] Export captions as SRT and WebVTT.
-- [ ] Acceptance: a user can import or write transcript segments, preview them as
-  captions, and export caption files.
-
-## SAM And Mask Workflow
-
-- [ ] Add named mask objects so users can distinguish multiple segmentations.
-- [ ] Add delete/regenerate controls for masks and propagated masks.
-- [ ] Add a status row in the SAM panel showing last propagation start, end, frames
-  processed, and result (success / canceled / error); persist last-run in the
-  project so it survives reopening.
-- [ ] When `SamBackend.probe()` returns missing, replace the SAM panel body with a
-  one-screen explainer plus 'Install Dependencies' / 'Download Weights' buttons
-  that route to the existing onboarding flow.
-- [ ] Acceptance: SAM results feel like editable project assets, not one-off
-  hidden outputs.
-
-## Export And Distribution
-
 - [ ] Add export history for recent output files.
 - [ ] Add a collapsible 'Advanced' group to `ExportDialog` that exposes CRF, fps,
   target width/height, and audio codec. Defaults stay glued to the selected preset.
 - [ ] Convert `ALPHA_QA_CHECKLIST.md` from a generic template to a per-tag file:
   include the tag SHA, fill date, and results columns. Commit one per release.
 - [ ] Evaluate Intel Mac build support if testers need it.
-- [ ] Acceptance: non-technical testers can install, export, find their files,
-  and report issues with minimal guidance.
+- [ ] Acceptance: a user can import or write transcript segments, preview them as
+  captions, export caption files, and find previous exports without digging.
 
-## Quality And Regression Coverage
+## Quality and regression coverage (continuous — pair with each phase)
 
+- [ ] Add regression tests for the bugs fixed in the 2026-06-09 review:
+  (1) deleting an audio track must not delete unattached transcript segments;
+  (2) timeline Cut must preserve `media_type`/fade fields on the right piece;
+  (3) `ProjectExporter._duration()` must equal content end (no black tail);
+  (4) `ProjectState.from_dict` must tolerate unknown keys from newer saves.
 - [ ] Add a test that calls `MainWindow()` headlessly under
   `QT_QPA_PLATFORM=offscreen`, asserts construction, then switches each of the
   5 right-panel tabs and asserts no exception.
@@ -107,12 +111,14 @@ notes or docs instead of expanding this file indefinitely.
 - [ ] Keep `ruff check src tests` and `python -m pytest tests/ -q` green before
   every release tag.
 
-## Stryker Imaging / Video Integration
+## P5 — Stryker Imaging / Video Integration (parked: needs sample data)
 
 These items target compatibility with Stryker's surgical imaging stack
 (1688 AIM 4K, SDC4K / SDC3, SPY-PHI, Connected OR Hub, Studio3). There is
 no public Stryker SDK; integration is via DICOM, FTP/SMB drop zones, and
-shared file formats. Grouped by user-visible value, highest first.
+shared file formats. **Before building any of this, acquire sample SDC4K /
+Connected OR Hub output files** — banner positions, filename conventions, and
+bundle formats below are all assumptions until verified against real captures.
 
 ### Ingest from Stryker hardware
 
@@ -181,3 +187,16 @@ A surgical-case clip captured on a Stryker 1688 / SDC4K can be imported into
 NeuroEdit, redacted (banner + annotations), and exported back to PACS as a DICOM
 Video instance plus a Structured Report — without leaving the app or touching
 command-line tools.
+
+## Completed (kept for context; details in HANDOFF.md)
+
+- [x] Project Library: duration + media count per row, thumbnails, missing-media
+  indicator, relative timestamps, Reveal in Finder/Explorer, status colors.
+- [x] Annotation workflow: duplicate at playhead (Cmd+D), Delete button in the
+  inspector + Delete/Backspace on canvas, custom label presets persisted to
+  `~/.neuroedit/custom_label_presets.json`, set start/end to playhead.
+- [x] 2026-06-09 review: transcript-deletion bug, Cut losing media_type/fades,
+  export duration ratchet, ffmpeg pipe deadlocks, Windows thumbnail/date bugs,
+  SAM3 frame-loading speedup + 4K downscale, mask-cache memory cap, undo-history
+  noise from draw settings, forward-compatible project loading, HF token
+  masking, env-aware weight-cache path.
