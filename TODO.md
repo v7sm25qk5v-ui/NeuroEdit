@@ -75,8 +75,19 @@ bet and stays parked until sample data and a design pass exist.
   a checkbox in the audio panel; warn on export-with-audio if unset (do not block).
 - [ ] Add 'Reveal Report' and 'Reveal MP4' buttons to the post-export dialog
   (`QDesktopServices.openUrl`).
+- [ ] Add a configurable default storage location. Today
+  `default_project_root()` hardcodes `~/Documents/NeuroEdit/Autosave/`, which on
+  macOS is iCloud-synced when "Desktop & Documents Folders" is on (and OneDrive
+  on Windows) — so PHI in `masks/`/`stills/` of an unsaved scratch project can
+  auto-upload to a personal cloud account. Add a one-time "Where NeuroEdit
+  stores projects" preference (persist in `QSettings("NeuroEdit", "Desktop")`),
+  read it in `default_project_root()`, and surface a first-run prompt that
+  recommends a non-cloud-synced folder (e.g. `~/Library/Application
+  Support/NeuroEdit/`). Per-project Save As already lets users choose a
+  destination; this fixes only the pre-Save-As scratch window.
 - [ ] Acceptance: before export, the app makes unresolved visual/audio PHI risks
-  visible and hard to miss.
+  visible and hard to miss, and PHI never lands in a cloud-synced folder without
+  the user having chosen it.
 
 ## P4 — Captions, transcript, and export polish
 
