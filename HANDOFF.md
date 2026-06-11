@@ -558,11 +558,17 @@ preset-vs-CRF export UX) drove the design choices noted inline below.
   running" (this DID abort a bare script; pytest survived but don't rely
   on it).
 
-## Current state at handoff (updated 2026-06-10, second session)
+## Current state at handoff (updated 2026-06-11)
 
-- `main`: P3 commit `719ce68`, P4 commit `5f58847`, plus the quality/tests
-  commit after it (see `git log`). Local == `origin/main` after push.
+- `main`: P3 commit `719ce68`, P4 commit `5f58847`, quality/tests commit
+  `ffeb7f9`. Local == `origin/main` after push.
 - Version: `0.4.0-alpha` in `neuroedit_desktop/__init__.py`.
+- **Released 2026-06-11**: tag `v0.4.0-alpha` (at `ffeb7f9`) built and
+  published successfully —
+  https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.4.0-alpha
+  with `NeuroEdit-v0.4.0-alpha-macOS-unsigned.dmg` (128 MB), the macOS zip
+  (116 MB), and `NeuroEdit-v0.4.0-alpha-Windows-Setup.exe` (100 MB).
+  Quality workflow was green on the same SHA before tagging.
 - Test suite: **60 passing** (`ruff` clean): 6 original + 13 P1 + 8 P2 +
   9 P3 + 11 P4 captions + 13 quality/regression/headless.
 - Remote auth: SSH remote failed (no key); remote switched to HTTPS
@@ -570,10 +576,11 @@ preset-vs-CRF export UX) drove the design choices noted inline below.
 - Roadmap status: P0 partially owner-blocked (repo visibility, signing, DMG
   smoke test), P1–P4 shipped, P5 (Stryker/DICOM) parked pending sample data.
 - **Immediate next steps:**
-  1. Confirm the GitHub quality workflow is green for the new commits.
-  2. Visual smoke test: first-run storage prompt, guided review, checklist,
-     captions preview/burn-in, export history (offscreen tests can't judge
-     look & feel). Use the new per-tag QA checklist.
-  3. Consider tagging `v0.4.0-alpha` to ship installers with P3+P4.
+  1. ~~Confirm the GitHub quality workflow is green~~ — done, green on `ffeb7f9`.
+  2. Visual smoke test of the v0.4.0-alpha build: first-run storage prompt,
+     guided review, checklist, captions preview/burn-in, export history
+     (offscreen tests can't judge look & feel). Copy the per-tag QA checklist
+     to `qa/QA_v0.4.0-alpha.md` and fill it in.
+  3. ~~Tag `v0.4.0-alpha`~~ — done, released 2026-06-11 (see above).
   4. Owner decisions still pending: repo private, code signing, Intel Mac.
 - Heads-up: always `git fetch` and check HEAD before editing across sessions.
