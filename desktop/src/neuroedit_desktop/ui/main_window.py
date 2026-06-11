@@ -4075,7 +4075,15 @@ class MainWindow(QMainWindow):
         self.panel_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         # Never let the right pane be narrower than its widest panel's content,
         # so panels don't clip / horizontally scroll when the window is resized.
-        panel_min = self.panels.minimumSizeHint().width()
+        # The vertical scrollbar (always present — panels are taller than the
+        # viewport) eats into the viewport width on non-overlay styles, so it
+        # must be part of the minimum or every panel scrolls sideways by
+        # exactly its width.
+        chrome_width = (
+            self.panel_scroll.verticalScrollBar().sizeHint().width()
+            + 2 * self.panel_scroll.frameWidth()
+        )
+        panel_min = self.panels.minimumSizeHint().width() + chrome_width
         self.panel_scroll.setMinimumWidth(panel_min)
         self.panel_scroll.setMinimumHeight(0)
         splitter.addWidget(self.panel_scroll)

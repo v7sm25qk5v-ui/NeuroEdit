@@ -10,6 +10,9 @@ Covers work completed across sessions (accumulated):
 6. **SAM3 first-run download flow** — in-app model download, weight cache management.
 7. **P1 timeline editing + P2 SAM mask workflow** — selection/snapping/rename,
    clinician-style mask list, re-track, status, propagation window, and mask colors.
+8. **P3 privacy/PHI review + P4 captions/export polish** (§11) — guided PHI
+   review, pre-export checklist, storage location, captions with SRT/VTT,
+   export history, advanced export settings, and the quality test batch.
 
 Repo: https://github.com/v7sm25qk5v-ui/NeuroEdit. Default branch `main`.
 **Visibility: still PUBLIC** — recommended to make private (commercialization intent); pending owner action in GitHub settings.
@@ -460,26 +463,117 @@ pass; ruff clean.
   pre-existing `SamSetupDialog` — one of them should be removed.
 - Marker dragging, multi-select, keyboard-delete, snap guide line deferred.
 
-## Current state at handoff (updated 2026-06-10)
+## 11. P3 + P4 feature implementation (2026-06-10, second session)
 
-- HEAD is `422674f` ("fix(sam): save mask PNGs without Pillow") on `main`.
-  Local and remote `origin/main` are in sync after the CI-quality fix.
-- Tags: `v0.2.0-alpha` through `v0.2.5-alpha` are pushed. `v0.3.0-alpha` is
-  also pushed and points at `ed44a6f`, the docs/version commit before the
-  follow-up quality fix.
-- Test suite: **27/27 passing** (`ruff` clean, `py_compile` clean).
-  6 original + 13 P1 timeline tests + 8 P2 SAM tests.
-- CI workflows added: `quality.yml` (ruff + pytest on push to main),
-  `build.yml` (macOS DMG + Windows EXE on `v*` tag, publishes GitHub Release).
+Both remaining roadmap tracks implemented and tested. Market research
+(confirmation-fatigue / soft-stop literature for clinical software; caption
+accessibility conventions; Premiere/Resolve caption-workflow complaints;
+preset-vs-CRF export UX) drove the design choices noted inline below.
+
+### P3 — Privacy and PHI review (`models.py`, `main_window.py`, `editor_panels.py`)
+
+- **Guided PHI Review** (Edit menu → `PhiReviewDialog`): builds one review
+  stop per clip/slide/audio track (sorted by start), seeks the playhead via
+  `seek_requested`, shows a what-to-look-for hint per media kind. Marking
+  every stop reviewed emits `review_completed` → sets
+  `phi_review_confirmed`; any skip leaves it unconfirmed (status-bar message,
+  deliberately no extra modal).
+- **Pre-export checklist** (`ExportChecklistDialog`): single attestation
+  dialog between the Export settings dialog and the save-location picker.
+  Three required checkboxes (PHI review / de-identification / consent) gate
+  Continue; pre-filled from project state so re-exports don't re-ask. The
+  audio item ("audio reviewed for spoken PHI") warns amber but never blocks
+  (per TODO). It **replaces** the old keep-original-audio QMessageBox.
+  A "Run Guided PHI Review…" button appears when PHI review is unconfirmed
+  (sets `guided_review_requested`, caller opens the stepper).
+- **`audio_reviewed_for_phi`** on `ProjectState` (+ `from_dict`); checkbox in
+  the Audio panel; new preflight warning; new line in the export report.
+- **Reveal MP4 / Reveal Report** buttons on the export-complete box via
+  `MainWindow._reveal_path` (`open -R` on macOS, `explorer /select,` on
+  Windows, folder-open fallback).
+- **Configurable storage root**: `default_project_root()` now reads
+  `QSettings storage/projectRoot`; `recommended_project_root()` returns a
+  non-cloud-synced per-OS location (`~/Library/Application Support/NeuroEdit/
+  Autosave`, `%LOCALAPPDATA%`, `~/.local/share`). `StorageLocationDialog`
+  runs once on first launch (`storage/promptShown`, chained before the
+  tutorial prompt so modals never stack) and any time from File → Project
+  Storage Location…. Changing it re-targets the store only for an untouched
+  scratch project; existing autosave contents are not migrated (deferred).
+- 9 tests in `tests/test_phi_review.py`.
+
+### P4 — Captions + export polish (`captions.py` NEW, `exporter.py`, UI files)
+
+- **`captions.py`**: `build_caption_cues` converts transcript segments into
+  cues (≤42 chars/line, ≤2 lines/cue, long segments split sequentially with
+  duration proportional to chunk characters, `Speaker: ` prefixes, empty
+  segments skipped); `cues_to_srt` / `cues_to_vtt`; `paint_caption` is the
+  ONE renderer used by both the canvas item and the exporter (white bold
+  text, optional #000 @165 alpha rounded box, 5% safe-area margin,
+  bottom/top center, font = fraction of frame height).
+- **Canvas preview**: `AnnotationGraphicsItem._paint_captions` (gated on
+  `project.captions_enabled`, cue list memoized on a segment fingerprint).
+  Paints after fade, before redactions, and also on the full-frame-slide
+  early-return path.
+- **Burn-in export**: `ExportSettings.burn_captions`. Cue spans force
+  `_segment_needs_render` True and add `_timeline_boundaries` entries so
+  stream-copy can never drop captions. Painted under redactions.
+- **Caption style fields** on `ProjectState`: `captions_enabled`,
+  `caption_size` (small/medium/large), `caption_position` (bottom/top),
+  `caption_background` — controls in the Audio panel under "Captions".
+- **Sidecar export**: File → Export Captions (SRT/VTT)… +
+  `AudioPanel.export_captions_requested` button. Extension follows the
+  chosen filter.
+- **Export history**: `record_export_history`/`load_export_history`
+  (QSettings JSON, deduped by path, capped 20) recorded on every successful
+  export; File → Export History… (`ExportHistoryDialog`) lists name /
+  relative time / preset label / folder with Reveal File + Reveal Report;
+  missing files grayed.
+- **Advanced export group** (collapsed by default): CRF 12–32, fps
+  24/25/30/50/60, width/height spinners, AAC bitrate 128/192/256 (new
+  `ExportSettings.audio_bitrate_k`, used by `_mux_audio`). `_preset_changed`
+  re-glues every advanced field to the preset.
+- `ALPHA_QA_CHECKLIST.md` → per-tag template (tag/SHA/date/tester header,
+  result columns) including the new caption + PHI flows.
+- 11 tests in `tests/test_captions.py`.
+
+### Quality/regression coverage (TODO "Quality" section)
+
+- `tests/test_regressions.py`: audio-track delete keeps unattached
+  transcripts; Cut preserves `media_type` and moves fade-out to the right
+  piece; `ProjectExporter._duration()` ignores the ratcheted
+  `project.duration`; `from_dict` drops unknown top-level and nested keys;
+  ExportDialog defaults (mute source audio) yield zero audio sources.
+- `tests/test_main_window_headless.py`: full `MainWindow()` construction
+  (autosave root redirected to tmp via `storage/projectRoot` — tests never
+  touch real storage), 5-panel switching, resize at 1085×600/1280×720/
+  1920×1080 asserting `panel_scroll.horizontalScrollBar().maximum() == 0`,
+  autosave round trip, `_new_project` reset, export-report PHI flag block.
+- **Real bug found by the resize test**: `panel_min` ignored the vertical
+  scrollbar + QScrollArea frame, so the right panel always scrolled
+  sideways by ~20 px whenever the vertical scrollbar was visible. Fixed in
+  `_build_central_ui` (adds `verticalScrollBar().sizeHint().width() +
+  2*frameWidth()`); window minimum grows correspondingly.
+- Teardown note: the window fixture waits for `_sam_probe_thread` before
+  closing, else Qt aborts with "QThread: Destroyed while thread is still
+  running" (this DID abort a bare script; pytest survived but don't rely
+  on it).
+
+## Current state at handoff (updated 2026-06-10, second session)
+
+- `main`: P3 commit `719ce68`, P4 commit `5f58847`, plus the quality/tests
+  commit after it (see `git log`). Local == `origin/main` after push.
+- Version: `0.4.0-alpha` in `neuroedit_desktop/__init__.py`.
+- Test suite: **60 passing** (`ruff` clean): 6 original + 13 P1 + 8 P2 +
+  9 P3 + 11 P4 captions + 13 quality/regression/headless.
+- Remote auth: SSH remote failed (no key); remote switched to HTTPS
+  (`https://github.com/v7sm25qk5v-ui/NeuroEdit.git`), PAT cached in keychain.
+- Roadmap status: P0 partially owner-blocked (repo visibility, signing, DMG
+  smoke test), P1–P4 shipped, P5 (Stryker/DICOM) parked pending sample data.
 - **Immediate next steps:**
-  1. Confirm GitHub quality/build actions are green after `422674f`.
-  2. Consider whether to move/recreate `v0.3.0-alpha` if the release should
-     include the Pillow-free mask PNG fix; otherwise leave the tag as-is and
-     cut the next patch tag from `main`.
-  3. Smoke-test the app visually (P2 SamPanel structural change may affect
-     right-pane minimum width; duplicate explainer + SamSetupDialog on
-     deps-but-no-weights startup).
-  4. Next dev priority: **P3 — PHI review features** (configurable default
-     storage location is the safest starting point; was explicitly requested
-     and only added to roadmap, not implemented).
+  1. Confirm the GitHub quality workflow is green for the new commits.
+  2. Visual smoke test: first-run storage prompt, guided review, checklist,
+     captions preview/burn-in, export history (offscreen tests can't judge
+     look & feel). Use the new per-tag QA checklist.
+  3. Consider tagging `v0.4.0-alpha` to ship installers with P3+P4.
+  4. Owner decisions still pending: repo private, code signing, Intel Mac.
 - Heads-up: always `git fetch` and check HEAD before editing across sessions.

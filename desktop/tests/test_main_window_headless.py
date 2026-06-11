@@ -1,0 +1,140 @@
+"""Full headless MainWindow construction: panel switching, resize without
+right-panel horizontal scroll, autosave round trip, new-project reset, and the
+export report PHI flag block."""
+from __future__ import annotations
+
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import pytest
+from PySide6.QtCore import QSettings
+from PySide6.QtWidgets import QApplication
+
+from neuroedit_desktop.models import ProjectState, VideoClip, new_id
+from neuroedit_desktop.project_store import ProjectStore
+from neuroedit_desktop.sam_backend import SamBackend, SamBackendInfo
+from neuroedit_desktop.ui.main_window import MainWindow
+
+
+@pytest.fixture(scope="module")
+def app():
+    instance = QApplication.instance() or QApplication([])
+    yield instance
+
+
+@pytest.fixture()
+def window(app, tmp_path, monkeypatch):
+    """A real MainWindow whose autosave root is redirected to tmp_path so tests
+    never touch the user's project storage. SamBackend.probe is stubbed: the
+    real probe imports torch on a worker thread (minutes-cold on an iCloud
+    venv), which both stalls the suite and leaves a live QThread at teardown."""
+    monkeypatch.setattr(
+        SamBackend,
+        "probe",
+        lambda self: SamBackendInfo("missing", "none", "stubbed for tests"),
+    )
+    settings = QSettings("NeuroEdit", "Desktop")
+    original_root = settings.value("storage/projectRoot", "")
+    original_prompt = settings.value("storage/promptShown", False, type=bool)
+    original_tutorial = settings.value("tutorial/seen", False, type=bool)
+    settings.setValue("storage/projectRoot", str(tmp_path / "Autosave"))
+    # First-run prompts are modal; they must never fire inside a test run.
+    settings.setValue("storage/promptShown", True)
+    settings.setValue("tutorial/seen", True)
+    win = MainWindow()
+    try:
+        yield win
+    finally:
+        # Let the (stubbed, fast) SAM probe thread finish before the window
+        # dies or Qt aborts: "QThread: Destroyed while thread is still running".
+        QApplication.processEvents()
+        probe_thread = getattr(win, "_sam_probe_thread", None)
+        if probe_thread is not None:
+            probe_thread.quit()
+            probe_thread.wait(5_000)
+        win.close()
+        settings.setValue("storage/projectRoot", original_root)
+        settings.setValue("storage/promptShown", original_prompt)
+        settings.setValue("tutorial/seen", original_tutorial)
+
+
+def test_construct_and_switch_all_panels(window, app):
+    for panel in ("sam", "labels", "tips", "slides", "audio"):
+        window._set_panel(panel)
+        app.processEvents()
+        assert window.project.active_panel == panel
+
+
+@pytest.mark.parametrize("size", [(1085, 600), (1280, 720), (1920, 1080)])
+def test_right_panel_never_scrolls_horizontally(window, app, size):
+    width, height = size
+    window.resize(width, height)
+    window.show()
+    app.processEvents()
+    for panel in ("sam", "labels", "tips", "slides", "audio"):
+        window._set_panel(panel)
+        app.processEvents()
+        assert window.panel_scroll.horizontalScrollBar().maximum() == 0, (
+            f"{panel} panel scrolls horizontally at {width}x{height}"
+        )
+
+
+def test_autosave_restore_round_trip(tmp_path):
+    store = ProjectStore.create(tmp_path / "proj")
+    project = ProjectState(project_name="Round Trip")
+    project.clips.append(
+        VideoClip(id=new_id(), path="/tmp/a.mp4", name="A", duration=4.0,
+                  start_time=0.0, trim_start=0.0, trim_end=4.0)
+    )
+    project.captions_enabled = True
+    store.save(project)
+    assert store.project_path.exists()
+    _store2, restored = ProjectStore.open(store.project_path)
+    assert restored.project_name == "Round Trip"
+    assert len(restored.clips) == 1
+    assert restored.captions_enabled is True
+
+
+def test_new_project_resets_state(window, app):
+    window.project.project_name = "Old Case"
+    window.project.clips.append(
+        VideoClip(id=new_id(), path="/tmp/a.mp4", name="A", duration=4.0,
+                  start_time=0.0, trim_start=0.0, trim_end=4.0)
+    )
+    window.dirty = False  # skip the save prompt
+    window._new_project()
+    assert window.project.project_name == "Untitled Case"
+    assert window.project.clips == []
+    assert window.store.project_path.name == "project.json"
+
+
+def test_export_report_contains_phi_flag_block(window, tmp_path):
+    project = ProjectState(project_name="Report Case")
+    project.consent_confirmed = True
+    project.deidentified_confirmed = True
+    project.phi_review_confirmed = True
+    project.audio_reviewed_for_phi = True
+    window._export_report_project = project
+    output = tmp_path / "out.mp4"
+    report_path = window._write_export_report(output, ["note one"])
+    assert report_path == tmp_path / "out.export-report.txt"
+    text = report_path.read_text(encoding="utf-8")
+    assert "Consent/authorization confirmed: True" in text
+    assert "De-identified: True" in text
+    assert "PHI review completed: True" in text
+    assert "Audio reviewed for spoken PHI: True" in text
+    assert "- note one" in text
+
+
+def test_export_settings_defaults_have_no_audio(tmp_path):
+    from neuroedit_desktop.exporter import ExportSettings, ProjectExporter
+
+    settings = ExportSettings(
+        output_path=tmp_path / "o.mp4", width=1280, height=720,
+        fps=30, crf=20, label="defaults",
+    )
+    exporter = ProjectExporter(ProjectState(), settings)
+    # An empty project (and any project without readable audio) yields no
+    # audio sources, so the muxer is skipped and the MP4 has no audio stream.
+    assert exporter._audio_sources("ffmpeg") == []

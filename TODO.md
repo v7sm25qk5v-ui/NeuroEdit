@@ -13,26 +13,17 @@ bet and stays parked until sample data and a design pass exist.
 
 ## P0 — Unblock and ship the current alpha
 
-- [ ] **Fix the dev environment (blocker).** `desktop/.venv` →
-  `~/Documents/Claude/venv` is broken: its interpreter symlinks point at a
-  Python 3.13 framework that has been uninstalled
-  (`/Library/Frameworks/Python.framework/Versions/3.13` is gone). The app and
-  test suite cannot run. Reinstall Python 3.12 (preferred per CLAUDE.md) or
-  3.13, then recreate the venv at the same location and
-  `pip install -e ".[sam]"`. Do not relocate the venv (intentional iCloud
-  placement).
-- [ ] Run `ruff check src tests` and `python -m pytest tests/ -q` once the venv
-  is restored — the 2026-06-09 review session changed exporter/undo/SAM paths
-  and was verified by lint + syntax check only.
-- [ ] Commit the working-tree changes (review-session fixes + Project Library +
-  annotation workflow) and tag `v0.2.3-alpha` (bump
-  `neuroedit_desktop.__version__` if the tag name differs).
+- [x] Fix the dev environment — Python 3.13 reinstalled 2026-06-10; venv
+  revived in place, full suite runs.
+- [x] Run `ruff check src tests` and `python -m pytest tests/ -q` — green and
+  kept green through P1–P4.
+- [x] Commit the working-tree changes — landed across the v0.3.x commits.
 - [ ] Verify the generated macOS DMG launches, imports media, plays/scrubs, and
   exports an MP4 plus `.export-report.txt`.
 - [ ] Decide when to make the GitHub repository private (recommended —
-  commercialization intent; see HANDOFF).
+  commercialization intent; see HANDOFF). **Owner action.**
 - [ ] Decide when to add Windows Authenticode signing and macOS Developer ID
-  signing/notarization.
+  signing/notarization. **Owner action.**
 
 ## P1 — Timeline editing gaps — ✅ SHIPPED 2026-06-10
 
@@ -52,61 +43,40 @@ track-window UI prefs; disable mask-list rows while a SAM job is running;
 consider dropping the auto-shown SamSetupDialog now that the explainer covers
 ready-but-no-weights (currently both appear).
 
-## P3 — Privacy and PHI review (trust-critical)
+## P3 — Privacy and PHI review — ✅ SHIPPED 2026-06-10
 
-- [ ] Add a guided PHI review mode that steps through timeline sections needing
-  review.
-- [ ] Show a modal pre-export checklist that requires explicit acknowledgement of
-  PHI review, de-identification, and consent before the export job starts. Write
-  the same flags to the export report.
-- [ ] Add an explicit `audio_reviewed_for_phi` flag to project state, surfaced as
-  a checkbox in the audio panel; warn on export-with-audio if unset (do not block).
-- [ ] Add 'Reveal Report' and 'Reveal MP4' buttons to the post-export dialog
-  (`QDesktopServices.openUrl`).
-- [ ] Add a configurable default storage location. Today
-  `default_project_root()` hardcodes `~/Documents/NeuroEdit/Autosave/`, which on
-  macOS is iCloud-synced when "Desktop & Documents Folders" is on (and OneDrive
-  on Windows) — so PHI in `masks/`/`stills/` of an unsaved scratch project can
-  auto-upload to a personal cloud account. Add a one-time "Where NeuroEdit
-  stores projects" preference (persist in `QSettings("NeuroEdit", "Desktop")`),
-  read it in `default_project_root()`, and surface a first-run prompt that
-  recommends a non-cloud-synced folder (e.g. `~/Library/Application
-  Support/NeuroEdit/`). Per-project Save As already lets users choose a
-  destination; this fixes only the pre-Save-As scratch window.
-- [ ] Acceptance: before export, the app makes unresolved visual/audio PHI risks
-  visible and hard to miss, and PHI never lands in a cloud-synced folder without
-  the user having chosen it.
+All five items implemented (guided PHI review mode, pre-export attestation
+checklist with flags written to the export report, `audio_reviewed_for_phi`
+flag + Audio-panel checkbox + warn-not-block on export-with-audio, Reveal
+MP4/Report buttons, configurable storage location with first-run prompt
+recommending a non-cloud-synced folder); see Completed section. Follow-ups
+deliberately deferred: per-stop review progress persistence (guided review
+state is per-session; completion sets `phi_review_confirmed`), migrating
+existing autosave contents when the storage root changes.
 
-## P4 — Captions, transcript, and export polish
+## P4 — Captions, transcript, and export polish — ✅ SHIPPED 2026-06-10
 
-- [ ] Generate captions from transcript segments.
-- [ ] Add caption preview on the video canvas.
-- [ ] Add caption style controls that are simple and export-safe.
-- [ ] Export captions as SRT and WebVTT.
-- [ ] Add export history for recent output files.
-- [ ] Add a collapsible 'Advanced' group to `ExportDialog` that exposes CRF, fps,
-  target width/height, and audio codec. Defaults stay glued to the selected preset.
-- [ ] Convert `ALPHA_QA_CHECKLIST.md` from a generic template to a per-tag file:
-  include the tag SHA, fill date, and results columns. Commit one per release.
+All items implemented except Intel Mac evaluation (captions from transcript,
+canvas preview, simple export-safe style controls, SRT + WebVTT export,
+export history, collapsible Advanced export group, per-tag QA checklist
+template); see Completed section.
+
 - [ ] Evaluate Intel Mac build support if testers need it.
-- [ ] Acceptance: a user can import or write transcript segments, preview them as
-  captions, export caption files, and find previous exports without digging.
 
 ## Quality and regression coverage (continuous — pair with each phase)
 
-- [ ] Add regression tests for the bugs fixed in the 2026-06-09 review:
-  (1) deleting an audio track must not delete unattached transcript segments;
-  (2) timeline Cut must preserve `media_type`/fade fields on the right piece;
-  (3) `ProjectExporter._duration()` must equal content end (no black tail);
-  (4) `ProjectState.from_dict` must tolerate unknown keys from newer saves.
-- [ ] Add a test that calls `MainWindow()` headlessly under
-  `QT_QPA_PLATFORM=offscreen`, asserts construction, then switches each of the
-  5 right-panel tabs and asserts no exception.
-- [ ] Add tests for autosave restore and new-project behavior.
-- [ ] Add two exporter tests: (1) `ExportSettings()` defaults produce no audio
-  stream; (2) export writes a `*.export-report.txt` with the PHI/consent flag block.
-- [ ] Add a regression test that constructs `MainWindow` headlessly at 1085×600,
-  1280×720, and 1920×1080 and asserts no horizontal scrollbar on the right panel.
+- [x] Regression tests for the 2026-06-09 review bugs (audio-track delete,
+  Cut media_type/fades, exporter duration, from_dict tolerance) —
+  `tests/test_regressions.py`.
+- [x] Headless `MainWindow()` construction + 5-panel switch test —
+  `tests/test_main_window_headless.py`.
+- [x] Autosave restore and new-project tests.
+- [x] Exporter tests: defaults produce no audio stream; export report
+  contains the PHI/consent flag block.
+- [x] Resize test at 1085×600 / 1280×720 / 1920×1080 asserting no horizontal
+  scrollbar on the right panel (found and fixed a real bug: the panel
+  minimum width ignored the vertical scrollbar + frame, so every panel
+  scrolled sideways by ~20 px whenever the vertical scrollbar was visible).
 - [ ] Keep `ruff check src tests` and `python -m pytest tests/ -q` green before
   every release tag.
 
@@ -206,6 +176,26 @@ command-line tools.
   prior zoom/scroll); snapping to playhead/edges/markers/t=0 with 10-screen-px
   threshold, Shift momentary bypass, magnet toggle (default on). Playhead
   scrubbing never snaps. 13 new tests in `tests/test_timeline_editing.py`.
+- [x] P3 privacy/PHI review (2026-06-10): guided PHI review stepper (Edit
+  menu) over clips/slides/audio with what-to-look-for hints — completing it
+  sets `phi_review_confirmed`; single pre-export attestation checklist
+  (PHI/de-id/consent required, audio warn-only) pre-filled from project state,
+  flags written to the export report; `audio_reviewed_for_phi` flag +
+  Audio-panel checkbox + preflight warning; Reveal MP4/Reveal Report on the
+  completion dialog; configurable storage root (`storage/projectRoot` in
+  QSettings) with first-run prompt recommending non-cloud-synced folders.
+  UX grounded in clinical-software research (soft stops over hard stops,
+  alert-fatigue avoidance, human-in-the-loop review). 9 tests in
+  `tests/test_phi_review.py`.
+- [x] P4 captions + export polish (2026-06-10): `captions.py` turns transcript
+  segments into accessibility-conventional cues (≤42 chars/line, ≤2 lines,
+  proportional split timing, speaker prefixes) with SRT/WebVTT export and a
+  shared canvas/exporter painter (white-on-dark box, safe-area margins);
+  caption style fields + Audio-panel controls + live preview; burn-in export
+  option that forces re-render over cue spans; File → Export Captions and
+  Export History (QSettings, Reveal buttons); collapsible Advanced export
+  group (CRF/fps/size/AAC bitrate) glued to presets; per-tag QA checklist
+  template. 11 tests in `tests/test_captions.py`.
 - [x] P2 SAM mask workflow (2026-06-10): 3D-Slicer-style mask list in the SAM
   panel (color swatch, inline rename, visibility checkbox, context menu);
   delete routes through undo-safe `_delete_annotation`, orphan mask PNGs swept
