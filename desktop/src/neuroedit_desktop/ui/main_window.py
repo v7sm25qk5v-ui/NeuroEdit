@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QProgressDialog,
     QPushButton,
+    QRadioButton,
     QScrollArea,
     QSlider,
     QSplitter,
@@ -163,8 +164,33 @@ def _save_custom_presets(presets: list[str]) -> None:
         pass
 
 
-def default_project_root() -> Path:
+def legacy_project_root() -> Path:
     return Path.home() / "Documents" / "NeuroEdit" / "Autosave"
+
+
+def recommended_project_root() -> Path:
+    """A per-user location that cloud-sync services do not mirror by default.
+    ~/Documents can be auto-uploaded by iCloud ("Desktop & Documents Folders")
+    or OneDrive, which would silently push PHI in masks/stills of an unsaved
+    scratch project to a personal cloud account."""
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "NeuroEdit" / "Autosave"
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA")
+        if base:
+            return Path(base) / "NeuroEdit" / "Autosave"
+        return Path.home() / "AppData" / "Local" / "NeuroEdit" / "Autosave"
+    return Path.home() / ".local" / "share" / "neuroedit" / "Autosave"
+
+
+def default_project_root() -> Path:
+    """Where unsaved scratch projects autosave. Configurable via the one-time
+    storage prompt / File menu; defaults to the legacy Documents location for
+    existing users who never chose."""
+    stored = QSettings("NeuroEdit", "Desktop").value("storage/projectRoot", "")
+    if stored:
+        return Path(str(stored))
+    return legacy_project_root()
 
 
 def _distance_to_segment(
@@ -2431,6 +2457,345 @@ class SamSetupDialog(QDialog):
         return self._token_edit.text().strip()
 
 
+class StorageLocationDialog(QDialog):
+    """One-time / on-demand chooser for where unsaved scratch projects autosave.
+    Exists because ~/Documents (the legacy default) is cloud-synced on many
+    machines, which can silently upload PHI before the user ever hits Save As."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Where NeuroEdit Stores Projects")
+        self.setMinimumWidth(520)
+
+        title = QLabel("Where should NeuroEdit store unsaved projects?")
+        title.setProperty("role", "title")
+        title.setWordWrap(True)
+        intro = QLabel(
+            "Until you choose Save As, new projects autosave here — including any "
+            "video stills and masks, which may contain patient information. "
+            "Folders synced to iCloud or OneDrive (often ~/Documents) can upload "
+            "that content to a personal cloud account automatically."
+        )
+        intro.setProperty("role", "muted")
+        intro.setWordWrap(True)
+
+        recommended = recommended_project_root()
+        legacy = legacy_project_root()
+        current = default_project_root()
+
+        self.recommended_radio = QRadioButton(
+            f"Recommended — local app folder (not cloud-synced)\n{recommended}"
+        )
+        self.legacy_radio = QRadioButton(
+            f"Documents folder (may be iCloud/OneDrive synced)\n{legacy}"
+        )
+        self.custom_radio = QRadioButton("Choose a folder…")
+        self.custom_path_label = QLabel("")
+        self.custom_path_label.setProperty("role", "muted")
+        self.custom_path_label.setWordWrap(True)
+        self._custom_path: Path | None = None
+
+        if current == recommended:
+            self.recommended_radio.setChecked(True)
+        elif current == legacy:
+            self.recommended_radio.setChecked(True)  # nudge toward the safe choice
+        else:
+            self.custom_radio.setChecked(True)
+            self._custom_path = current
+            self.custom_path_label.setText(str(current))
+
+        self.custom_radio.toggled.connect(self._pick_custom)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Use This Location")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
+        layout.addWidget(title)
+        layout.addWidget(intro)
+        layout.addWidget(self.recommended_radio)
+        layout.addWidget(self.legacy_radio)
+        layout.addWidget(self.custom_radio)
+        layout.addWidget(self.custom_path_label)
+        layout.addWidget(buttons)
+
+    def _pick_custom(self, checked: bool) -> None:
+        if not checked or self._custom_path is not None:
+            return
+        folder = QFileDialog.getExistingDirectory(
+            self, "Choose Project Storage Folder", str(Path.home())
+        )
+        if folder:
+            self._custom_path = Path(folder) / "NeuroEdit" / "Autosave"
+            self.custom_path_label.setText(str(self._custom_path))
+        else:
+            self.recommended_radio.setChecked(True)
+
+    def chosen_root(self) -> Path:
+        if self.custom_radio.isChecked() and self._custom_path is not None:
+            return self._custom_path
+        if self.legacy_radio.isChecked():
+            return legacy_project_root()
+        return recommended_project_root()
+
+
+class PhiReviewDialog(QDialog):
+    """Guided PHI review: steps the playhead through each timeline item that
+    needs human eyes (clips, stills/slides, audio) with a what-to-look-for hint.
+    Marking every stop reviewed sets project.phi_review_confirmed."""
+
+    review_completed = Signal()
+    seek_requested = Signal(float)
+
+    def __init__(self, project: ProjectState, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Guided PHI Review")
+        self.setMinimumWidth(460)
+        self.stops = self._build_stops(project)
+        self._index = 0
+        self._reviewed: set[int] = set()
+
+        self.progress_label = QLabel()
+        self.progress_label.setProperty("role", "title")
+        self.item_label = QLabel()
+        self.item_label.setWordWrap(True)
+        self.hint_label = QLabel()
+        self.hint_label.setProperty("role", "muted")
+        self.hint_label.setWordWrap(True)
+
+        self.back_btn = QPushButton("◀ Back")
+        self.back_btn.clicked.connect(self._go_back)
+        self.skip_btn = QPushButton("Skip")
+        self.skip_btn.setToolTip("Move on without marking this section reviewed.")
+        self.skip_btn.clicked.connect(self._go_next)
+        self.mark_btn = QPushButton("Mark Reviewed, Next ▶")
+        self.mark_btn.setProperty("variant", "cyan")
+        self.mark_btn.clicked.connect(self._mark_and_next)
+
+        nav = QHBoxLayout()
+        nav.addWidget(self.back_btn)
+        nav.addStretch(1)
+        nav.addWidget(self.skip_btn)
+        nav.addWidget(self.mark_btn)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(10)
+        layout.addWidget(self.progress_label)
+        layout.addWidget(self.item_label)
+        layout.addWidget(self.hint_label)
+        layout.addLayout(nav)
+        self._show_stop()
+
+    @staticmethod
+    def _build_stops(project: ProjectState) -> list[tuple[str, str, float]]:
+        """(label, hint, seek_time) per timeline item needing review."""
+        stops: list[tuple[str, str, float]] = []
+        clip_hint = (
+            "Scrub through this clip. Look for burned-in patient banners, names, "
+            "MRNs, dates, faces, tattoos, or room displays. Cover anything found "
+            "with the Redact tool."
+        )
+        for clip in sorted(project.clips, key=lambda c: c.start_time):
+            span = (
+                f"{format_time(clip.start_time)}–"
+                f"{format_time(clip.start_time + clip.display_duration)}"
+            )
+            kind = "Still image" if clip.media_type == "image" else "Video clip"
+            stops.append((f"{kind} “{clip.name}” ({span})", clip_hint, clip.start_time))
+        slide_hint = (
+            "Read every line of slide text and any slide image for patient "
+            "identifiers, case numbers, or dates."
+        )
+        for slide in sorted(project.slides, key=lambda s: s.start_time):
+            stops.append(
+                (
+                    f"Slide “{slide.title or 'Untitled'}” ({format_time(slide.start_time)})",
+                    slide_hint,
+                    slide.start_time,
+                )
+            )
+        audio_hint = (
+            "Listen to the narration/audio for spoken identifiers — patient name, "
+            "MRN, date of birth, staff full names. The Redact tool does not cover "
+            "audio; re-record or remove the track if needed."
+        )
+        for track in sorted(project.audio_tracks, key=lambda t: t.start_time):
+            stops.append(
+                (
+                    f"Audio track “{track.name}” ({format_time(track.start_time)})",
+                    audio_hint,
+                    track.start_time,
+                )
+            )
+        return stops
+
+    def _show_stop(self) -> None:
+        total = len(self.stops)
+        if total == 0:
+            self.progress_label.setText("Nothing to review")
+            self.item_label.setText("This project has no clips, slides, or audio yet.")
+            self.hint_label.setText("")
+            self.mark_btn.setEnabled(False)
+            self.skip_btn.setEnabled(False)
+            self.back_btn.setEnabled(False)
+            return
+        if self._index >= total:
+            self._finish()
+            return
+        label, hint, seek_time = self.stops[self._index]
+        reviewed = " ✓ reviewed" if self._index in self._reviewed else ""
+        self.progress_label.setText(f"Section {self._index + 1} of {total}{reviewed}")
+        self.item_label.setText(label)
+        self.hint_label.setText(hint)
+        self.back_btn.setEnabled(self._index > 0)
+        self.seek_requested.emit(seek_time)
+
+    def _go_back(self) -> None:
+        if self._index > 0:
+            self._index -= 1
+            self._show_stop()
+
+    def _go_next(self) -> None:
+        self._index += 1
+        self._show_stop()
+
+    def _mark_and_next(self) -> None:
+        self._reviewed.add(self._index)
+        self._go_next()
+
+    def _finish(self) -> None:
+        # No extra pop-up here: the caller surfaces the outcome in the status
+        # bar, and stacking a second modal on dialog close trains users to
+        # click through (confirmation fatigue).
+        total = len(self.stops)
+        if len(self._reviewed) == total and total > 0:
+            self.review_completed.emit()
+            self.accept()
+        else:
+            self.reject()
+
+
+class ExportChecklistDialog(QDialog):
+    """Pre-export attestation: one concise dialog (not a chain of pop-ups) that
+    requires the three trust-critical confirmations before the export job starts.
+    The audio item warns but never blocks. State is pre-filled from the project
+    so re-exports don't re-ask what was already confirmed."""
+
+    def __init__(
+        self,
+        project: ProjectState,
+        *,
+        export_includes_audio: bool,
+        keeps_source_audio: bool,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Before You Export")
+        self.setMinimumWidth(500)
+
+        title = QLabel("Confirm before exporting")
+        title.setProperty("role", "title")
+        intro = QLabel(
+            "These confirmations are saved with the project and written into the "
+            "export report next to the MP4."
+        )
+        intro.setProperty("role", "muted")
+        intro.setWordWrap(True)
+
+        self.phi_check = QCheckBox(
+            "I reviewed the full timeline for on-screen PHI\n"
+            "(names, MRNs, dates, faces, monitors, paperwork)"
+        )
+        self.phi_check.setChecked(project.phi_review_confirmed)
+        self.deid_check = QCheckBox(
+            "De-identification is complete — redactions cover\nany identifiers found"
+        )
+        self.deid_check.setChecked(project.deidentified_confirmed)
+        self.consent_check = QCheckBox(
+            "Patient consent or institutional authorization\nis in place for this use"
+        )
+        self.consent_check.setChecked(project.consent_confirmed)
+
+        self.guided_btn = QPushButton("Run Guided PHI Review…")
+        self.guided_btn.setVisible(not project.phi_review_confirmed)
+        self.guided_review_requested = False
+        self.guided_btn.clicked.connect(self._request_guided_review)
+
+        self.audio_check = QCheckBox("The audio was reviewed for spoken PHI")
+        self.audio_check.setChecked(project.audio_reviewed_for_phi)
+        self.audio_warning = QLabel()
+        self.audio_warning.setWordWrap(True)
+        self.audio_warning.setStyleSheet("color: #f59e0b;")
+        audio_note = (
+            "This export includes audio. Spoken identifiers (patient name, MRN, "
+            "date of birth) are not covered by the Redact tool."
+        )
+        if keeps_source_audio:
+            audio_note += " Original operating-room clip audio is being kept."
+        self.audio_warning.setText(audio_note)
+        self._export_includes_audio = export_includes_audio
+        self.audio_check.setVisible(export_includes_audio)
+        self.audio_warning.setVisible(export_includes_audio)
+        self.audio_check.toggled.connect(self._update_audio_warning)
+        self._update_audio_warning()
+
+        for check in (self.phi_check, self.deid_check, self.consent_check):
+            check.toggled.connect(self._update_ok_enabled)
+
+        self.buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok
+        )
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Continue to Export")
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
+        layout.addWidget(title)
+        layout.addWidget(intro)
+        layout.addWidget(self.phi_check)
+        layout.addWidget(self.guided_btn)
+        layout.addWidget(self.deid_check)
+        layout.addWidget(self.consent_check)
+        layout.addWidget(self.audio_warning)
+        layout.addWidget(self.audio_check)
+        layout.addWidget(self.buttons)
+        self._update_ok_enabled()
+
+    def _request_guided_review(self) -> None:
+        self.guided_review_requested = True
+        self.reject()
+
+    def _update_ok_enabled(self) -> None:
+        required_ok = (
+            self.phi_check.isChecked()
+            and self.deid_check.isChecked()
+            and self.consent_check.isChecked()
+        )
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(required_ok)
+
+    def _update_audio_warning(self) -> None:
+        # Reviewed audio doesn't need the amber warning anymore.
+        if self.audio_check.isChecked():
+            self.audio_warning.setStyleSheet("color: #6b7280;")
+        else:
+            self.audio_warning.setStyleSheet("color: #f59e0b;")
+
+    def apply_to_project(self, project: ProjectState) -> None:
+        project.phi_review_confirmed = self.phi_check.isChecked()
+        project.deidentified_confirmed = self.deid_check.isChecked()
+        project.consent_confirmed = self.consent_check.isChecked()
+        if self._export_includes_audio:
+            project.audio_reviewed_for_phi = self.audio_check.isChecked()
+
+
 class ExportDialog(QDialog):
     PRESETS = [
         (
@@ -3013,6 +3378,12 @@ class MainWindow(QMainWindow):
         self.delete_annotation_action = QAction("Delete Annotation", self)
         self.delete_annotation_action.triggered.connect(self._delete_selected_annotation)
 
+        self.phi_review_action = QAction("Guided PHI Review…", self)
+        self.phi_review_action.triggered.connect(self._start_phi_review)
+
+        self.storage_location_action = QAction("Project Storage Location…", self)
+        self.storage_location_action.triggered.connect(self._change_storage_location)
+
         self.new_action.triggered.connect(self._new_project)
         self.open_action.triggered.connect(self._open_project)
         self.open_library_action.triggered.connect(self._open_project_library)
@@ -3038,6 +3409,8 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(self.import_video_action)
         file_menu.addAction(self.import_image_action)
+        file_menu.addSeparator()
+        file_menu.addAction(self.storage_location_action)
         self._rebuild_recent_menu()
 
         edit_menu = menubar.addMenu("Edit")
@@ -3046,6 +3419,8 @@ class MainWindow(QMainWindow):
         edit_menu.addSeparator()
         edit_menu.addAction(self.duplicate_annotation_action)
         edit_menu.addAction(self.delete_annotation_action)
+        edit_menu.addSeparator()
+        edit_menu.addAction(self.phi_review_action)
 
         help_menu = menubar.addMenu("Help")
         help_menu.addAction(self.tutorial_action)
@@ -3787,7 +4162,52 @@ class MainWindow(QMainWindow):
         overlay.finished.connect(lambda: setattr(self, "_tutorial_overlay", None))
         self._tutorial_overlay = overlay
 
+    def _maybe_prompt_storage_location(self) -> None:
+        settings = QSettings("NeuroEdit", "Desktop")
+        if settings.value("storage/projectRoot", ""):
+            return
+        if settings.value("storage/promptShown", False, type=bool):
+            return
+        settings.setValue("storage/promptShown", True)
+        self._change_storage_location()
+
+    def _change_storage_location(self) -> None:
+        dialog = StorageLocationDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        root = dialog.chosen_root()
+        QSettings("NeuroEdit", "Desktop").setValue("storage/projectRoot", str(root))
+        # Move the autosave target only when the open project is an untouched
+        # scratch project still pointed at the old default location.
+        is_scratch = (
+            not self.project.clips
+            and not self.project.audio_tracks
+            and not self.project.slides
+            and not self.project.annotations
+        )
+        if is_scratch and not self.dirty and self.store.project_path.parent != root:
+            self.store = ProjectStore.create(root)
+        self.statusBar().showMessage(f"New projects will be stored in {root}", 5000)
+
+    def _start_phi_review(self) -> None:
+        dialog = PhiReviewDialog(self.project, self)
+        dialog.seek_requested.connect(self._seek_global)
+        dialog.review_completed.connect(self._phi_review_completed)
+        if dialog.exec() != QDialog.DialogCode.Accepted and dialog.stops:
+            self.statusBar().showMessage(
+                "PHI review incomplete — skipped sections keep it unconfirmed.", 6000
+            )
+
+    def _phi_review_completed(self) -> None:
+        self.project.phi_review_confirmed = True
+        self._mark_dirty(history=False)
+        self.refresh()
+        self.statusBar().showMessage(
+            "PHI review complete — recorded in the project and export report.", 6000
+        )
+
     def _maybe_show_first_run_tutorial(self) -> None:
+        self._maybe_prompt_storage_location()
         settings = QSettings("NeuroEdit", "Desktop")
         if settings.value("tutorial/seen", False, type=bool):
             return
@@ -4220,6 +4640,24 @@ class MainWindow(QMainWindow):
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
+        keeps_source_audio = not dialog.mute_source_audio_check.isChecked() and any(
+            clip.media_type == "video" for clip in self.project.clips
+        )
+        includes_audio = keeps_source_audio or bool(self.project.audio_tracks)
+        checklist = ExportChecklistDialog(
+            self.project,
+            export_includes_audio=includes_audio,
+            keeps_source_audio=keeps_source_audio,
+            parent=self,
+        )
+        if checklist.exec() != QDialog.DialogCode.Accepted:
+            if checklist.guided_review_requested:
+                self._start_phi_review()
+            return
+        checklist.apply_to_project(self.project)
+        self._mark_dirty(history=False)
+        self.refresh()
+
         default_name = self._safe_export_name(self.project.project_name)
         default_path = Path.home() / "Movies" / f"{default_name}.mp4"
         path_str, _ = QFileDialog.getSaveFileName(
@@ -4234,21 +4672,6 @@ class MainWindow(QMainWindow):
         if output_path.suffix.lower() != ".mp4":
             output_path = output_path.with_suffix(".mp4")
         settings = dialog.export_settings(output_path)
-        if not settings.mute_source_audio and any(
-            clip.media_type == "video" for clip in self.project.clips
-        ):
-            reply = QMessageBox.warning(
-                self,
-                "Keep original audio?",
-                "You chose to keep the original clip audio. Operating-room audio can "
-                "contain spoken patient identifiers (name, MRN, date of birth).\n\n"
-                "The Redact tool only covers on-screen PHI — it does not remove audio.\n\n"
-                "Export with the original audio anyway?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if reply != QMessageBox.StandardButton.Yes:
-                return
         self._start_export(settings)
 
     def _safe_export_name(self, value: str) -> str:
@@ -4317,12 +4740,40 @@ class MainWindow(QMainWindow):
         report_path = self._write_export_report(Path(output_path), warnings)
         if report_path is not None:
             warning_text += f"\n\nExport report:\n{report_path}"
-        QMessageBox.information(
-            self,
-            "Export complete",
-            f"Saved MP4 export:\n{output_path}{warning_text}",
-        )
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setWindowTitle("Export complete")
+        box.setText(f"Saved MP4 export:\n{output_path}{warning_text}")
+        reveal_mp4_btn = box.addButton("Reveal MP4", QMessageBox.ButtonRole.ActionRole)
+        reveal_report_btn = None
+        if report_path is not None:
+            reveal_report_btn = box.addButton(
+                "Reveal Report", QMessageBox.ButtonRole.ActionRole
+            )
+        box.addButton(QMessageBox.StandardButton.Ok)
+        box.setDefaultButton(QMessageBox.StandardButton.Ok)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is reveal_mp4_btn:
+            self._reveal_path(Path(output_path))
+        elif reveal_report_btn is not None and clicked is reveal_report_btn:
+            self._reveal_path(report_path)
         self.statusBar().showMessage(f"Exported {output_path}", 5000)
+
+    @staticmethod
+    def _reveal_path(path: Path) -> None:
+        """Show the file selected in Finder/Explorer; fall back to opening the
+        enclosing folder where selection isn't supported."""
+        try:
+            if sys.platform == "darwin":
+                subprocess.run(["open", "-R", str(path)], check=False)
+                return
+            if sys.platform == "win32":
+                subprocess.run(["explorer", f"/select,{path}"], check=False)
+                return
+        except OSError:
+            pass
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))
 
     def _write_export_report(self, output_path: Path, export_warnings: list[str]) -> Path | None:
         project = getattr(self, "_export_report_project", None)
@@ -4350,6 +4801,7 @@ class MainWindow(QMainWindow):
             f"Staff notice/consent addressed: {project.staff_notice_confirmed}",
             f"De-identified: {project.deidentified_confirmed}",
             f"PHI review completed: {project.phi_review_confirmed}",
+            f"Audio reviewed for spoken PHI: {project.audio_reviewed_for_phi}",
             f"Edit disclosure: {project.edit_disclosure or 'Not specified'}",
             "",
             "Timeline counts",

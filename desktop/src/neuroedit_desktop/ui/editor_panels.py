@@ -1576,6 +1576,14 @@ class AudioPanel(QWidget):
         delete_btn.setProperty("variant", "danger")
         delete_btn.clicked.connect(self._delete_selected)
 
+        self.audio_phi_check = QCheckBox("Audio reviewed for spoken PHI")
+        self.audio_phi_check.setToolTip(
+            "Confirm you listened to the narration/audio for spoken identifiers "
+            "(patient name, MRN, date of birth). Recorded in the export report; "
+            "exports with audio warn when this is unchecked."
+        )
+        self.audio_phi_check.toggled.connect(self._apply_audio_phi_flag)
+
         form = QFormLayout()
         form.addRow("Name", self.track_name)
         form.addRow("Start", self.start_input)
@@ -1659,6 +1667,7 @@ class AudioPanel(QWidget):
         layout.addWidget(self.list_widget, 1)
         layout.addLayout(form)
         layout.addWidget(delete_btn)
+        layout.addWidget(self.audio_phi_check)
         layout.addWidget(transcript_title)
         layout.addWidget(transcript_hint)
         layout.addWidget(self.transcript_search)
@@ -1681,9 +1690,16 @@ class AudioPanel(QWidget):
                 self.list_widget.setCurrentItem(item)
                 break
 
+    def _apply_audio_phi_flag(self, checked: bool) -> None:
+        if self._refreshing:
+            return
+        self.project.audio_reviewed_for_phi = checked
+        self.project_changed.emit()
+
     def refresh(self) -> None:
         self._refreshing = True
         current_id = self._selected_id()
+        self.audio_phi_check.setChecked(self.project.audio_reviewed_for_phi)
         self.list_widget.clear()
         for track in self.project.audio_tracks:
             item = QListWidgetItem(
@@ -2392,6 +2408,10 @@ def project_preflight_warnings(project: ProjectState) -> list[str]:
         warnings.append("Confirm de-identification before distribution.")
     if project.clips and not project.phi_review_confirmed:
         warnings.append("Complete a PHI review before export.")
+    if project.audio_tracks and not project.audio_reviewed_for_phi:
+        warnings.append(
+            "Audio has not been reviewed for spoken PHI (Audio panel checkbox)."
+        )
     if (
         project.clips
         and not project.phi_review_confirmed

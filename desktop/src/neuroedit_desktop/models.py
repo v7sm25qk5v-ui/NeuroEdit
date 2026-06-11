@@ -183,6 +183,7 @@ class ProjectState:
     staff_notice_confirmed: bool = False
     deidentified_confirmed: bool = False
     phi_review_confirmed: bool = False
+    audio_reviewed_for_phi: bool = False
     edit_disclosure: str = ""
     clips: list[VideoClip] = field(default_factory=list)
     audio_tracks: list[AudioTrack] = field(default_factory=list)
@@ -364,6 +365,7 @@ class ProjectState:
             staff_notice_confirmed=bool(data.get("staff_notice_confirmed", False)),
             deidentified_confirmed=bool(data.get("deidentified_confirmed", False)),
             phi_review_confirmed=bool(data.get("phi_review_confirmed", False)),
+            audio_reviewed_for_phi=bool(data.get("audio_reviewed_for_phi", False)),
             edit_disclosure=data.get("edit_disclosure", ""),
             current_time=float(data.get("current_time", 0.0)),
             duration=float(data.get("duration", 0.0)),
