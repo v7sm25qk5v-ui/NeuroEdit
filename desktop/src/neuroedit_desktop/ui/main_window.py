@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QScrollArea,
     QSlider,
+    QSpinBox,
     QSplitter,
     QStackedWidget,
     QStatusBar,
@@ -58,6 +59,14 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QSettings
 
 from neuroedit_desktop import __version__
+from neuroedit_desktop.captions import (
+    CaptionCue,
+    build_caption_cues,
+    cue_at_time,
+    cues_to_srt,
+    cues_to_vtt,
+    paint_caption,
+)
 from neuroedit_desktop.exporter import ExportCancelled, ExportSettings, ProjectExporter
 from neuroedit_desktop.models import Annotation, PanelType, ProjectState, SamPoint, Slide, VideoClip, new_id
 from neuroedit_desktop.project_store import ProjectStore
@@ -193,6 +202,32 @@ def default_project_root() -> Path:
     return legacy_project_root()
 
 
+EXPORT_HISTORY_LIMIT = 20
+
+
+def load_export_history() -> list[dict]:
+    """Recent exports, newest first: {path, report, label, time(epoch s)}."""
+    raw = QSettings("NeuroEdit", "Desktop").value("exportHistory", "")
+    try:
+        data = json.loads(str(raw))
+        if isinstance(data, list):
+            return [entry for entry in data if isinstance(entry, dict) and entry.get("path")]
+    except (ValueError, TypeError):
+        pass
+    return []
+
+
+def record_export_history(entry: dict) -> None:
+    history = [
+        existing for existing in load_export_history()
+        if existing.get("path") != entry.get("path")
+    ]
+    history.insert(0, entry)
+    QSettings("NeuroEdit", "Desktop").setValue(
+        "exportHistory", json.dumps(history[:EXPORT_HISTORY_LIMIT])
+    )
+
+
 def _distance_to_segment(
     px: float, py: float, x1: float, y1: float, x2: float, y2: float,
 ) -> float:
@@ -281,6 +316,8 @@ class AnnotationGraphicsItem(QGraphicsObject):
         self._slide_image_cache: dict[str, QPixmap] = {}
         self._preview_annotation: Annotation | None = None
         self._selected_slide_region: tuple[str, str] | None = None
+        self._caption_cues: list[CaptionCue] = []
+        self._caption_fingerprint: tuple | None = None
         self.setZValue(10)
 
     def set_size(self, size: QSizeF) -> None:
@@ -326,8 +363,9 @@ class AnnotationGraphicsItem(QGraphicsObject):
         if active_slide is not None:
             self._paint_slide(painter, active_slide, w, h)
             if not active_slide.overlay:
-                # A full-frame slide covers the video, but redactions still burn on
-                # top so a redaction placed over slide/still content can't vanish.
+                # A full-frame slide covers the video, but captions (narration
+                # continues across slides) and redactions still paint on top.
+                self._paint_captions(painter, w, h)
                 self._paint_redactions(painter, w, h)
                 return
 
@@ -366,7 +404,31 @@ class AnnotationGraphicsItem(QGraphicsObject):
             )
 
         self._paint_fade_overlay(painter, w, h)
+        self._paint_captions(painter, w, h)
         self._paint_redactions(painter, w, h)
+
+    def _paint_captions(self, painter: QPainter, w: float, h: float) -> None:
+        if not self.project.captions_enabled or not self.project.transcript_segments:
+            return
+        fingerprint = tuple(
+            (s.id, s.start_time, s.end_time, s.speaker, s.text)
+            for s in self.project.transcript_segments
+        )
+        if fingerprint != self._caption_fingerprint:
+            self._caption_cues = build_caption_cues(self.project.transcript_segments)
+            self._caption_fingerprint = fingerprint
+        cue = cue_at_time(self._caption_cues, self.project.current_time)
+        if cue is None:
+            return
+        paint_caption(
+            painter,
+            cue,
+            w,
+            h,
+            size=self.project.caption_size,
+            position=self.project.caption_position,
+            background=self.project.caption_background,
+        )
 
     def _paint_redactions(self, painter: QPainter, w: float, h: float) -> None:
         """Burn opaque black over every visible redaction, last and on top, so no
@@ -2827,10 +2889,11 @@ class ExportDialog(QDialog):
         ),
     ]
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, project: ProjectState | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Export Video")
         self.setMinimumWidth(440)
+        self._project = project
 
         title = QLabel("Where will this video be watched?")
         title.setProperty("role", "title")
@@ -2867,10 +2930,65 @@ class ExportDialog(QDialog):
             "Narration or music you added on the Audio panel is kept."
         )
 
+        self.burn_captions_check = QCheckBox("Burn captions into the video (from transcript)")
+        has_transcript = bool(project and project.transcript_segments)
+        if has_transcript:
+            self.burn_captions_check.setChecked(bool(project and project.captions_enabled))
+            self.burn_captions_check.setToolTip(
+                "Renders the transcript as open captions in the exported frames. "
+                "For toggleable captions, use File → Export Captions (SRT/VTT) "
+                "and ship the sidecar file instead."
+            )
+        else:
+            self.burn_captions_check.setChecked(False)
+            self.burn_captions_check.setEnabled(False)
+            self.burn_captions_check.setToolTip(
+                "Add transcript segments on the Audio panel to enable captions."
+            )
+
         form = QFormLayout()
         form.addRow("Viewing target", self.preset_combo)
         form.addRow("File type", self.file_type)
         form.addRow("Privacy", self.mute_source_audio_check)
+        form.addRow("Captions", self.burn_captions_check)
+
+        # Advanced settings stay collapsed: presets are the primary interface,
+        # and the fields below re-glue to the preset whenever it changes.
+        self.advanced_toggle = QPushButton("Advanced settings ▸")
+        self.advanced_toggle.setCheckable(True)
+        self.advanced_toggle.setFlat(True)
+        self.advanced_toggle.setStyleSheet("text-align: left; padding: 2px;")
+        self.advanced_toggle.toggled.connect(self._toggle_advanced)
+
+        self.crf_spin = QSpinBox()
+        self.crf_spin.setRange(12, 32)
+        self.crf_spin.setToolTip(
+            "Constant Rate Factor: lower = higher quality and bigger files. "
+            "18–23 is the practical range for most exports."
+        )
+        self.fps_combo = QComboBox()
+        for fps_value in (24, 25, 30, 50, 60):
+            self.fps_combo.addItem(f"{fps_value} fps", fps_value)
+        self.width_spin = QSpinBox()
+        self.width_spin.setRange(320, 4096)
+        self.width_spin.setSingleStep(2)
+        self.height_spin = QSpinBox()
+        self.height_spin.setRange(240, 2160)
+        self.height_spin.setSingleStep(2)
+        self.audio_bitrate_combo = QComboBox()
+        for kbps in (128, 192, 256):
+            self.audio_bitrate_combo.addItem(f"AAC {kbps} kbit/s", kbps)
+        self.audio_bitrate_combo.setCurrentIndex(1)  # 192k, the long-standing default
+
+        advanced_form = QFormLayout()
+        advanced_form.addRow("Quality (CRF)", self.crf_spin)
+        advanced_form.addRow("Frame rate", self.fps_combo)
+        advanced_form.addRow("Width", self.width_spin)
+        advanced_form.addRow("Height", self.height_spin)
+        advanced_form.addRow("Audio", self.audio_bitrate_combo)
+        self.advanced_widget = QWidget()
+        self.advanced_widget.setLayout(advanced_form)
+        self.advanced_widget.setVisible(False)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok
@@ -2886,24 +3004,115 @@ class ExportDialog(QDialog):
         layout.addWidget(intro)
         layout.addLayout(form)
         layout.addWidget(self.help_label)
+        layout.addWidget(self.advanced_toggle)
+        layout.addWidget(self.advanced_widget)
         layout.addWidget(buttons)
         self._preset_changed()
 
     def export_settings(self, output_path: Path) -> ExportSettings:
-        _key, width, height, fps, crf, _help_text = self.preset_combo.currentData()
         return ExportSettings(
             output_path=output_path,
-            width=int(width),
-            height=int(height),
-            fps=int(fps),
-            crf=int(crf),
+            width=int(self.width_spin.value()),
+            height=int(self.height_spin.value()),
+            fps=int(self.fps_combo.currentData()),
+            crf=int(self.crf_spin.value()),
             label=self.preset_combo.currentText(),
             mute_source_audio=self.mute_source_audio_check.isChecked(),
+            burn_captions=self.burn_captions_check.isChecked(),
+            audio_bitrate_k=int(self.audio_bitrate_combo.currentData()),
         )
 
+    def _toggle_advanced(self, checked: bool) -> None:
+        self.advanced_widget.setVisible(checked)
+        self.advanced_toggle.setText(
+            "Advanced settings ▾" if checked else "Advanced settings ▸"
+        )
+        self.adjustSize()
+
     def _preset_changed(self) -> None:
-        _key, width, height, fps, _crf, help_text = self.preset_combo.currentData()
+        _key, width, height, fps, crf, help_text = self.preset_combo.currentData()
         self.help_label.setText(f"{help_text} Output: {width} x {height}, {fps} fps.")
+        # Re-glue the advanced fields to the preset so a preset switch always
+        # produces exactly the preset, even after manual tweaks.
+        self.crf_spin.setValue(int(crf))
+        index = self.fps_combo.findData(int(fps))
+        self.fps_combo.setCurrentIndex(index if index >= 0 else 2)
+        self.width_spin.setValue(int(width))
+        self.height_spin.setValue(int(height))
+
+
+class ExportHistoryDialog(QDialog):
+    """Answers "where did my export go?" — recent output files with one-click
+    Reveal for the MP4 and its export report."""
+
+    def __init__(self, reveal, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Export History")
+        self.setMinimumSize(560, 360)
+        self._reveal = reveal
+
+        intro = QLabel("Your most recent exports, newest first.")
+        intro.setProperty("role", "muted")
+
+        self.list_widget = QListWidget()
+        self.list_widget.itemDoubleClicked.connect(self._reveal_selected)
+
+        self.reveal_btn = QPushButton("Reveal File")
+        self.reveal_btn.clicked.connect(self._reveal_selected)
+        self.reveal_report_btn = QPushButton("Reveal Report")
+        self.reveal_report_btn.clicked.connect(self._reveal_report)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+
+        buttons = QHBoxLayout()
+        buttons.addWidget(self.reveal_btn)
+        buttons.addWidget(self.reveal_report_btn)
+        buttons.addStretch(1)
+        buttons.addWidget(close_btn)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(10)
+        layout.addWidget(intro)
+        layout.addWidget(self.list_widget, 1)
+        layout.addLayout(buttons)
+        self._populate()
+
+    def _populate(self) -> None:
+        self.list_widget.clear()
+        for entry in load_export_history():
+            path = Path(str(entry.get("path")))
+            when = _relative_time(float(entry.get("time", 0.0))).replace("Opened", "Exported")
+            label = str(entry.get("label", "")).strip()
+            missing = "" if path.exists() else "  —  file missing"
+            item = QListWidgetItem(f"{path.name}{missing}\n{when}  •  {label}\n{path.parent}")
+            item.setData(Qt.ItemDataRole.UserRole, entry)
+            if missing:
+                item.setForeground(QColor("#6b7280"))
+            self.list_widget.addItem(item)
+        has_items = self.list_widget.count() > 0
+        self.reveal_btn.setEnabled(has_items)
+        self.reveal_report_btn.setEnabled(has_items)
+        if not has_items:
+            self.list_widget.addItem("No exports yet — finished exports will appear here.")
+
+    def _selected_entry(self) -> dict | None:
+        item = self.list_widget.currentItem()
+        data = item.data(Qt.ItemDataRole.UserRole) if item else None
+        return data if isinstance(data, dict) else None
+
+    def _reveal_selected(self, *_args) -> None:
+        entry = self._selected_entry()
+        if entry and Path(str(entry["path"])).exists():
+            self._reveal(Path(str(entry["path"])))
+
+    def _reveal_report(self) -> None:
+        entry = self._selected_entry()
+        if entry is None:
+            return
+        report = entry.get("report")
+        if report and Path(str(report)).exists():
+            self._reveal(Path(str(report)))
 
 
 class ExportWorker(QObject):
@@ -3381,6 +3590,12 @@ class MainWindow(QMainWindow):
         self.phi_review_action = QAction("Guided PHI Review…", self)
         self.phi_review_action.triggered.connect(self._start_phi_review)
 
+        self.export_captions_action = QAction("Export Captions (SRT/VTT)…", self)
+        self.export_captions_action.triggered.connect(self._export_captions)
+
+        self.export_history_action = QAction("Export History…", self)
+        self.export_history_action.triggered.connect(self._show_export_history)
+
         self.storage_location_action = QAction("Project Storage Location…", self)
         self.storage_location_action.triggered.connect(self._change_storage_location)
 
@@ -3409,6 +3624,9 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(self.import_video_action)
         file_menu.addAction(self.import_image_action)
+        file_menu.addSeparator()
+        file_menu.addAction(self.export_captions_action)
+        file_menu.addAction(self.export_history_action)
         file_menu.addSeparator()
         file_menu.addAction(self.storage_location_action)
         self._rebuild_recent_menu()
@@ -3841,6 +4059,7 @@ class MainWindow(QMainWindow):
         self.slides_panel.project_changed.connect(self._mark_project_dirty)
         self.audio_panel.project_changed.connect(self._mark_project_dirty)
         self.audio_panel.seek_requested.connect(self._seek_global)
+        self.audio_panel.export_captions_requested.connect(self._export_captions)
 
         for panel_widget in (
             self.sam_panel, self.labels_panel, self.tips_panel,
@@ -4636,7 +4855,7 @@ class MainWindow(QMainWindow):
                 self.refresh()
                 return
 
-        dialog = ExportDialog(self)
+        dialog = ExportDialog(self.project, self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
@@ -4674,6 +4893,41 @@ class MainWindow(QMainWindow):
         settings = dialog.export_settings(output_path)
         self._start_export(settings)
 
+    def _show_export_history(self) -> None:
+        ExportHistoryDialog(self._reveal_path, self).exec()
+
+    def _export_captions(self) -> None:
+        if not self.project.transcript_segments:
+            QMessageBox.information(
+                self,
+                "Export Captions",
+                "No transcript segments yet. Add or import a transcript on the "
+                "Audio panel first.",
+            )
+            return
+        default_name = self._safe_export_name(self.project.project_name)
+        default_path = Path.home() / "Movies" / f"{default_name}.srt"
+        path_str, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "Export Captions",
+            str(default_path),
+            "SubRip captions (*.srt);;WebVTT captions (*.vtt)",
+        )
+        if not path_str:
+            return
+        output_path = Path(path_str)
+        wants_vtt = "WebVTT" in selected_filter or output_path.suffix.lower() == ".vtt"
+        if output_path.suffix.lower() not in (".srt", ".vtt"):
+            output_path = output_path.with_suffix(".vtt" if wants_vtt else ".srt")
+        cues = build_caption_cues(self.project.transcript_segments)
+        content = cues_to_vtt(cues) if wants_vtt else cues_to_srt(cues)
+        try:
+            output_path.write_text(content, encoding="utf-8")
+        except OSError as exc:
+            QMessageBox.critical(self, "Export Captions failed", str(exc))
+            return
+        self.statusBar().showMessage(f"Captions saved to {output_path}", 5000)
+
     def _safe_export_name(self, value: str) -> str:
         safe = "".join(ch if ch.isalnum() or ch in ("-", "_", " ") else "_" for ch in value)
         safe = "_".join(safe.strip().split())
@@ -4709,6 +4963,7 @@ class MainWindow(QMainWindow):
         self._export_progress_dialog = progress
         self._export_thread = thread
         self._export_worker = worker
+        self._export_worker_settings = settings
         self.statusBar().showMessage("Export started...")
         thread.start()
 
@@ -4740,6 +4995,15 @@ class MainWindow(QMainWindow):
         report_path = self._write_export_report(Path(output_path), warnings)
         if report_path is not None:
             warning_text += f"\n\nExport report:\n{report_path}"
+        record_export_history(
+            {
+                "path": str(output_path),
+                "report": str(report_path) if report_path else "",
+                "label": getattr(getattr(self, "_export_worker_settings", None), "label", "")
+                or self.project.project_name,
+                "time": time.time(),
+            }
+        )
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Information)
         box.setWindowTitle("Export complete")

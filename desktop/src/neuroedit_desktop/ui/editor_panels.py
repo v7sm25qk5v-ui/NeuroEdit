@@ -1517,6 +1517,7 @@ class SlideEditorPanel(QWidget):
 class AudioPanel(QWidget):
     project_changed = Signal()
     seek_requested = Signal(float)
+    export_captions_requested = Signal()
 
     def __init__(self, project: ProjectState, audio_dir: Path, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1651,6 +1652,35 @@ class AudioPanel(QWidget):
         transcript_form.addRow("Speaker", self.segment_speaker)
         transcript_form.addRow("Text", self.segment_text)
 
+        captions_title = QLabel("Captions")
+        captions_title.setProperty("role", "title")
+        captions_hint = QLabel(
+            "Captions are generated from the transcript segments above. Preview "
+            "them on the canvas, burn them in at export, or save an SRT/VTT file."
+        )
+        captions_hint.setProperty("role", "muted")
+        captions_hint.setWordWrap(True)
+
+        self.captions_enabled_check = QCheckBox("Show captions on the video")
+        self.captions_enabled_check.toggled.connect(self._apply_caption_fields)
+        self.caption_size_combo = QComboBox()
+        for key, label in (("small", "Small"), ("medium", "Medium"), ("large", "Large")):
+            self.caption_size_combo.addItem(label, key)
+        self.caption_size_combo.currentIndexChanged.connect(self._apply_caption_fields)
+        self.caption_position_combo = QComboBox()
+        for key, label in (("bottom", "Bottom"), ("top", "Top")):
+            self.caption_position_combo.addItem(label, key)
+        self.caption_position_combo.currentIndexChanged.connect(self._apply_caption_fields)
+        self.caption_background_check = QCheckBox("Dark background box")
+        self.caption_background_check.toggled.connect(self._apply_caption_fields)
+        export_captions_btn = QPushButton("Export Captions (SRT/VTT)…")
+        export_captions_btn.setProperty("variant", "cyan")
+        export_captions_btn.clicked.connect(self.export_captions_requested.emit)
+
+        captions_form = QFormLayout()
+        captions_form.addRow("Size", self.caption_size_combo)
+        captions_form.addRow("Position", self.caption_position_combo)
+
         self.clock = QTimer(self)
         self.clock.setInterval(100)
         self.clock.timeout.connect(self._tick_recording)
@@ -1675,6 +1705,12 @@ class AudioPanel(QWidget):
         layout.addLayout(transcript_buttons)
         layout.addLayout(transcript_form)
         layout.addLayout(transcript_actions)
+        layout.addWidget(captions_title)
+        layout.addWidget(captions_hint)
+        layout.addWidget(self.captions_enabled_check)
+        layout.addLayout(captions_form)
+        layout.addWidget(self.caption_background_check)
+        layout.addWidget(export_captions_btn)
         self.refresh()
 
     def set_project(self, project: ProjectState, audio_dir: Path | None = None) -> None:
@@ -1696,10 +1732,25 @@ class AudioPanel(QWidget):
         self.project.audio_reviewed_for_phi = checked
         self.project_changed.emit()
 
+    def _apply_caption_fields(self) -> None:
+        if self._refreshing:
+            return
+        self.project.captions_enabled = self.captions_enabled_check.isChecked()
+        self.project.caption_size = str(self.caption_size_combo.currentData())
+        self.project.caption_position = str(self.caption_position_combo.currentData())
+        self.project.caption_background = self.caption_background_check.isChecked()
+        self.project_changed.emit()
+
     def refresh(self) -> None:
         self._refreshing = True
         current_id = self._selected_id()
         self.audio_phi_check.setChecked(self.project.audio_reviewed_for_phi)
+        self.captions_enabled_check.setChecked(self.project.captions_enabled)
+        size_index = self.caption_size_combo.findData(self.project.caption_size)
+        self.caption_size_combo.setCurrentIndex(size_index if size_index >= 0 else 1)
+        pos_index = self.caption_position_combo.findData(self.project.caption_position)
+        self.caption_position_combo.setCurrentIndex(pos_index if pos_index >= 0 else 0)
+        self.caption_background_check.setChecked(self.project.caption_background)
         self.list_widget.clear()
         for track in self.project.audio_tracks:
             item = QListWidgetItem(

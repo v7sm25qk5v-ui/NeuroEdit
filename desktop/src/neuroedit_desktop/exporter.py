@@ -13,6 +13,7 @@ import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QFont, QFontMetricsF, QImage, QPainter, QPen, QPolygonF
 
+from neuroedit_desktop.captions import build_caption_cues, cue_at_time, paint_caption
 from neuroedit_desktop.models import Annotation, ProjectState, Slide, VideoClip
 
 
@@ -29,6 +30,8 @@ class ExportSettings:
     crf: int
     label: str
     mute_source_audio: bool = False  # drop original clip audio (may contain spoken PHI)
+    burn_captions: bool = False  # burn transcript captions into the video frames
+    audio_bitrate_k: int = 192  # AAC bitrate in kbit/s for the mixed audio track
 
 
 @dataclass(frozen=True)
@@ -75,6 +78,11 @@ class ProjectExporter:
         self._qt_image_cache: dict[str, QImage] = {}
         self._audio_probe_cache: dict[str, bool] = {}
         self._ffmpeg_encoder_cache: dict[str, bool] = {}
+        self._caption_cues = (
+            build_caption_cues(project.transcript_segments)
+            if settings.burn_captions
+            else []
+        )
 
     def export(self) -> list[str]:
         import cv2  # noqa: PLC0415
@@ -224,6 +232,10 @@ class ProjectExporter:
             ann_end = duration if ann.ann_duration == 0 else ann.frame_time + ann.ann_duration
             add(ann_end)
 
+        for cue in self._caption_cues:
+            add(cue.start)
+            add(cue.end)
+
         ordered: list[float] = []
         for value in sorted(boundaries):
             if not ordered or abs(value - ordered[-1]) > 0.001:
@@ -242,6 +254,8 @@ class ProjectExporter:
         if self._slide_at_time(mid) is not None:
             return True
         if self._has_visible_annotation(mid):
+            return True
+        if cue_at_time(self._caption_cues, mid) is not None:
             return True
         # Redactions must never be decided by a single midpoint sample: a sub-frame
         # window that the boundary dedup collapsed could otherwise slip past and let
@@ -614,6 +628,9 @@ class ProjectExporter:
         if include_annotations:
             self._paint_annotations(painter, time_s, width, height)
             self._paint_fade(painter, time_s, width, height)
+        # Captions paint over slides too (narration continues across them), but
+        # under redactions so a redaction can never be covered by caption text.
+        self._paint_captions(painter, time_s, width, height)
         # Redactions burn last and unconditionally — even behind a full-frame slide —
         # so a redaction placed over slide/still content is never skipped.
         self._paint_redactions(painter, time_s, width, height)
@@ -838,6 +855,20 @@ class ProjectExporter:
         painter.setPen(color)
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, label)
 
+    def _paint_captions(self, painter: QPainter, time_s: float, w: int, h: int) -> None:
+        cue = cue_at_time(self._caption_cues, time_s)
+        if cue is None:
+            return
+        paint_caption(
+            painter,
+            cue,
+            w,
+            h,
+            size=self.project.caption_size,
+            position=self.project.caption_position,
+            background=self.project.caption_background,
+        )
+
     def _paint_redactions(self, painter: QPainter, time_s: float, w: int, h: int) -> None:
         """Burn every visible redaction as a fully opaque black box, last and on
         top, so the underlying PHI is irrecoverable in the exported file."""
@@ -990,7 +1021,7 @@ class ProjectExporter:
                 "-c:a",
                 "aac",
                 "-b:a",
-                "192k",
+                f"{max(64, int(self.settings.audio_bitrate_k))}k",
                 "-t",
                 f"{duration:.3f}",
                 "-movflags",

@@ -209,6 +209,12 @@ class ProjectState:
     draw_width: int = 6
     draw_opacity: float = 0.85
     draw_label: str = ""
+    # Caption preview/burn-in style (export-safe by construction: white text,
+    # optional dark box, safe-area margins; only size/position/background vary).
+    captions_enabled: bool = False
+    caption_size: str = "medium"  # small | medium | large
+    caption_position: str = "bottom"  # bottom | top
+    caption_background: bool = True
     # Last SAM propagation run, persisted so the status survives reopening.
     # Keys: started_iso, duration_s, frames, result ("success"|"error"|"canceled"),
     # backend, message.
@@ -384,6 +390,10 @@ class ProjectState:
             draw_width=int(data.get("draw_width", 6)),
             draw_opacity=float(data.get("draw_opacity", 0.85)),
             draw_label=data.get("draw_label", ""),
+            captions_enabled=bool(data.get("captions_enabled", False)),
+            caption_size=data.get("caption_size", "medium"),
+            caption_position=data.get("caption_position", "bottom"),
+            caption_background=bool(data.get("caption_background", True)),
             sam_last_run=data.get("sam_last_run", {}) or {},
         )
         project.clips = [_from_dict_tolerant(VideoClip, clip) for clip in data.get("clips", [])]
