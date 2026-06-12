@@ -12,11 +12,18 @@ from PySide6.QtCore import QEvent, QPointF, Qt  # noqa: E402
 from PySide6.QtGui import QKeyEvent, QMouseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from neuroedit_desktop.models import ProjectState, TimelineMarker, VideoClip  # noqa: E402
+from neuroedit_desktop.models import (  # noqa: E402
+    AudioTrack,
+    ProjectState,
+    Slide,
+    TimelineMarker,
+    VideoClip,
+)
 from neuroedit_desktop.ui import editor_panels  # noqa: E402
 from neuroedit_desktop.ui.editor_panels import (  # noqa: E402
     RichTimelineWidget,
     TimelineCanvas,
+    TrashDropTarget,
     project_end_time,
 )
 
@@ -60,6 +67,18 @@ def _press(canvas: TimelineCanvas, x: float, y: float) -> None:
         Qt.KeyboardModifier.NoModifier,
     )
     canvas.mousePressEvent(event)
+
+
+def _release(canvas: TimelineCanvas, x: float, y: float) -> None:
+    event = QMouseEvent(
+        QEvent.Type.MouseButtonRelease,
+        QPointF(x, y),
+        QPointF(x, y),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    canvas.mouseReleaseEvent(event)
 
 
 # --- _snap_time -------------------------------------------------------------
@@ -292,6 +311,101 @@ def test_delete_key_without_selection_is_noop() -> None:
 
     assert len(project.clips) == 1
     assert not emitted
+
+
+def test_delete_selected_item_audio_and_slide() -> None:
+    project = _project()
+    project.audio_tracks.append(
+        AudioTrack(id="a1", path="/tmp/a.m4a", name="A", start_time=0.0, duration=3.0)
+    )
+    project.slides.append(Slide(id="s1", title="S", start_time=1.0))
+    canvas = TimelineCanvas(project)
+
+    canvas.selected_item = ("audio", "a1")
+    canvas._delete_selected_item()
+    assert project.audio_tracks == []
+
+    canvas.selected_item = ("slide", "s1")
+    canvas._delete_selected_item()
+    assert project.slides == []
+
+
+# --- Selection signal ---------------------------------------------------------
+
+
+def test_selection_changed_signal_emits_on_change_only() -> None:
+    project = _project()
+    project.clips.append(_clip())
+    canvas = TimelineCanvas(project)
+    events: list[bool] = []
+    canvas.selection_changed.connect(events.append)
+
+    canvas._set_selection(("clip", "clip-1"))
+    canvas._set_selection(("clip", "clip-1"))  # unchanged → no emit
+    canvas._set_selection(None)
+
+    assert events == [True, False]
+
+
+# --- Floating trash delete target ---------------------------------------------
+
+
+def test_trash_target_arms_and_disarms() -> None:
+    trash = TrashDropTarget()
+    assert trash._armed is False
+    trash.set_armed(True)
+    assert trash._armed is True
+    trash.set_armed(False)
+    assert trash._armed is False
+
+
+def test_drag_drop_on_trash_deletes_dragged_item() -> None:
+    project = _project()
+    project.clips.append(_clip())
+    project.active_clip_id = "clip-1"
+    canvas = TimelineCanvas(project)
+    canvas.trash_target = TrashDropTarget()
+    # Simulate an in-progress drag that is hovering the trash on release.
+    canvas.selected_item = ("clip", "clip-1")
+    canvas._drag = ("clip", "clip-1", 0.0, 0.0)
+    canvas._over_trash = True
+    emitted: list[bool] = []
+    canvas.project_changed.connect(lambda: emitted.append(True))
+
+    _release(canvas, 500, 40)
+
+    assert project.clips == []
+    assert project.active_clip_id is None
+    assert emitted
+
+
+def test_drag_release_off_trash_keeps_item() -> None:
+    project = _project()
+    project.clips.append(_clip())
+    canvas = TimelineCanvas(project)
+    canvas.trash_target = TrashDropTarget()
+    canvas.selected_item = ("clip", "clip-1")
+    canvas._drag = ("clip", "clip-1", 0.0, 0.0)
+    canvas._over_trash = False
+
+    _release(canvas, 500, 40)
+
+    assert len(project.clips) == 1  # a normal move, not a delete
+
+
+def test_richtimeline_trash_visibility_follows_selection(app) -> None:
+    project = _project()
+    project.clips.append(_clip())
+    widget = RichTimelineWidget(project)
+    # isHidden() reflects the explicit show/hide state without needing a shown
+    # parent window.
+    assert widget.trash.isHidden()
+
+    widget.canvas._set_selection(("clip", "clip-1"))
+    assert not widget.trash.isHidden()
+
+    widget.canvas._set_selection(None)
+    assert widget.trash.isHidden()
 
 
 # --- Static layer cache -------------------------------------------------------

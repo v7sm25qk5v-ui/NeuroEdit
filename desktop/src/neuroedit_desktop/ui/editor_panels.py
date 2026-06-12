@@ -8,7 +8,7 @@ import wave
 from pathlib import Path
 from typing import Literal
 
-from PySide6.QtCore import QDir, QPointF, QRectF, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QDir, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QKeySequence, QPainter, QPen, QPixmap, QShortcut
 from PySide6.QtMultimedia import (
     QAudioInput,
@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QFontComboBox,
     QFormLayout,
     QFrame,
+    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -97,6 +98,12 @@ def project_end_time(project: ProjectState) -> float:
     ends.extend(slide.start_time + max(0.1, slide.duration) for slide in project.slides)
     ends.extend(marker.time + 1.0 for marker in project.markers)
     return max(1.0, max(ends, default=1.0))
+
+
+def _hex_to_rgba(color_hex: str, alpha: float) -> str:
+    value = color_hex.lstrip("#")
+    r, g, b = (int(value[i : i + 2], 16) for i in (0, 2, 4))
+    return f"rgba({r}, {g}, {b}, {alpha:.2f})"
 
 
 class MediaExplorerPanel(QWidget):
@@ -250,6 +257,7 @@ class TimelineCanvas(QWidget):
     seek_requested = Signal(float)
     project_changed = Signal()
     item_activated = Signal(str, str)  # (kind, item_id)
+    selection_changed = Signal(bool)   # True when a timeline item is selected
 
     LABEL_W = 92
     RULER_H = 30
@@ -285,9 +293,19 @@ class TimelineCanvas(QWidget):
         self._static_cache_key: tuple | None = None
         self._snap_indicator_time: float | None = None
         self._hover_item: tuple[str, str] | None = None  # (kind, item_id)
+        # Floating delete target (set by RichTimelineWidget) + whether the
+        # current drag is hovering it, so a clip can be "dumped" onto it.
+        self.trash_target: QWidget | None = None
+        self._over_trash = False
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.refresh_geometry()
+
+    def _set_selection(self, value: tuple[str, str] | None) -> None:
+        if value == self.selected_item:
+            return
+        self.selected_item = value
+        self.selection_changed.emit(value is not None)
 
     def set_project(self, project: ProjectState) -> None:
         self.project = project
@@ -314,7 +332,7 @@ class TimelineCanvas(QWidget):
             "marker": self.project.markers,
         }
         if not any(item.id == item_id for item in pools.get(kind, [])):
-            self.selected_item = None
+            self._set_selection(None)
 
     def paintEvent(self, _event) -> None:  # noqa: N802
         paint_start = time.perf_counter()
@@ -650,7 +668,7 @@ class TimelineCanvas(QWidget):
         hit = self._hit_block(pos.x(), pos.y())
         if hit is not None:
             kind, item_id, offset = hit
-            self.selected_item = ("clip" if kind.startswith("clip") else kind, item_id)
+            self._set_selection(("clip" if kind.startswith("clip") else kind, item_id))
             origin_start = self._item_start_time(kind, item_id)
             self._drag = (kind, item_id, offset, origin_start)
             if kind.startswith("clip"):
@@ -664,11 +682,11 @@ class TimelineCanvas(QWidget):
             return
         marker = self._hit_marker(pos.x(), pos.y())
         if marker is not None:
-            self.selected_item = ("marker", marker.id)
+            self._set_selection(("marker", marker.id))
             self.update()
             return
         if self.selected_item is not None:
-            self.selected_item = None
+            self._set_selection(None)
             self.update()
         self.seek_requested.emit(min(time_s, project_end_time(self.project)))
 
@@ -738,13 +756,38 @@ class TimelineCanvas(QWidget):
         self.project.duration = project_end_time(self.project)
         self.refresh_geometry()
         self.update()
+        self._update_trash_arm(event.globalPosition().toPoint())
+
+    def _point_over_trash(self, global_pt: QPoint) -> bool:
+        target = self.trash_target
+        if target is None or not target.isVisible():
+            return False
+        top_left = target.mapToGlobal(QPoint(0, 0))
+        return QRect(top_left, target.size()).contains(global_pt)
+
+    def _update_trash_arm(self, global_pt: QPoint) -> None:
+        over = self._point_over_trash(global_pt)
+        if over == self._over_trash:
+            return
+        self._over_trash = over
+        if self.trash_target is not None:
+            self.trash_target.set_armed(over)
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
-        had_drag = self._drag is not None
+        drag = self._drag
         self._drag = None
         self._snap_indicator_time = None
         self.setCursor(Qt.CursorShape.ArrowCursor)
-        if had_drag:
+        dropped_on_trash = drag is not None and self._over_trash
+        self._over_trash = False
+        if self.trash_target is not None:
+            self.trash_target.set_armed(False)
+        if dropped_on_trash:
+            # "Dump" the dragged item: delete it instead of committing the move.
+            base_kind = "clip" if drag[0].startswith("clip") else drag[0]
+            self._set_selection((base_kind, drag[1]))
+            self._delete_selected_item()
+        elif drag is not None:
             self.update()
             self.project_changed.emit()
         super().mouseReleaseEvent(event)
@@ -781,7 +824,7 @@ class TimelineCanvas(QWidget):
             self.project.markers = [m for m in self.project.markers if m.id != item_id]
         else:
             return
-        self.selected_item = None
+        self._set_selection(None)
         self.project.duration = project_end_time(self.project)
         self.refresh_geometry()
         self.update()
@@ -841,14 +884,34 @@ class TimelineCanvas(QWidget):
                 self._delete_all_markers()
             return
         hit = self._hit_block(pos.x(), pos.y())
-        if hit is not None and hit[0].startswith("clip"):
-            clip = next((c for c in self.project.clips if c.id == hit[1]), None)
-            if clip is None:
-                return
+        if hit is not None:
+            base_kind = "clip" if hit[0].startswith("clip") else hit[0]
+            item_id = hit[1]
             menu = QMenu(self)
-            rename_action = menu.addAction("Rename Clip…")
-            if menu.exec(event.globalPos()) == rename_action:
+            rename_action = None
+            clip = None
+            if base_kind == "clip":
+                clip = next((c for c in self.project.clips if c.id == item_id), None)
+                if clip is None:
+                    return
+                rename_action = menu.addAction("Rename Clip…")
+                menu.addSeparator()
+                delete_action = menu.addAction("Delete Clip")
+            elif base_kind == "audio":
+                delete_action = menu.addAction("Delete Audio Track")
+            elif base_kind == "slide":
+                delete_action = menu.addAction("Delete Slide")
+            else:
+                return
+            # Select the item so the deletion (and the floating trash button)
+            # target what the user right-clicked.
+            self._set_selection((base_kind, item_id))
+            self.update()
+            chosen = menu.exec(event.globalPos())
+            if rename_action is not None and chosen == rename_action:
                 self._rename_clip(clip)
+            elif chosen == delete_action:
+                self._delete_selected_item()
 
     def _edit_marker(self, marker: TimelineMarker) -> None:
         label, ok = QInputDialog.getText(self, "Edit Marker", "Marker label:", text=marker.label)
@@ -998,6 +1061,56 @@ class TimelineCanvas(QWidget):
         return None
 
 
+class TrashDropTarget(QPushButton):
+    """Floating round red delete button over the timeline. Appears only when a
+    timeline item is selected. Click it to delete the selection, or drag a clip
+    onto it and release to "dump" (delete) it — it brightens and glows while a
+    drag hovers it."""
+
+    SIZE = 46
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFixedSize(self.SIZE, self.SIZE)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setText("🗑")
+        self.setToolTip(
+            "Delete the selected timeline item.\n"
+            "Tip: drag a clip onto this and release to remove it."
+        )
+        self._armed = False
+        self._glow = QGraphicsDropShadowEffect(self)
+        self._glow.setOffset(0, 0)
+        self.setGraphicsEffect(self._glow)
+        self.hide()
+        self._apply_style()
+
+    def set_armed(self, armed: bool) -> None:
+        if armed == self._armed:
+            return
+        self._armed = armed
+        self._apply_style()
+
+    def _apply_style(self) -> None:
+        radius = self.SIZE // 2
+        if self._armed:
+            background = ACCENT_RED
+            border = "#ffffff"
+            self._glow.setColor(QColor(ACCENT_RED))
+            self._glow.setBlurRadius(28)
+        else:
+            background = _hex_to_rgba(ACCENT_RED, 0.18)
+            border = ACCENT_RED
+            self._glow.setColor(QColor(0, 0, 0, 130))
+            self._glow.setBlurRadius(10)
+        self.setStyleSheet(
+            f"QPushButton {{ background: {background}; border: 2px solid {border};"
+            f" border-radius: {radius}px; color: #ffffff; font-size: 20px; }}"
+            f"QPushButton:hover {{ background: {ACCENT_RED}; border-color: #ffffff; }}"
+        )
+
+
 class RichTimelineWidget(QWidget):
     seek_requested = Signal(float)
     project_changed = Signal()
@@ -1120,12 +1233,41 @@ class RichTimelineWidget(QWidget):
         self.scroll.setFixedHeight(self._timeline_scroll_height())
         self.scroll.horizontalScrollBar().valueChanged.connect(self._scroll_changed)
 
+        # Floating delete target, overlaid on the scroll viewport (so it stays
+        # put as the timeline scrolls). Shown only while something is selected.
+        self.trash = TrashDropTarget(self)
+        self.trash.clicked.connect(self._delete_selection)
+        self.canvas.trash_target = self.trash
+        self.canvas.selection_changed.connect(self._on_selection_changed)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self.toolbar_scroll)
         layout.addWidget(self.scroll)
         self.refresh()
+
+    def _delete_selection(self) -> None:
+        self.canvas._delete_selected_item()
+
+    def _on_selection_changed(self, has_selection: bool) -> None:
+        self.trash.setVisible(has_selection)
+        if has_selection:
+            self._position_trash()
+            self.trash.raise_()
+
+    def _position_trash(self) -> None:
+        # Bottom-right of the timeline scroll area, clear of the 8px scrollbar.
+        geo = self.scroll.geometry()
+        margin = 14
+        x = geo.right() - self.trash.width() - margin
+        y = geo.bottom() - self.trash.height() - margin - 8
+        self.trash.move(max(geo.left(), x), max(geo.top(), y))
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        if self.trash.isVisible():
+            self._position_trash()
 
     def set_project(self, project: ProjectState) -> None:
         self.project = project
@@ -1143,6 +1285,8 @@ class RichTimelineWidget(QWidget):
         self.canvas.refresh_geometry()
         self.canvas.update()
         self.scroll.setFixedHeight(self._timeline_scroll_height())
+        if getattr(self, "trash", None) is not None and self.trash.isVisible():
+            self._position_trash()
 
         clip = self.project.active_clip
         for spin, value in (

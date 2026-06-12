@@ -107,6 +107,43 @@ def test_right_panel_never_scrolls_horizontally(window, app, size):
         )
 
 
+def test_deleting_clip_under_playhead_clears_preview(window):
+    """Deleting the clip under the playhead must blank the preview to black —
+    the deleted clip's last frame can't be left frozen on screen."""
+    from PySide6.QtCore import QUrl
+
+    clip = VideoClip(id=new_id(), path="/tmp/x.mp4", name="X", duration=5.0,
+                     start_time=0.0, trim_start=0.0, trim_end=5.0)
+    window.project.clips.append(clip)
+    window.project.active_clip_id = clip.id
+    window.project.current_time = 1.0
+    # Simulate a loaded, visible video frame.
+    window.video_view.video_item.setVisible(True)
+    window.player.setSource(QUrl.fromLocalFile("/tmp/x.mp4"))
+
+    # Delete it through the real timeline path (canvas → project_changed).
+    window.timeline.canvas.selected_item = ("clip", clip.id)
+    window.timeline.canvas._delete_selected_item()
+
+    assert window.project.clips == []
+    assert window.video_view.video_item.isVisible() is False
+    assert window.player.source().isEmpty()
+
+
+def test_sync_shows_black_when_no_clip_under_playhead(window):
+    from PySide6.QtCore import QUrl
+
+    window.project.clips.clear()
+    window.project.current_time = 2.0
+    window.video_view.video_item.setVisible(True)
+    window.player.setSource(QUrl.fromLocalFile("/tmp/gone.mp4"))
+
+    window._sync_player_to_timeline(play=False)
+
+    assert window.video_view.video_item.isVisible() is False
+    assert window.player.source().isEmpty()
+
+
 def test_autosave_restore_round_trip(tmp_path):
     store = ProjectStore.create(tmp_path / "proj")
     project = ProjectState(project_name="Round Trip")

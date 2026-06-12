@@ -1043,6 +1043,18 @@ class VideoGraphicsView(QGraphicsView):
         self.video_item.setVisible(False)
         self._fit()
 
+    def show_black(self) -> None:
+        """Clear the preview to the black background — used when no clip or image
+        sits under the playhead (e.g. after deleting the clip there) so a stale
+        last decoded frame can't linger."""
+        if not self.video_item.isVisible() and not self.image_item.isVisible():
+            return
+        self.image_item.setPixmap(QPixmap())
+        self.image_item.setVisible(False)
+        self.video_item.setVisible(False)
+        self._raw_image_pixmap = None
+        self.update_annotations()
+
     def _rescale_image_item(self) -> None:
         # Pixmap is stored at native size; image_item just needs to stay at (0,0).
         pix = getattr(self, "_raw_image_pixmap", None)
@@ -4473,6 +4485,10 @@ class MainWindow(QMainWindow):
         self.dirty = True
         self._update_title()
         self.video_view.set_project(self.project)
+        # Re-point the player at whatever is under the playhead now. A timeline
+        # edit can change (or remove) the clip there — without this, deleting the
+        # clip under the playhead leaves its last frame frozen in the preview.
+        self._sync_player_to_timeline(play=self._timeline_playing)
         self.video_view.update_annotations()
         self.timeline.refresh()
         self.media_panel.refresh()
@@ -5703,7 +5719,17 @@ class MainWindow(QMainWindow):
     def _sync_player_to_timeline(self, *, play: bool) -> None:
         slide = self._slide_at_time(self.project.current_time)
         clip = self._clip_at_time(self.project.current_time)
-        if slide is not None or clip is None:
+        if clip is None:
+            # Nothing under the playhead (e.g. the clip there was deleted): stop
+            # the player, drop its source, and clear the preview to black so the
+            # deleted clip's last frame can't linger. A full-frame slide, if any,
+            # still paints on top via the annotation layer.
+            self.player.pause()
+            if not self.player.source().isEmpty():
+                self.player.setSource(QUrl())
+            self.video_view.show_black()
+            return
+        if slide is not None:
             self.player.pause()
             self.video_view.update_annotations()
             return

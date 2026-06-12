@@ -558,6 +558,57 @@ preset-vs-CRF export UX) drove the design choices noted inline below.
   running" (this DID abort a bare script; pytest survived but don't rely
   on it).
 
+## 13. Timeline clip deletion + preview-blanking fix (2026-06-12, v0.5.1-alpha)
+
+Two user-reported gaps after the v0.5.0 theming pass, both in
+`ui/editor_panels.py` / `ui/main_window.py`.
+
+### Multiple ways to delete a timeline element
+
+Previously a clip could only be removed by the keyboard shortcut (easy to
+miss). Added, all routed through `TimelineCanvas._delete_selected_item` (so
+they reset `active_clip_id`, recompute duration, and stay undoable):
+
+- **Right-click → Delete** on any block: "Delete Clip" (+ Rename), "Delete
+  Audio Track", "Delete Slide". Markers already had Delete / Delete All.
+- **Floating round red trash button** (`TrashDropTarget`, overlaid bottom-right
+  of the timeline scroll): appears only while something is selected. Click to
+  delete the selection.
+- **Drag-to-dump**: drag a clip/audio/slide block onto the trash and release to
+  delete it; the target brightens to solid red with a white ring + red glow
+  while a drag hovers it (`set_armed`). Detected via `_point_over_trash`
+  (global-coord hit test) during the canvas drag; the drop is handled in
+  `mouseReleaseEvent` (`_over_trash`).
+- Delete/Backspace keyboard shortcut retained.
+- New `TimelineCanvas.selection_changed(bool)` signal drives trash
+  show/hide/reposition from `RichTimelineWidget`; all selection writes go
+  through `_set_selection`.
+
+### Preview blanks to black when the playhead has no clip
+
+Deleting the clip under the playhead left its last decoded frame frozen in the
+preview, because `_mark_project_dirty` refreshed the overlay/timeline but never
+re-synced the player. Fixes:
+
+- `_mark_project_dirty` now calls `_sync_player_to_timeline(play=...)` after
+  every timeline edit, so the preview always reflects what is under the
+  playhead (also handles a *different* clip ending up there after a move).
+- `_sync_player_to_timeline` splits out the "no clip under playhead" case:
+  pause, drop the player source, and call the new
+  `VideoGraphicsView.show_black()` (hides video + image items so the black
+  background shows). Full-frame slides still paint on top.
+- `show_black()` is idempotent/guarded so empty-gap playback stays cheap.
+
+### Verification
+
+- `ruff check src tests scripts` clean; **117 tests pass** (+9 vs §12's 108):
+  audio/slide delete, selection signal, trash arm, drag-drop-deletes,
+  release-off-trash-keeps, trash visibility follows selection, plus two
+  preview-blank regression tests (real delete path + direct no-clip sync).
+- Offscreen renders confirmed: armed trash button shows on selection; preview
+  is solid black after deleting the clip under the playhead.
+- Version bumped to **0.5.1-alpha**.
+
 ## 12. Optimization + refinement batch from NEXT_OPTIMIZATION_PLAN.md (2026-06-11/12)
 
 Implements every code-implementable task in [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md)
@@ -694,23 +745,23 @@ owner asked to test first.** `git add -A && git commit` once satisfied.
   and change track-window state must save/restore those keys (see
   `test_track_window_prefs_persist_across_panels`).
 
-## Current state at handoff (updated 2026-06-11)
+## Current state at handoff (updated 2026-06-12)
 
-- `main`: section 12's optimization batch + the Codex light/dark theming pass
-  committed on top of `cb86aad` and pushed; owner tested from source first.
-- Version: `0.5.0-alpha` in `neuroedit_desktop/__init__.py`.
-- **Released 2026-06-12**: tag `v0.5.0-alpha` — optimization batch (diagnostics,
+- `main`: section 12 (optimization batch + Codex theming) released as
+  `v0.5.0-alpha`; section 13 (clip-delete options + preview-blank fix) on top.
+- Version: `0.5.1-alpha` in `neuroedit_desktop/__init__.py`.
+- **Released 2026-06-12**: tag `v0.5.1-alpha` — §13 clip-deletion UX (right-
+  click delete, floating trash button, drag-to-dump) + the preview-blanks-to-
+  black fix when the playhead has no clip. Built/published via `build.yml`.
+- Earlier 2026-06-12: tag `v0.5.0-alpha` — optimization batch (diagnostics,
   timeline paint cache, snap guide/keyboard delete/hover, library search/sort,
   SAM follow-ups, PHI resume + storage migration, export recommendation) plus
-  the light/dark/system theming pass. Built and published via the `build.yml`
-  workflow on the tag.
-- Prior release 2026-06-11: tag `v0.4.0-alpha` (at `ffeb7f9`) —
+  the light/dark/system theming pass.
+- 2026-06-11: tag `v0.4.0-alpha` (at `ffeb7f9`) —
   https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.4.0-alpha
   with the macOS DMG/zip and Windows Setup.exe.
-- Test suite: **109 passing** (`ruff` clean): the previous 60 plus the
-  section-12 additions (timeline, diagnostics, design/theme tokens, appearance
-  action, export recommendation, project library, SAM prefs, PHI
-  progress/migration).
+- Test suite: **117 passing** (`ruff` clean): §12's 109 plus the §13 delete +
+  preview-blank tests.
 - Remote auth: SSH remote failed (no key); remote switched to HTTPS
   (`https://github.com/v7sm25qk5v-ui/NeuroEdit.git`), PAT cached in keychain.
 - Roadmap status: P0 partially owner-blocked (repo visibility, signing, DMG
