@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QPointF, QRectF, QSize, QSizeF, Qt, QThread, QTimer, QUrl, Signal
-from PySide6.QtGui import QAction, QBrush, QColor, QDesktopServices, QFont, QFontMetricsF, QIcon, QImage, QPainter, QPen, QPixmap, QPolygonF
+from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QDesktopServices, QFont, QFontMetricsF, QIcon, QImage, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 from PySide6.QtWidgets import (
@@ -58,7 +58,7 @@ from PySide6.QtWidgets import (
 
 from PySide6.QtCore import QSettings
 
-from neuroedit_desktop import __version__
+from neuroedit_desktop import __version__, diagnostics
 from neuroedit_desktop.captions import (
     CaptionCue,
     build_caption_cues,
@@ -71,6 +71,7 @@ from neuroedit_desktop.exporter import ExportCancelled, ExportSettings, ProjectE
 from neuroedit_desktop.models import Annotation, PanelType, ProjectState, SamPoint, Slide, VideoClip, new_id
 from neuroedit_desktop.project_store import ProjectStore
 from neuroedit_desktop.sam_backend import SamBackend, SamCancelled
+from neuroedit_desktop.ui import styles as ui_styles
 from neuroedit_desktop.ui.editor_panels import (
     AudioPanel,
     MediaExplorerPanel,
@@ -81,9 +82,10 @@ from neuroedit_desktop.ui.editor_panels import (
     project_end_time,
 )
 from neuroedit_desktop.ui.styles import (
-    ACCENT_AMBER, ACCENT_CYAN, ACCENT_RED,
+    ACCENT_AMBER, ACCENT_CYAN, ACCENT_RED, ACCENT_SLIDES,
     BG_CARD, BG_HOVER,
-    BORDER, BORDER_BRIGHT, PRIMARY, TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY,
+    BORDER, BORDER_BRIGHT, DANGER, PRIMARY, SUCCESS,
+    TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY, VIDEO_CANVAS,
 )
 from neuroedit_desktop.ui.tutorial import TutorialOverlay, build_default_steps
 from neuroedit_desktop.video_probe import probe_video
@@ -114,7 +116,7 @@ PANELS: list[tuple[PanelType, str, str]] = [
     ("sam",    "SAM",    ACCENT_CYAN),
     ("labels", "Labels", PRIMARY),
     ("tips",   "Tips",   ACCENT_AMBER),
-    ("slides", "Slides", "#8b5cf6"),
+    ("slides", "Slides", ACCENT_SLIDES),
     ("audio",  "Audio",  ACCENT_RED),
 ]
 
@@ -200,6 +202,19 @@ def default_project_root() -> Path:
     if stored:
         return Path(str(stored))
     return legacy_project_root()
+
+
+def migrate_storage_root(old_root: Path, new_root: Path) -> str | None:
+    """Copy the autosave tree from old_root into new_root. Copy, never move:
+    the originals are the user's safety net until they verify the new location.
+    Returns an error string on failure, None on success."""
+    import shutil
+
+    try:
+        shutil.copytree(old_root, new_root, dirs_exist_ok=True)
+    except OSError as exc:
+        return str(exc)
+    return None
 
 
 EXPORT_HISTORY_LIMIT = 20
@@ -354,6 +369,13 @@ class AnnotationGraphicsItem(QGraphicsObject):
         return QRectF(0, 0, self._size.width(), self._size.height())
 
     def paint(self, painter, _option, _widget=None) -> None:
+        paint_start = time.perf_counter()
+        self._paint_impl(painter)
+        diagnostics.record_paint(
+            "canvas_paint", (time.perf_counter() - paint_start) * 1000.0
+        )
+
+    def _paint_impl(self, painter) -> None:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self._size.width(), self._size.height()
         if w <= 0 or h <= 0:
@@ -1543,6 +1565,7 @@ class SamPanel(QWidget):
     mask_retrack_requested = Signal(str)          # annotation id
     install_deps_requested = Signal()
     download_weights_requested = Signal()
+    cancel_requested = Signal()
 
     def __init__(self, project: ProjectState, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1562,6 +1585,12 @@ class SamPanel(QWidget):
         self.progress.setTextVisible(False)
         self.progress.setFixedHeight(4)
         self.progress.hide()
+
+        # Visible only while a job runs; cooperative cancel for long SAM work.
+        self.cancel_button = QPushButton("Cancel SAM Job")
+        self.cancel_button.setProperty("variant", "danger")
+        self.cancel_button.clicked.connect(self.cancel_requested)
+        self.cancel_button.hide()
 
         self.include_btn = QPushButton("＋ Include")
         self.exclude_btn = QPushButton("− Exclude")
@@ -1601,22 +1630,24 @@ class SamPanel(QWidget):
         self.clear_button.clicked.connect(self.clear_points_requested)
 
         # Propagation window: track to clip end by default (least confusing for
-        # novices), or a fixed number of seconds from the playhead.
+        # novices), or a fixed number of seconds from the playhead. Both prefs
+        # persist app-wide so the choice survives restarts.
+        prefs = QSettings("NeuroEdit", "Desktop")
         self.track_window_spin = QDoubleSpinBox()
         self.track_window_spin.setRange(1.0, 120.0)
         self.track_window_spin.setDecimals(1)
         self.track_window_spin.setSingleStep(1.0)
-        self.track_window_spin.setValue(5.0)
+        self.track_window_spin.setValue(float(prefs.value("sam/trackWindowS", 5.0)))
         self.track_window_spin.setSuffix(" s")
         self.track_to_end_check = QCheckBox("To clip end")
         self.track_to_end_check.setToolTip(
             "Track from the playhead to the end of the active clip."
         )
-        self.track_to_end_check.setChecked(True)
-        self.track_window_spin.setEnabled(False)
-        self.track_to_end_check.toggled.connect(
-            lambda checked: self.track_window_spin.setEnabled(not checked)
-        )
+        track_to_end = prefs.value("sam/trackToEnd", True, type=bool)
+        self.track_to_end_check.setChecked(track_to_end)
+        self.track_window_spin.setEnabled(not track_to_end)
+        self.track_to_end_check.toggled.connect(self._track_prefs_changed)
+        self.track_window_spin.valueChanged.connect(self._track_prefs_changed)
 
         # Mask list (3D Slicer "Segment Editor" pattern): one row per
         # mask/tracked-mask annotation with visibility checkbox + inline rename.
@@ -1694,6 +1725,7 @@ class SamPanel(QWidget):
         layout.addWidget(title)
         layout.addWidget(self.status)
         layout.addWidget(self.progress)
+        layout.addWidget(self.cancel_button)
         layout.addWidget(self.last_run_label)
         layout.addWidget(self._explainer)
         layout.addWidget(self._controls, 2)
@@ -1722,10 +1754,21 @@ class SamPanel(QWidget):
 
     def set_busy(self, busy: bool) -> None:
         self.progress.setVisible(busy)
+        self.cancel_button.setVisible(busy)
         self.segment_button.setEnabled(not busy)
         self.propagate_button.setEnabled(not busy)
         self.point_toggle.setEnabled(not busy)
         self.undo_button.setEnabled(not busy and bool(self.project.sam_points))
+        # Mask rows can't safely be renamed/deleted/re-tracked while a job may
+        # rewrite their frames; gray the list until the job ends.
+        self.masks_list.setEnabled(not busy)
+
+    def _track_prefs_changed(self, *_args) -> None:
+        to_end = self.track_to_end_check.isChecked()
+        self.track_window_spin.setEnabled(not to_end)
+        prefs = QSettings("NeuroEdit", "Desktop")
+        prefs.setValue("sam/trackToEnd", to_end)
+        prefs.setValue("sam/trackWindowS", float(self.track_window_spin.value()))
 
     def refresh(self) -> None:
         self.points.clear()
@@ -2102,11 +2145,7 @@ class LabelsPanel(QWidget):
         self._duplicate_btn.clicked.connect(self._duplicate_selected)
         self._delete_inspector_btn = QPushButton("Delete")
         self._delete_inspector_btn.setToolTip("Delete selected annotation")
-        self._delete_inspector_btn.setStyleSheet(
-            "QPushButton { color: #F44336; border-color: rgba(244, 67, 54, 0.35);"
-            " background: rgba(244, 67, 54, 0.10); }"
-            "QPushButton:hover { background: rgba(244, 67, 54, 0.22); }"
-        )
+        self._delete_inspector_btn.setProperty("variant", "danger")
         self._delete_inspector_btn.clicked.connect(self._delete_selected)
         action_row.addWidget(self._duplicate_btn, 1)
         action_row.addWidget(self._delete_inspector_btn, 1)
@@ -2189,7 +2228,7 @@ class LabelsPanel(QWidget):
             remove_btn.setStyleSheet(
                 f"QPushButton {{ color: {TEXT_MUTED}; border: none; background: transparent;"
                 f" font-size: 12px; padding: 0; }}"
-                f"QPushButton:hover {{ color: #F44336; }}"
+                f"QPushButton:hover {{ color: {DANGER}; }}"
             )
             remove_btn.clicked.connect(lambda _=False, pl=preset_label: self._remove_custom_preset(pl))
             row_layout.addWidget(btn, 1)
@@ -2619,8 +2658,19 @@ class PhiReviewDialog(QDialog):
         self.setWindowTitle("Guided PHI Review")
         self.setMinimumWidth(460)
         self.stops = self._build_stops(project)
+        # Stops are keyed by item id so saved progress survives reordering and
+        # newly added media simply appears as an unreviewed stop.
+        stop_keys = {key for key, *_rest in self.stops}
+        self._reviewed: set[str] = {
+            key for key, done in (project.phi_review_progress or {}).items()
+            if done and key in stop_keys
+        }
+        # Resume at the first stop not yet reviewed.
         self._index = 0
-        self._reviewed: set[int] = set()
+        for position, (key, *_rest) in enumerate(self.stops):
+            if key not in self._reviewed:
+                self._index = position
+                break
 
         self.progress_label = QLabel()
         self.progress_label.setProperty("role", "title")
@@ -2655,9 +2705,9 @@ class PhiReviewDialog(QDialog):
         self._show_stop()
 
     @staticmethod
-    def _build_stops(project: ProjectState) -> list[tuple[str, str, float]]:
-        """(label, hint, seek_time) per timeline item needing review."""
-        stops: list[tuple[str, str, float]] = []
+    def _build_stops(project: ProjectState) -> list[tuple[str, str, str, float]]:
+        """(item_id, label, hint, seek_time) per timeline item needing review."""
+        stops: list[tuple[str, str, str, float]] = []
         clip_hint = (
             "Scrub through this clip. Look for burned-in patient banners, names, "
             "MRNs, dates, faces, tattoos, or room displays. Cover anything found "
@@ -2669,7 +2719,9 @@ class PhiReviewDialog(QDialog):
                 f"{format_time(clip.start_time + clip.display_duration)}"
             )
             kind = "Still image" if clip.media_type == "image" else "Video clip"
-            stops.append((f"{kind} “{clip.name}” ({span})", clip_hint, clip.start_time))
+            stops.append(
+                (clip.id, f"{kind} “{clip.name}” ({span})", clip_hint, clip.start_time)
+            )
         slide_hint = (
             "Read every line of slide text and any slide image for patient "
             "identifiers, case numbers, or dates."
@@ -2677,6 +2729,7 @@ class PhiReviewDialog(QDialog):
         for slide in sorted(project.slides, key=lambda s: s.start_time):
             stops.append(
                 (
+                    slide.id,
                     f"Slide “{slide.title or 'Untitled'}” ({format_time(slide.start_time)})",
                     slide_hint,
                     slide.start_time,
@@ -2690,12 +2743,17 @@ class PhiReviewDialog(QDialog):
         for track in sorted(project.audio_tracks, key=lambda t: t.start_time):
             stops.append(
                 (
+                    track.id,
                     f"Audio track “{track.name}” ({format_time(track.start_time)})",
                     audio_hint,
                     track.start_time,
                 )
             )
         return stops
+
+    def progress_dict(self) -> dict:
+        """Per-stop progress to persist on the project, complete or not."""
+        return {key: True for key in self._reviewed}
 
     def _show_stop(self) -> None:
         total = len(self.stops)
@@ -2710,8 +2768,8 @@ class PhiReviewDialog(QDialog):
         if self._index >= total:
             self._finish()
             return
-        label, hint, seek_time = self.stops[self._index]
-        reviewed = " ✓ reviewed" if self._index in self._reviewed else ""
+        key, label, hint, seek_time = self.stops[self._index]
+        reviewed = " ✓ reviewed" if key in self._reviewed else ""
         self.progress_label.setText(f"Section {self._index + 1} of {total}{reviewed}")
         self.item_label.setText(label)
         self.hint_label.setText(hint)
@@ -2728,7 +2786,8 @@ class PhiReviewDialog(QDialog):
         self._show_stop()
 
     def _mark_and_next(self) -> None:
-        self._reviewed.add(self._index)
+        if self._index < len(self.stops):
+            self._reviewed.add(self.stops[self._index][0])
         self._go_next()
 
     def _finish(self) -> None:
@@ -2736,7 +2795,7 @@ class PhiReviewDialog(QDialog):
         # bar, and stacking a second modal on dialog close trains users to
         # click through (confirmation fatigue).
         total = len(self.stops)
-        if len(self._reviewed) == total and total > 0:
+        if total > 0 and all(key in self._reviewed for key, *_rest in self.stops):
             self.review_completed.emit()
             self.accept()
         else:
@@ -2846,7 +2905,7 @@ class ExportChecklistDialog(QDialog):
     def _update_audio_warning(self) -> None:
         # Reviewed audio doesn't need the amber warning anymore.
         if self.audio_check.isChecked():
-            self.audio_warning.setStyleSheet("color: #6b7280;")
+            self.audio_warning.setStyleSheet(f"color: {TEXT_MUTED};")
         else:
             self.audio_warning.setStyleSheet("color: #f59e0b;")
 
@@ -2856,6 +2915,22 @@ class ExportChecklistDialog(QDialog):
         project.consent_confirmed = self.consent_check.isChecked()
         if self._export_includes_audio:
             project.audio_reviewed_for_phi = self.audio_check.isChecked()
+
+
+def recommended_preset_key(project: ProjectState | None) -> tuple[str, str]:
+    """(preset_key, reason) for the export dialog's default selection, from
+    source resolution and intended use. Never recommends upscaling, and only
+    recommends 4K when the video goal actually targets a big screen."""
+    if project is None or not project.clips:
+        return "1080p", "the standard choice when no source video is loaded"
+    max_height = max((clip.height or 0) for clip in project.clips)
+    if 0 < max_height < 1080:
+        return "720p", "matches your source resolution (upscaling adds size, not quality)"
+    if max_height >= 2160 and project.video_goal in (
+        "standalone-publication", "conference",
+    ):
+        return "4k", "your source is 4K and this video targets a large screen"
+    return "1080p", "the best balance for teaching and sharing at your source resolution"
 
 
 class ExportDialog(QDialog):
@@ -2913,6 +2988,18 @@ class ExportDialog(QDialog):
         self.help_label = QLabel()
         self.help_label.setProperty("role", "muted")
         self.help_label.setWordWrap(True)
+
+        recommended_key, reason = recommended_preset_key(project)
+        recommended_label = next(
+            (label for key, label, *_rest in self.PRESETS if key == recommended_key),
+            "",
+        )
+        self.recommend_label = QLabel(
+            f"★ Recommended for this project: {recommended_label} — {reason}."
+        )
+        self.recommend_label.setProperty("role", "muted")
+        self.recommend_label.setWordWrap(True)
+        self._recommended_key = recommended_key
 
         self.file_type = QComboBox()
         self.file_type.addItem("MP4 video (.mp4) - highest compatibility", "mp4")
@@ -3002,11 +3089,17 @@ class ExportDialog(QDialog):
         layout.setSpacing(12)
         layout.addWidget(title)
         layout.addWidget(intro)
+        layout.addWidget(self.recommend_label)
         layout.addLayout(form)
         layout.addWidget(self.help_label)
         layout.addWidget(self.advanced_toggle)
         layout.addWidget(self.advanced_widget)
         layout.addWidget(buttons)
+        # Preselect the recommendation; the user can still pick any preset.
+        for index in range(self.preset_combo.count()):
+            if self.preset_combo.itemData(index)[0] == recommended_key:
+                self.preset_combo.setCurrentIndex(index)
+                break
         self._preset_changed()
 
     def export_settings(self, output_path: Path) -> ExportSettings:
@@ -3088,7 +3181,7 @@ class ExportHistoryDialog(QDialog):
             item = QListWidgetItem(f"{path.name}{missing}\n{when}  •  {label}\n{path.parent}")
             item.setData(Qt.ItemDataRole.UserRole, entry)
             if missing:
-                item.setForeground(QColor("#6b7280"))
+                item.setForeground(QColor(TEXT_MUTED))
             self.list_widget.addItem(item)
         has_items = self.list_widget.count() > 0
         self.reveal_btn.setEnabled(has_items)
@@ -3271,8 +3364,11 @@ class ProjectLibraryDialog(QDialog):
         # Threads that outlived a quick shutdown wait; kept referenced so the
         # QThread C++ object is not garbage-collected while still running.
         self._orphan_threads: list[tuple[QThread, ThumbnailWorker]] = []
+        # Metadata cache: search/sort re-filter this without re-reading disk.
+        self._entries: list[dict] = []
+        self._thumb_pixmaps: dict[str, QPixmap] = {}
         self._build_ui()
-        self._populate()
+        self._reload()
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -3285,6 +3381,24 @@ class ProjectLibraryDialog(QDialog):
         header.addWidget(title)
         header.addStretch()
         layout.addLayout(header)
+
+        filter_row = QHBoxLayout()
+        filter_row.setSpacing(8)
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search projects…")
+        self.search_input.setClearButtonEnabled(True)
+        self.search_input.textChanged.connect(self._populate)
+        self.sort_combo = QComboBox()
+        for key, label in (
+            ("recent", "Recently opened"),
+            ("name", "Name (A–Z)"),
+            ("missing", "Missing media first"),
+        ):
+            self.sort_combo.addItem(label, key)
+        self.sort_combo.currentIndexChanged.connect(self._populate)
+        filter_row.addWidget(self.search_input, 1)
+        filter_row.addWidget(self.sort_combo)
+        layout.addLayout(filter_row)
 
         self.list_widget = QListWidget()
         self.list_widget.setAlternatingRowColors(False)
@@ -3309,27 +3423,66 @@ class ProjectLibraryDialog(QDialog):
         btn_row.addWidget(open_btn)
         layout.addLayout(btn_row)
 
-    def _populate(self) -> None:
+    def _reload(self) -> None:
+        """Read recents + per-project metadata from disk once; _populate()
+        then filters/sorts the cache, so typing in the search box is free."""
         self._stop_thumb_thread()
-        self.list_widget.clear()
         settings = QSettings("NeuroEdit", "Desktop")
         recents: list[str] = settings.value("recentProjects", []) or []
 
+        self._entries = []
         thumb_tasks: list[tuple[str, str, float]] = []
-        placeholder_icon = QPixmap(_make_gray_placeholder())
-
-        for path_str in recents:
+        for order, path_str in enumerate(recents):
             p = Path(path_str)
-            folder_name = p.parent.name if p.name == "project.json" else p.name
             meta = _read_project_meta(p)
-            project_name = meta["project_name"] or folder_name
-
-            modified = ""
             try:
-                ts = p.stat().st_mtime
-                modified = _relative_time(ts)
+                mtime = p.stat().st_mtime
             except Exception:  # noqa: BLE001
-                pass
+                mtime = 0.0
+            self._entries.append(
+                {"path": path_str, "meta": meta, "mtime": mtime, "order": order}
+            )
+            if meta["first_source_path"]:
+                thumb_tasks.append(
+                    (path_str, meta["first_source_path"], meta["first_clip_duration"])
+                )
+
+        self._populate()
+        if thumb_tasks:
+            self._start_thumb_thread(thumb_tasks)
+
+    @staticmethod
+    def _entry_display_name(entry: dict) -> str:
+        p = Path(entry["path"])
+        folder_name = p.parent.name if p.name == "project.json" else p.name
+        return str(entry["meta"]["project_name"] or folder_name)
+
+    def _filtered_sorted_entries(self) -> list[dict]:
+        query = self.search_input.text().strip().lower()
+        entries = [
+            entry for entry in self._entries
+            if not query or query in self._entry_display_name(entry).lower()
+        ]
+        sort_key = self.sort_combo.currentData()
+        if sort_key == "name":
+            entries.sort(key=lambda entry: self._entry_display_name(entry).lower())
+        elif sort_key == "missing":
+            entries.sort(key=lambda entry: (-entry["meta"]["missing_count"], entry["order"]))
+        # "recent" keeps the recents (most recently opened first) order.
+        return entries
+
+    def _populate(self, *_args) -> None:
+        self.list_widget.clear()
+        placeholder_icon = QPixmap(_make_gray_placeholder())
+        entries = self._filtered_sorted_entries()
+
+        for entry in entries:
+            path_str = entry["path"]
+            p = Path(path_str)
+            meta = entry["meta"]
+            project_name = self._entry_display_name(entry)
+
+            modified = _relative_time(entry["mtime"]) if entry["mtime"] else ""
 
             dur = meta["total_duration"]
             if dur > 0:
@@ -3375,27 +3528,26 @@ class ProjectLibraryDialog(QDialog):
 
             item = QListWidgetItem(display)
             item.setData(Qt.ItemDataRole.UserRole, path_str)
-            item.setIcon(QPixmap(placeholder_icon))
+            cached_thumb = self._thumb_pixmaps.get(path_str)
+            item.setIcon(cached_thumb if cached_thumb else QPixmap(placeholder_icon))
 
             if meta["ok"] and missing == 0:
-                item.setForeground(QColor("#4CAF50"))
+                item.setForeground(QColor(SUCCESS))
             elif meta["ok"] and missing > 0:
-                item.setForeground(QColor("#F44336"))
+                item.setForeground(QColor(DANGER))
             elif not p.exists():
-                item.setForeground(QColor("#6b7280"))
+                item.setForeground(QColor(TEXT_MUTED))
 
             self.list_widget.addItem(item)
 
-            if meta["first_source_path"]:
-                thumb_tasks.append((path_str, meta["first_source_path"], meta["first_clip_duration"]))
-
-        if not recents:
+        if not self._entries:
             placeholder = QListWidgetItem("No recent projects")
             placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
             self.list_widget.addItem(placeholder)
-
-        if thumb_tasks:
-            self._start_thumb_thread(thumb_tasks)
+        elif not entries:
+            placeholder = QListWidgetItem("No projects match the search")
+            placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
+            self.list_widget.addItem(placeholder)
 
     def _start_thumb_thread(self, tasks: list[tuple[str, str, float]]) -> None:
         self._thumb_thread = QThread()
@@ -3424,12 +3576,15 @@ class ProjectLibraryDialog(QDialog):
             )
 
     def _on_thumbnail_ready(self, project_path: str, thumb_path: str) -> None:
+        pix = QPixmap(thumb_path)
+        if pix.isNull():
+            return
+        # Cache so re-filtering/sorting can restore the icon without ffmpeg.
+        self._thumb_pixmaps[project_path] = pix
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
             if item and item.data(Qt.ItemDataRole.UserRole) == project_path:
-                pix = QPixmap(thumb_path)
-                if not pix.isNull():
-                    item.setIcon(pix)
+                item.setIcon(pix)
                 break
 
     def _show_context_menu(self, pos) -> None:
@@ -3482,7 +3637,7 @@ class ProjectLibraryDialog(QDialog):
         if path_str in recents:
             recents.remove(path_str)
         settings.setValue("recentProjects", recents)
-        self._populate()
+        self._reload()
 
     def closeEvent(self, event) -> None:
         self._stop_thumb_thread()
@@ -3572,6 +3727,23 @@ class MainWindow(QMainWindow):
         self.about_action = QAction("About NeuroEdit", self)
         self.about_action.triggered.connect(self._show_about)
 
+        # Dev-only: timestamped paint/load/export/SAM timing log for manual QA.
+        self.diagnostics_action = QAction("Performance Diagnostics (Developer)", self)
+        self.diagnostics_action.setCheckable(True)
+        settings_enabled = QSettings("NeuroEdit", "Desktop").value(
+            "diagnostics/enabled", False, type=bool
+        )
+        if settings_enabled and not diagnostics.is_enabled():
+            diagnostics.set_enabled(True)
+        self.diagnostics_action.setChecked(diagnostics.is_enabled())
+        self.diagnostics_action.toggled.connect(self._toggle_diagnostics)
+
+        self.reveal_diagnostics_action = QAction("Reveal Diagnostics Log", self)
+        self.reveal_diagnostics_action.setEnabled(diagnostics.is_enabled())
+        self.reveal_diagnostics_action.triggered.connect(
+            lambda: self._reveal_path(diagnostics.log_path())
+        )
+
         self.undo_action = QAction("Undo", self)
         self.undo_action.setShortcut("Ctrl+Z")
         self.undo_action.setEnabled(False)
@@ -3598,6 +3770,24 @@ class MainWindow(QMainWindow):
 
         self.storage_location_action = QAction("Project Storage Location…", self)
         self.storage_location_action.triggered.connect(self._change_storage_location)
+
+        self.theme_action_group = QActionGroup(self)
+        self.theme_action_group.setExclusive(True)
+        self.theme_actions: dict[ui_styles.ThemeMode, QAction] = {}
+        for mode, label in [
+            ("light", "Light"),
+            ("dark", "Dark"),
+            ("system", "System"),
+        ]:
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.setData(mode)
+            action.triggered.connect(
+                lambda checked=False, m=mode: self._set_theme_mode(m, checked)
+            )
+            self.theme_action_group.addAction(action)
+            self.theme_actions[mode] = action
+        self.theme_actions[ui_styles.stored_theme_mode()].setChecked(True)
 
         self.new_action.triggered.connect(self._new_project)
         self.open_action.triggered.connect(self._open_project)
@@ -3640,10 +3830,80 @@ class MainWindow(QMainWindow):
         edit_menu.addSeparator()
         edit_menu.addAction(self.phi_review_action)
 
+        view_menu = menubar.addMenu("View")
+        appearance_menu = view_menu.addMenu("Appearance")
+        for mode in ("light", "dark", "system"):
+            appearance_menu.addAction(self.theme_actions[mode])
+
         help_menu = menubar.addMenu("Help")
         help_menu.addAction(self.tutorial_action)
         help_menu.addSeparator()
+        help_menu.addAction(self.diagnostics_action)
+        help_menu.addAction(self.reveal_diagnostics_action)
+        help_menu.addSeparator()
         help_menu.addAction(self.about_action)
+
+    def _set_theme_mode(self, mode: ui_styles.ThemeMode, checked: bool = True) -> None:
+        if not checked:
+            return
+        ui_styles.save_theme_mode(mode)
+        self._apply_theme_mode(mode)
+        self.statusBar().showMessage(f"Appearance set to {mode.title()}", 3000)
+
+    def _apply_theme_mode(self, mode: ui_styles.ThemeMode) -> None:
+        app = QApplication.instance()
+        if app is not None:
+            ui_styles.apply_app_style(app, mode)
+        self._sync_imported_theme_tokens()
+        self._restyle_theme_widgets()
+        self.refresh()
+
+    def _sync_imported_theme_tokens(self) -> None:
+        from neuroedit_desktop.ui import editor_panels
+
+        for name in ui_styles.EXPORTED_COLOR_NAMES:
+            value = getattr(ui_styles, name)
+            if name in globals():
+                globals()[name] = value
+            if hasattr(editor_panels, name):
+                setattr(editor_panels, name, value)
+        global PANELS
+        PANELS = [
+            ("sam", "SAM", ui_styles.ACCENT_CYAN),
+            ("labels", "Labels", ui_styles.PRIMARY),
+            ("tips", "Tips", ui_styles.ACCENT_AMBER),
+            ("slides", "Slides", ui_styles.ACCENT_SLIDES),
+            ("audio", "Audio", ui_styles.ACCENT_RED),
+        ]
+        editor_panels.TimelineCanvas.TRACKS = [
+            ("video", "Video", ui_styles.TIMELINE_VIDEO),
+            ("audio", "Audio", ui_styles.TIMELINE_AUDIO),
+            ("slides", "Slides", ui_styles.TIMELINE_SLIDES),
+            ("markers", "Markers", ui_styles.TIMELINE_MARKERS),
+        ]
+
+    def _restyle_theme_widgets(self) -> None:
+        for button in getattr(self, "tool_buttons", {}).values():
+            button.setStyleSheet(self._tool_btn_css())
+        if hasattr(self, "color_picker_btn"):
+            self.color_picker_btn.setStyleSheet(
+                f"QPushButton {{ border-radius: 9px; border: 1px solid {BORDER_BRIGHT}; background: {BG_CARD}; }}"
+                f"QPushButton:hover {{ border-color: {TEXT_PRIMARY}; }}"
+            )
+        if hasattr(self, "width_label"):
+            self.width_label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px;")
+        if hasattr(self, "video_view"):
+            self.video_view.setStyleSheet(f"background: {VIDEO_CANVAS};")
+        if hasattr(self, "speed_btn"):
+            self.speed_btn.setStyleSheet(
+                f"QPushButton {{ border-radius: 6px; border: 1px solid {BORDER}; background: {BG_HOVER};"
+                f"  color: {TEXT_SECONDARY}; font-size: 11px; font-family: monospace; }}"
+                f"QPushButton:hover {{ border-color: {BORDER_BRIGHT}; color: {TEXT_PRIMARY}; }}"
+            )
+        if hasattr(self, "timeline"):
+            self.timeline.canvas._static_cache = None
+            self.timeline.canvas._static_cache_key = None
+            self.timeline.canvas.update()
 
     # ── Header bar (matches web app design) ──────────────────────────────
 
@@ -3916,7 +4176,7 @@ class MainWindow(QMainWindow):
         video_column_layout.setSpacing(0)
 
         self.video_view = VideoGraphicsView(self.project)
-        self.video_view.setStyleSheet("background: #000000;")
+        self.video_view.setStyleSheet(f"background: {VIDEO_CANVAS};")
         self.player.setVideoOutput(self.video_view.video_item)
         self.video_view.sam_point_added.connect(self._add_sam_point)
         self.video_view.annotation_added.connect(self._add_annotation)
@@ -4041,6 +4301,7 @@ class MainWindow(QMainWindow):
         self.sam_panel.mask_retrack_requested.connect(self._retrack_mask)
         self.sam_panel.install_deps_requested.connect(self._show_sam_install_help)
         self.sam_panel.download_weights_requested.connect(self._show_sam_setup)
+        self.sam_panel.cancel_requested.connect(self._cancel_sam_jobs)
         self.labels_panel.delete_requested.connect(self._delete_annotation)
         self.labels_panel.duplicate_requested.connect(self._duplicate_annotation)
         self.labels_panel.set_start_to_playhead.connect(self._set_annotation_start_to_playhead)
@@ -4399,11 +4660,14 @@ class MainWindow(QMainWindow):
         self._change_storage_location()
 
     def _change_storage_location(self) -> None:
+        old_root = default_project_root()
         dialog = StorageLocationDialog(self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         root = dialog.chosen_root()
         QSettings("NeuroEdit", "Desktop").setValue("storage/projectRoot", str(root))
+        if root != old_root:
+            self._offer_storage_migration(old_root, root)
         # Move the autosave target only when the open project is an untouched
         # scratch project still pointed at the old default location.
         is_scratch = (
@@ -4416,13 +4680,63 @@ class MainWindow(QMainWindow):
             self.store = ProjectStore.create(root)
         self.statusBar().showMessage(f"New projects will be stored in {root}", 5000)
 
+    def _offer_storage_migration(self, old_root: Path, new_root: Path) -> None:
+        """Safe migration when the storage root changes: copy (never move) the
+        previous autosave contents — project.json, masks, stills, audio may all
+        hold PHI, so nothing is deleted until the user verifies the copy."""
+        try:
+            has_content = old_root.exists() and any(old_root.iterdir())
+        except OSError:
+            has_content = False
+        if not has_content:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Copy existing autosave data?",
+            f"The previous storage location contains project data:\n{old_root}\n\n"
+            f"Copy it to the new location?\n{new_root}\n\n"
+            "Files are copied, not moved — the originals stay in place until "
+            "you verify the new location and remove them yourself.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        error = migrate_storage_root(old_root, new_root)
+        if error:
+            QMessageBox.warning(
+                self,
+                "Migration incomplete",
+                f"Some files could not be copied:\n{error}\n\n"
+                "The previous location was left untouched.",
+            )
+            return
+        # Re-point the open scratch store if it lived under the old root, so
+        # future autosaves land in the migrated copy.
+        try:
+            rel = self.store.project_path.relative_to(old_root)
+            self.store = ProjectStore(project_path=new_root / rel)
+        except ValueError:
+            pass
+        self.statusBar().showMessage(
+            "Autosave data copied to the new location (originals kept).", 6000
+        )
+
     def _start_phi_review(self) -> None:
         dialog = PhiReviewDialog(self.project, self)
         dialog.seek_requested.connect(self._seek_global)
         dialog.review_completed.connect(self._phi_review_completed)
-        if dialog.exec() != QDialog.DialogCode.Accepted and dialog.stops:
+        result = dialog.exec()
+        # Persist per-stop progress complete or not, so a paused review
+        # resumes at the first unreviewed section — even after reopening.
+        self.project.phi_review_progress = dialog.progress_dict()
+        self._mark_dirty(history=False)
+        if result != QDialog.DialogCode.Accepted and dialog.stops:
+            done = len(dialog.progress_dict())
             self.statusBar().showMessage(
-                "PHI review incomplete — skipped sections keep it unconfirmed.", 6000
+                f"PHI review paused — {done} of {len(dialog.stops)} sections "
+                "reviewed. Resume any time from Edit → Guided PHI Review.",
+                6000,
             )
 
     def _phi_review_completed(self) -> None:
@@ -4493,6 +4807,7 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
+        load_start = time.perf_counter()
         try:
             self.store, self.project = ProjectStore.open(Path(path))
         except Exception as exc:
@@ -4501,6 +4816,7 @@ class MainWindow(QMainWindow):
         self._add_to_recent(Path(path))
         self._validate_loaded_project_media("Open project")
         self._load_active_clip()
+        self._log_project_load(load_start, "dialog")
         self._mark_dirty()
 
     def _save_project(self) -> None:
@@ -4593,6 +4909,7 @@ class MainWindow(QMainWindow):
             settings.setValue("recentProjects", recents)
             self._rebuild_recent_menu()
             return
+        load_start = time.perf_counter()
         try:
             self.store, self.project = ProjectStore.open(path)
         except Exception as exc:
@@ -4601,7 +4918,20 @@ class MainWindow(QMainWindow):
         self._add_to_recent(path)
         self._validate_loaded_project_media("Open recent project")
         self._load_active_clip()
+        self._log_project_load(load_start, "recent")
         self._mark_dirty()
+
+    def _log_project_load(self, start_perf: float, source: str) -> None:
+        # PHI-safe by construction: counts and timing only, no names or paths.
+        diagnostics.log(
+            "project_load",
+            duration_ms=(time.perf_counter() - start_perf) * 1000.0,
+            source=source,
+            clips=len(self.project.clips),
+            audio=len(self.project.audio_tracks),
+            slides=len(self.project.slides),
+            annotations=len(self.project.annotations),
+        )
 
     def _clear_recent_projects(self) -> None:
         QSettings("NeuroEdit", "Desktop").setValue("recentProjects", [])
@@ -4972,10 +5302,26 @@ class MainWindow(QMainWindow):
         self._export_thread = thread
         self._export_worker = worker
         self._export_worker_settings = settings
+        self._export_started_perf = time.perf_counter()
+        self._export_first_progress_logged = False
+        diagnostics.log(
+            "export_start",
+            width=settings.width, height=settings.height,
+            fps=settings.fps, crf=settings.crf,
+            clips=len(project_snapshot.clips),
+        )
+        self.export_btn.setEnabled(False)
         self.statusBar().showMessage("Export started...")
         thread.start()
 
     def _export_progress(self, value: int, message: str) -> None:
+        if value > 0 and not getattr(self, "_export_first_progress_logged", True):
+            # Export *startup* latency: time until the pipeline first reports.
+            self._export_first_progress_logged = True
+            diagnostics.log(
+                "export_first_progress",
+                duration_ms=(time.perf_counter() - self._export_started_perf) * 1000.0,
+            )
         progress = getattr(self, "_export_progress_dialog", None)
         if progress is not None:
             progress.setLabelText(message)
@@ -4988,6 +5334,15 @@ class MainWindow(QMainWindow):
             progress.close()
         self._export_progress_dialog = None
         self._export_worker = None
+        self.export_btn.setEnabled(True)
+        started_perf = getattr(self, "_export_started_perf", None)
+        diagnostics.log(
+            "export_finished",
+            duration_ms=(
+                (time.perf_counter() - started_perf) * 1000.0 if started_perf else 0.0
+            ),
+            ok=int(error is None),
+        )
 
         if error:
             if str(error) == "Export canceled.":
@@ -5211,7 +5566,19 @@ class MainWindow(QMainWindow):
 
     def _set_panel(self, panel: PanelType) -> None:
         self.project.active_panel = panel
+        diagnostics.log("panel_switch", panel=panel)
         self._mark_dirty(history=False)
+
+    def _toggle_diagnostics(self, checked: bool) -> None:
+        diagnostics.set_enabled(checked)
+        QSettings("NeuroEdit", "Desktop").setValue("diagnostics/enabled", checked)
+        self.reveal_diagnostics_action.setEnabled(checked)
+        if checked:
+            self.statusBar().showMessage(
+                f"Performance diagnostics on — logging to {diagnostics.log_path()}", 8000
+            )
+        else:
+            self.statusBar().showMessage("Performance diagnostics off", 4000)
 
     # Draw-tool settings are transient UI state (see _TRANSIENT_SNAPSHOT_KEYS):
     # mark dirty for autosave, but never create or clobber undo history.
@@ -5580,6 +5947,22 @@ class MainWindow(QMainWindow):
         self.project.sam_mode = mode  # type: ignore[assignment]
         self._mark_dirty()
 
+    def _cancel_sam_jobs(self) -> None:
+        """Cooperative cancel of whichever SAM worker is running. The download
+        worker has no cancel hook (HF transfer is not interruptible), hence the
+        getattr guard."""
+        for worker_attr in (
+            "_sam_segment_worker",
+            "_sam_propagation_worker",
+            "_sam_probe_worker",
+            "_sam_download_worker",
+        ):
+            worker = getattr(self, worker_attr, None)
+            cancel = getattr(worker, "cancel", None)
+            if worker is not None and callable(cancel):
+                cancel()
+                self.statusBar().showMessage("SAM: cancel requested…", 3000)
+
     def _load_sam_backend(self) -> None:
         # Guard against double-calls while a probe is already in flight
         if getattr(self, "_sam_probe_thread", None) is not None:
@@ -5587,6 +5970,7 @@ class MainWindow(QMainWindow):
         self.sam_panel.set_status("Loading SAM backend… (importing PyTorch)")
         self.sam_panel.set_busy(True)
         self.statusBar().showMessage("Loading SAM backend…")
+        diagnostics.log("sam_job", job="probe", state="started")
 
         self._sam_probe_thread = QThread(self)
         self._sam_probe_worker = SamProbeWorker(self.sam_backend)
@@ -5607,6 +5991,7 @@ class MainWindow(QMainWindow):
         self._stop_sam_heartbeat()
         self._sam_probe_thread = None
         self._sam_probe_worker = None
+        diagnostics.log("sam_job", job="probe", state="finished", status=info.status)
         cached = self.sam_backend.is_weights_cached()
         self.sam_panel.set_weights_cached(cached)
         if info.status == "missing":
@@ -5618,10 +6003,14 @@ class MainWindow(QMainWindow):
         else:
             self.sam_panel.show_backend_ready()
         if info.status == "ready" and not cached:
-            self.sam_panel.set_status("SAM3 weights not downloaded yet.")
+            # The inline explainer (with its Download Weights button) is the
+            # single setup entry point; auto-opening SamSetupDialog on top of
+            # it produced two competing prompts for the same action.
+            self.sam_panel.set_status(
+                "SAM3 weights not downloaded yet — use Download Weights below."
+            )
             self.sam_panel.set_busy(False)
             self.statusBar().showMessage("SAM3 weights not downloaded", 4000)
-            self._show_sam_setup()
             return
         label = {
             "ready": info.message or f"SAM ready ({info.device})",
@@ -5657,6 +6046,7 @@ class MainWindow(QMainWindow):
         self.sam_panel.set_status("Downloading SAM3 weights…")
         self.sam_panel.set_busy(True)
         self.statusBar().showMessage("SAM3: downloading weights…")
+        diagnostics.log("sam_job", job="download", state="started")
         self._sam_download_thread = QThread(self)
         self._sam_download_worker = SamDownloadWorker(self.sam_backend, token)
         self._sam_download_worker.moveToThread(self._sam_download_thread)
@@ -5672,6 +6062,7 @@ class MainWindow(QMainWindow):
         self._stop_sam_heartbeat()
         self._sam_download_thread = None
         self._sam_download_worker = None
+        diagnostics.log("sam_job", job="download", state="finished", status=info.status)
         cached = self.sam_backend.is_weights_cached()
         self.sam_panel.set_weights_cached(cached)
         if info.status == "ready":
@@ -5723,6 +6114,12 @@ class MainWindow(QMainWindow):
         self.sam_panel.set_status("Running SAM segmentation…")
         self.sam_panel.set_busy(True)
         self.statusBar().showMessage("SAM: running segmentation…")
+        self._sam_run_started_iso = datetime.datetime.now().isoformat(timespec="seconds")
+        self._sam_run_start_monotonic = time.monotonic()
+        diagnostics.log(
+            "sam_job", job="segment", state="started",
+            points=len(self.project.sam_points),
+        )
 
         mask_dir = self.store.project_path.parent / "masks"
         self._pending_mask_color = self._next_mask_color()
@@ -5755,11 +6152,17 @@ class MainWindow(QMainWindow):
         self._sam_segment_worker = None
         self.sam_panel.set_busy(False)
         if error:
+            # Single-frame runs stamp sam_last_run just like propagation, so
+            # the SAM panel's "Last run" row reflects whichever ran last.
+            self.project.sam_last_run = self._sam_run_record("error", 0, "", str(error))
+            diagnostics.log("sam_job", job="segment", state="finished", ok=0)
             self.sam_panel.set_status(f"Segmentation failed: {error}")
             self.statusBar().showMessage("SAM: segmentation failed", 5000)
+            self._mark_dirty(history=False)
             QMessageBox.critical(self, "SAM segmentation failed", str(error))
             return
         if result is None:
+            diagnostics.log("sam_job", job="segment", state="finished", ok=0)
             return
         annotation = Annotation(
             id=new_id(),
@@ -5776,6 +6179,8 @@ class MainWindow(QMainWindow):
             prompt_points=list(getattr(self, "_pending_prompt_points", [])),
         )
         self.project.annotations.append(annotation)
+        self.project.sam_last_run = self._sam_run_record("success", 1, result.backend, "")
+        diagnostics.log("sam_job", job="segment", state="finished", ok=1)
         self.video_view.annotation_item.invalidate_mask_cache()
         self.sam_panel.set_status(f"{result.backend} mask saved (score {result.score:.2f})")
         self.statusBar().showMessage(
@@ -5880,6 +6285,10 @@ class MainWindow(QMainWindow):
         )
         self.sam_panel.set_busy(True)
         self.statusBar().showMessage("SAM: running video propagation…")
+        diagnostics.log(
+            "sam_job", job="propagate", state="started",
+            window_s=f"{duration_s:.1f}",
+        )
 
         mask_dir = self.store.project_path.parent / "masks"
         self._sam_propagation_thread = QThread(self)
@@ -5922,6 +6331,10 @@ class MainWindow(QMainWindow):
         self._sam_propagation_thread = None
         self._sam_propagation_worker = None
         self.sam_panel.set_busy(False)
+        diagnostics.log(
+            "sam_job", job="propagate", state="finished",
+            ok=int(error is None and result is not None and bool(result.mask_frames)),
+        )
         retrack_id = getattr(self, "_retrack_target_id", None)
         self._retrack_target_id = None
 

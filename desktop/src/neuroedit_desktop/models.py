@@ -219,6 +219,10 @@ class ProjectState:
     # Keys: started_iso, duration_s, frames, result ("success"|"error"|"canceled"),
     # backend, message.
     sam_last_run: dict = field(default_factory=dict)
+    # Guided PHI review progress per stop: {item_id: True} for clips, slides,
+    # and audio tracks already marked reviewed. Lets a paused review resume
+    # where it left off; phi_review_confirmed stays the single completion flag.
+    phi_review_progress: dict = field(default_factory=dict)
 
     @property
     def active_clip(self) -> VideoClip | None:
@@ -395,6 +399,7 @@ class ProjectState:
             caption_position=data.get("caption_position", "bottom"),
             caption_background=bool(data.get("caption_background", True)),
             sam_last_run=data.get("sam_last_run", {}) or {},
+            phi_review_progress=data.get("phi_review_progress", {}) or {},
         )
         project.clips = [_from_dict_tolerant(VideoClip, clip) for clip in data.get("clips", [])]
         project.audio_tracks = [

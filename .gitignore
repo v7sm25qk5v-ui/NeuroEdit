@@ -17,6 +17,12 @@ build/
 dist/
 release/
 
+# QA screenshot captures (scripts/capture_baseline_screenshots.py)
+desktop/qa/screenshots/
+
+# Private business / market materials — never commit to this (public) repo
+*.pptx
+
 # macOS / editor cruft
 .DS_Store
 

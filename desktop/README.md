@@ -1,13 +1,17 @@
 # NeuroEdit Desktop
 
-This is the macOS-first Python migration path for the current browser app.
-
-The goal is to keep the existing workflow while moving memory-heavy work out of the browser:
+The active NeuroEdit application: a native, cross-platform (macOS + Windows)
+desktop video editor built from one source tree. Memory-heavy work runs off the
+UI thread so the app stays responsive while editing operative video.
 
 - Native shell: PySide6
-- Video playback: Qt Multimedia first, with OpenCV/PyAV available for frame extraction
+- Video playback: Qt Multimedia, with OpenCV/PyAV available for frame extraction
 - Project persistence: project-folder JSON plus external mask/audio/video assets
-- SAM processing: separate Python backend boundary so SAM3 tracking can run outside the UI thread
+- SAM processing: separate Python backend boundary so SAM3 tracking runs outside
+  the UI thread
+
+The full module map and architecture notes (rendering pipeline, undo/redo,
+threading, PHI/redaction safeguards) are in [CLAUDE.md](CLAUDE.md).
 
 ## Run
 
@@ -30,6 +34,18 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[sam]"
 python -m neuroedit_desktop
+```
+
+The UI shell and editing workflow run without the SAM stack — install
+`-e ".[dev]"` instead of `-e ".[sam]"` to skip the ~1.6 GB PyTorch download;
+SAM features simply no-op until the `[sam]` extra is installed.
+
+## Quality checks
+
+```bash
+cd desktop
+ruff check src tests scripts
+python -m pytest tests/ -q
 ```
 
 ## SAM 3 Direction

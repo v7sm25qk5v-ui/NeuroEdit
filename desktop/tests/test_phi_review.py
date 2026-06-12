@@ -113,7 +113,7 @@ def test_phi_review_builds_stop_per_item(app):
     project = _project_with_media()
     dialog = PhiReviewDialog(project)
     assert len(dialog.stops) == 3
-    labels = [label for label, _hint, _t in dialog.stops]
+    labels = [label for _key, label, _hint, _t in dialog.stops]
     assert any("Clip A" in label for label in labels)
     assert any("Intro" in label for label in labels)
     assert any("Narration" in label for label in labels)
@@ -141,6 +141,72 @@ def test_phi_review_skip_does_not_complete(app):
     dialog._go_next()  # skip
     dialog._mark_and_next()
     assert completed == []
+
+
+def test_phi_review_progress_round_trips_on_project():
+    project = _project_with_media()
+    project.phi_review_progress = {project.clips[0].id: True}
+    restored = ProjectState.from_dict(project.to_dict())
+    assert restored.phi_review_progress == {project.clips[0].id: True}
+
+
+def test_phi_review_resumes_at_first_unreviewed_stop(app):
+    project = _project_with_media()
+    dialog = PhiReviewDialog(project)
+    first_key = dialog.stops[0][0]
+    project.phi_review_progress = {first_key: True}
+
+    resumed = PhiReviewDialog(project)
+    assert resumed._index == 1
+    assert resumed.progress_dict() == {first_key: True}
+
+
+def test_phi_review_partial_progress_is_exposed(app):
+    project = _project_with_media()
+    dialog = PhiReviewDialog(project)
+    dialog._mark_and_next()
+    dialog._go_next()  # skip the second stop
+    assert dialog.progress_dict() == {dialog.stops[0][0]: True}
+
+
+def test_phi_review_ignores_stale_progress_keys(app):
+    project = _project_with_media()
+    project.phi_review_progress = {"deleted-item-id": True}
+    dialog = PhiReviewDialog(project)
+    # Stale keys never count toward completion or the resume position.
+    assert dialog._index == 0
+    assert dialog.progress_dict() == {}
+
+
+def test_phi_review_resumed_session_can_complete(app):
+    project = _project_with_media()
+    probe = PhiReviewDialog(project)
+    project.phi_review_progress = {probe.stops[0][0]: True}
+
+    dialog = PhiReviewDialog(project)
+    completed = []
+    dialog.review_completed.connect(lambda: completed.append(True))
+    dialog._mark_and_next()  # stop 2
+    dialog._mark_and_next()  # stop 3 → finish
+    assert completed == [True]
+
+
+def test_migrate_storage_root_copies_tree(tmp_path):
+    from neuroedit_desktop.ui.main_window import migrate_storage_root
+
+    old_root = tmp_path / "old" / "Autosave"
+    (old_root / "masks").mkdir(parents=True)
+    (old_root / "project.json").write_text("{}", encoding="utf-8")
+    (old_root / "masks" / "m.png").write_bytes(b"png")
+    new_root = tmp_path / "new" / "Autosave"
+
+    error = migrate_storage_root(old_root, new_root)
+
+    assert error is None
+    assert (new_root / "project.json").read_text(encoding="utf-8") == "{}"
+    assert (new_root / "masks" / "m.png").read_bytes() == b"png"
+    # Copy, never move: originals stay until the user removes them.
+    assert (old_root / "project.json").exists()
 
 
 def test_default_project_root_respects_setting(app):

@@ -9,7 +9,7 @@ import pytest
 pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QEvent, QPointF, Qt  # noqa: E402
-from PySide6.QtGui import QMouseEvent  # noqa: E402
+from PySide6.QtGui import QKeyEvent, QMouseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from neuroedit_desktop.models import ProjectState, TimelineMarker, VideoClip  # noqa: E402
@@ -226,3 +226,92 @@ def test_stale_selection_cleared_on_refresh() -> None:
     canvas.refresh_geometry()
 
     assert canvas.selected_item is None
+
+
+# --- Snap guide line ----------------------------------------------------------
+
+
+def test_snap_engagement_arms_guide_indicator() -> None:
+    project = _project(current_time=5.0)
+    canvas = TimelineCanvas(project)
+
+    canvas._snap_indicator_time = None
+    assert canvas._snap_time(5.05, "clip", "other") == 5.0
+    assert canvas._snap_indicator_time == 5.0
+
+    canvas._snap_indicator_time = None
+    assert canvas._snap_time(7.0, "clip", "other") == 7.0
+    assert canvas._snap_indicator_time is None
+
+
+# --- Keyboard delete ----------------------------------------------------------
+
+
+def _key(canvas: TimelineCanvas, key: Qt.Key) -> None:
+    event = QKeyEvent(QEvent.Type.KeyPress, key, Qt.KeyboardModifier.NoModifier)
+    canvas.keyPressEvent(event)
+
+
+def test_delete_key_removes_selected_clip() -> None:
+    project = _project()
+    project.clips.append(_clip())
+    project.active_clip_id = "clip-1"
+    canvas = TimelineCanvas(project)
+    canvas.selected_item = ("clip", "clip-1")
+    emitted: list[bool] = []
+    canvas.project_changed.connect(lambda: emitted.append(True))
+
+    _key(canvas, Qt.Key.Key_Delete)
+
+    assert project.clips == []
+    assert project.active_clip_id is None
+    assert canvas.selected_item is None
+    assert emitted
+
+
+def test_backspace_removes_selected_marker() -> None:
+    project = _project()
+    project.markers.extend([_marker("m-1"), _marker("m-2", at=4.0)])
+    canvas = TimelineCanvas(project)
+    canvas.selected_item = ("marker", "m-1")
+
+    _key(canvas, Qt.Key.Key_Backspace)
+
+    assert [m.id for m in project.markers] == ["m-2"]
+    assert canvas.selected_item is None
+
+
+def test_delete_key_without_selection_is_noop() -> None:
+    project = _project()
+    project.clips.append(_clip())
+    canvas = TimelineCanvas(project)
+    emitted: list[bool] = []
+    canvas.project_changed.connect(lambda: emitted.append(True))
+
+    _key(canvas, Qt.Key.Key_Delete)
+
+    assert len(project.clips) == 1
+    assert not emitted
+
+
+# --- Static layer cache -------------------------------------------------------
+
+
+def test_playhead_move_reuses_static_cache() -> None:
+    project = _project()
+    project.clips.append(_clip())
+    canvas = TimelineCanvas(project)
+
+    canvas.grab()  # forces a paint
+    first = canvas._static_cache
+    assert first is not None
+
+    # Playhead motion must NOT invalidate the static layer...
+    project.current_time = 3.0
+    canvas.grab()
+    assert canvas._static_cache is first
+
+    # ...but moving a block must.
+    project.clips[0].start_time = 2.0
+    canvas.grab()
+    assert canvas._static_cache is not first

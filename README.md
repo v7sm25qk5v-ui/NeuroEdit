@@ -1,15 +1,41 @@
 # NeuroEdit
 
 NeuroEdit is a standalone desktop video editor for preparing operative video for
-conference, research, and educational use.
+conference, research, and educational use. It runs entirely on your own machine —
+no video, audio, or patient content ever leaves the computer.
 
-Current alpha release: [v0.2.1-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.2.1-alpha)
+Current alpha release: [v0.5.0-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.0-alpha)
+
+## Features
+
+- **Timeline editing** — clip trim/cut, drag-to-reorder with snapping, fades,
+  chapter markers, zoom-to-fit, and keyboard delete of selected items.
+- **Annotation tools** — rectangle, ellipse, arrow, text, and brush overlays
+  with per-anatomy label presets and a duplicate-at-playhead shortcut.
+- **SAM segmentation** — click-to-segment an anatomical structure and track it
+  through the video. Runs locally on Apple Silicon (MPS) or CPU; weights are
+  downloaded once from Hugging Face.
+- **Privacy / PHI review** — a guided, resumable PHI review stepper, a redaction
+  tool that burns opaque boxes over on-screen identifiers, metadata stripping on
+  every export, a pre-export attestation checklist, and a configurable
+  (non-cloud-synced) storage location.
+- **Slides and stills** — title/body slides, image overlays, and "Take Still"
+  frame capture that inherits redactions.
+- **Captions** — generated from transcript segments, previewed on the canvas,
+  burned in at export or exported as an SRT/VTT sidecar.
+- **Export** — H.264 MP4 with resolution presets (a recommended preset is
+  preselected from your source resolution and intended use), advanced CRF/fps/
+  bitrate controls, export history, and a written export report next to each MP4.
+- **Project library** — recent projects with thumbnails, durations, missing-media
+  warnings, and search/sort.
+- **Appearance** — Light, Dark, or System theme, chosen on first launch and
+  switchable any time from View → Appearance.
 
 ## Install The Alpha
 
 ### macOS
 
-Download `NeuroEdit-v0.2.1-alpha-macOS-unsigned.dmg` from the release page.
+Download `NeuroEdit-v0.5.0-alpha-macOS-unsigned.dmg` from the release page.
 Open the DMG, drag `NeuroEdit.app` into Applications, then right-click the app
 and choose `Open` for the first launch.
 
@@ -19,13 +45,13 @@ If macOS blocks launch, open `System Settings` -> `Privacy & Security`, choose
 
 ### Windows
 
-Download `NeuroEdit-v0.2.1-alpha-Windows-Setup.exe` from the release page on a
+Download `NeuroEdit-v0.5.0-alpha-Windows-Setup.exe` from the release page on a
 Windows PC. If SmartScreen warns, choose `More info` -> `Run anyway`, then follow
 the installer.
 
 The Windows installer is built by CI from the same source as macOS. Runtime UI
-verification for the Windows `v0.2.1-alpha` build is still pending; testers should
-capture toolbar screenshots at 100%, 125%, and 150% display scaling.
+verification on Windows is still pending; testers should capture toolbar
+screenshots at 100%, 125%, and 150% display scaling.
 
 ## Clinical Disclaimer
 
@@ -37,21 +63,39 @@ video.
 
 ## Development
 
-The active application lives in `desktop/`.
+The active application lives in `desktop/`. See
+[desktop/README.md](desktop/README.md) for the SAM3 setup and architecture, and
+[desktop/CLAUDE.md](desktop/CLAUDE.md) for the full module map.
 
 ```bash
 cd desktop
 python3.12 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[dev]"   # add ".[sam]" for SAM segmentation
 python -m neuroedit_desktop
 ```
 
-Run the current quality checks:
+Run the quality checks (the release gate):
 
 ```bash
 cd desktop
-source .venv/bin/activate
-ruff check src tests
+ruff check src tests scripts
 python -m pytest tests/ -q
 ```
+
+### QA tooling
+
+- `python scripts/make_smoothness_fixture.py --register` — builds a synthetic
+  test project (1080p + 4K clips, all annotation types, slides, captions, a
+  missing-media case) for comparing performance across builds. No patient data.
+- `python scripts/capture_baseline_screenshots.py` — renders the window, panels,
+  and dialogs offscreen to `desktop/qa/screenshots/` (gitignored) for visual
+  regression comparison.
+- Help → **Performance Diagnostics (Developer)** (or `NEUROEDIT_DIAGNOSTICS=1`)
+  logs paint/load/export/SAM timings to a per-user log outside any project
+  folder — counts and durations only, never media paths or project names.
+
+Design and QA references live in `desktop/docs/`:
+[DESIGN_LANGUAGE.md](desktop/docs/DESIGN_LANGUAGE.md),
+[ASSET_CHECKLIST.md](desktop/docs/ASSET_CHECKLIST.md), and
+[VISUAL_QA_CHECKLIST.md](desktop/docs/VISUAL_QA_CHECKLIST.md).

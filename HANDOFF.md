@@ -558,29 +558,177 @@ preset-vs-CRF export UX) drove the design choices noted inline below.
   running" (this DID abort a bare script; pytest survived but don't rely
   on it).
 
+## 12. Optimization + refinement batch from NEXT_OPTIMIZATION_PLAN.md (2026-06-11/12)
+
+Implements every code-implementable task in [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md)
+(Phases 1–5). **All changes are deliberately uncommitted and unpushed — the
+owner asked to test first.** `git add -A && git commit` once satisfied.
+
+### Phase 1 — measurement
+
+- **`diagnostics.py` (NEW)** — dev-only perf log: Help → "Performance
+  Diagnostics (Developer)" (persisted in QSettings, or `NEUROEDIT_DIAGNOSTICS=1`),
+  plus Help → "Reveal Diagnostics Log". Logs timeline/canvas paint timing
+  (immediate when a paint blows the 33 ms budget, avg/max summary every 120
+  paints), project-load duration+counts, export start / first-progress /
+  finish, SAM job lifecycle (probe/segment/propagate/download), and panel
+  switches. Writes to `~/Library/Logs/NeuroEdit` (per-OS equivalent) — never
+  inside project folders; **no media paths or project names are ever logged**.
+- **`scripts/make_smoothness_fixture.py` (NEW)** — builds the repeatable QA
+  project: synthetic 1080p + 4K clips and a sine narration (bundled ffmpeg,
+  zero patient content), a deliberately missing clip, all annotation types
+  incl. a generated SAM-style mask PNG, 2 slides, 3 markers, transcript +
+  captions on. `--register` adds it to Recent Projects. **Verified end-to-end**
+  (generated to /tmp, reopened via ProjectStore, all content present).
+- **`scripts/capture_baseline_screenshots.py` (NEW)** — offscreen capture of
+  16 surfaces (window/header/timeline/5 panels/SAM-missing state/7 dialogs)
+  into `desktop/qa/screenshots/<timestamp>/` (gitignored). Saves/restores the
+  user's QSettings; autosaves into a temp dir. **Verified: all 16 PNGs render.**
+
+### Phase 2 — brand system
+
+- **`ui/styles.py`** — semantic tokens (`SURFACE*`, `ACCENT_PRIMARY`,
+  `ACCENT_CLINICAL`, `ACCENT_SLIDES`, `BORDER_SUBTLE`, `FOCUS_RING`, `DANGER`,
+  `WARNING`, `SUCCESS`), radius/spacing/icon scales, and new QSS
+  `:pressed`/`:focus`/`:disabled`/checkbox-hover states. One-off hexes in
+  `main_window.py`/`editor_panels.py` replaced with tokens (slides violet,
+  library green/red/gray, inspector Delete now uses the `danger` variant).
+- **Contrast fixes from the audit**: `TEXT_MUTED` `#64748b→#8093ab` (was
+  3.4–3.9:1, now ≥4.5:1 on all surfaces), `TEXT_DIM` `#475569→#64748b`
+  (ruler timestamps were 2.45:1), emerald-button hover label white→`#052e16`
+  (white on emerald was 2.5:1).
+- **`tests/test_design_tokens.py` (NEW)** — WCAG contrast audit (body ≥4.5,
+  muted ≥4.5, dim ≥3.0, accent-fill labels ≥3.0, indicators ≥3.0), danger
+  hue-distinct from primary, MASK_PALETTE contains no red. Known deviation
+  documented: white-on-brand-blue = 3.7:1 (large-text floor; a 4.5 fix is a
+  Figma-level brand decision).
+- **Docs (NEW)**: [desktop/docs/DESIGN_LANGUAGE.md](desktop/docs/DESIGN_LANGUAGE.md)
+  (visual grammar + surface→token map; note: **Figma Make files cannot be read
+  via the Figma API/MCP** — values must be transcribed manually),
+  [desktop/docs/ASSET_CHECKLIST.md](desktop/docs/ASSET_CHECKLIST.md) (identity
+  assets: what exists, what's placeholder, export sizes/paths),
+  [desktop/docs/VISUAL_QA_CHECKLIST.md](desktop/docs/VISUAL_QA_CHECKLIST.md)
+  (17-item visual regression list keyed to the capture filenames).
+- **Warm light theme pass**: `ui/styles.py` now owns light/dark theme tokens,
+  `appearance/themeMode` in `QSettings`, and semantic timeline colors. Light is
+  the default Figma-inspired cream/bone/earth-accent direction; dark preserves
+  the previous high-contrast palette. `__main__.py` prompts first-run users to
+  choose Light/Dark/System before importing `MainWindow`; View → Appearance can
+  change the saved preference later. The video canvas remains dark in both
+  themes.
+
+### Phase 3 — smoothness
+
+- **Timeline static-layer cache** (`editor_panels.TimelineCanvas`): ruler,
+  lanes, blocks, markers render into a device-pixel-ratio-aware QPixmap keyed
+  by a content fingerprint that deliberately excludes `current_time` — playhead
+  motion during playback/scrub is now one blit + two lines instead of a full
+  repaint. Cache skipped above 4M px (very long/zoomed timelines) to bound
+  memory. Paint timing feeds the diagnostics budget (33 ms).
+- **Snap guide line**: dashed `SELECTION_OUTLINE` vertical line at the engaged
+  snap target during drags (clears on release/Shift-bypass).
+- **Keyboard delete**: Delete/Backspace removes the selected timeline item
+  (clip/audio/slide/marker); canvas is click-to-focus so text fields are safe.
+- **Hover states**: timeline blocks/markers lift subtly under the pointer;
+  QSS pressed/focus states cover buttons/tabs/list rows app-wide.
+- **Marker dragging intentionally NOT added** — the plan gates it on
+  paint-budget measurements from the fixture; measure first.
+- **Cancellable SAM jobs**: "Cancel SAM Job" button (danger variant) appears
+  in the SAM panel while busy; cooperative cancel of segment/propagate/probe
+  workers (HF download has no cancel hook).
+- Export button disabled during a running export.
+
+### Phase 4 — workflow refinement
+
+- **Project Library search/sort**: search box + sort combo (Recently opened /
+  Name A–Z / Missing media first). Metadata is read from disk once per open
+  (`_reload`) and re-filtered in memory; thumbnails cached in
+  `_thumb_pixmaps` so re-filtering never re-runs ffmpeg.
+- **SAM follow-ups**: `sam_last_run` now stamped for single-frame segmentation
+  (success and error); track-window prefs persist via QSettings
+  (`sam/trackToEnd`, `sam/trackWindowS`); mask list disabled while a job runs;
+  **auto-shown SamSetupDialog removed** — the inline explainer's "Download
+  Weights" button is the single setup entry point.
+- **PHI per-stop progress**: new `ProjectState.phi_review_progress`
+  ({item_id: True}); the stepper resumes at the first unreviewed stop, partial
+  progress persists on pause (status-bar "N of M reviewed"), stale ids from
+  deleted media are ignored. `phi_review_confirmed` remains the completion flag.
+- **Storage migration**: changing the storage root with existing autosave data
+  now offers to **copy (never move)** the old tree to the new root
+  (`migrate_storage_root`); originals stay until the user deletes them; the
+  open scratch store is re-pointed when it lived under the old root.
+- **Export preset recommendation** (`recommended_preset_key`): never
+  upscales — <1080p source → 720p; 4K source recommends 4K only for
+  conference/standalone-publication goals; else 1080p. Dialog preselects it
+  and shows a one-line "★ Recommended for this project" reason; advanced
+  settings stay collapsed, privacy default unchanged.
+
+### Verification
+
+- `ruff check src tests scripts` clean; **109 tests pass** (was 60): +5
+  timeline (keyboard delete, snap guide, static-cache reuse), +6 diagnostics,
+  +17 design/theme tokens, +1 appearance action, +6 export recommendation,
+  +5 project library, +2 SAM (busy state, prefs persistence), +6 PHI
+  progress/migration, +1 single-frame stamp round-trip.
+- Both new scripts executed successfully (see above); latest main-window
+  screenshot visually inspected at
+  `desktop/qa/screenshots/20260612_025650/window_1440x900.png` — warm light
+  theme renders correctly offscreen.
+- Version bumped to **0.5.0-alpha**.
+- **Not yet verified**: behavior in the packaged builds; Windows high-DPI
+  (offscreen capture can't reproduce fractional scaling — checklist item);
+  real SAM runs with torch installed (workers stubbed in tests); export
+  diagnostics timing on a real export.
+
+### Gotchas for the next session
+
+- `TimelineCanvas._static_fingerprint` must include anything the static layer
+  draws (it already covers clips/audio/slides/markers/selection/hover/drag/
+  goal settings) — if a new visual is added to `_paint_tracks`, add its inputs
+  to the fingerprint or it will paint stale.
+- `PhiReviewDialog.stops` tuples grew from 3 to 4 fields (`item_id` first) —
+  anything unpacking them must use 4 fields.
+- `ruff` is NOT in the venv — use the global `ruff` on PATH
+  (`/Library/Frameworks/Python.framework/Versions/3.13/bin/ruff`).
+- SamPanel now reads/writes QSettings in `__init__` — tests that construct it
+  and change track-window state must save/restore those keys (see
+  `test_track_window_prefs_persist_across_panels`).
+
 ## Current state at handoff (updated 2026-06-11)
 
-- `main`: P3 commit `719ce68`, P4 commit `5f58847`, quality/tests commit
-  `ffeb7f9`. Local == `origin/main` after push.
-- Version: `0.4.0-alpha` in `neuroedit_desktop/__init__.py`.
-- **Released 2026-06-11**: tag `v0.4.0-alpha` (at `ffeb7f9`) built and
-  published successfully —
+- `main`: section 12's optimization batch + the Codex light/dark theming pass
+  committed on top of `cb86aad` and pushed; owner tested from source first.
+- Version: `0.5.0-alpha` in `neuroedit_desktop/__init__.py`.
+- **Released 2026-06-12**: tag `v0.5.0-alpha` — optimization batch (diagnostics,
+  timeline paint cache, snap guide/keyboard delete/hover, library search/sort,
+  SAM follow-ups, PHI resume + storage migration, export recommendation) plus
+  the light/dark/system theming pass. Built and published via the `build.yml`
+  workflow on the tag.
+- Prior release 2026-06-11: tag `v0.4.0-alpha` (at `ffeb7f9`) —
   https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.4.0-alpha
-  with `NeuroEdit-v0.4.0-alpha-macOS-unsigned.dmg` (128 MB), the macOS zip
-  (116 MB), and `NeuroEdit-v0.4.0-alpha-Windows-Setup.exe` (100 MB).
-  Quality workflow was green on the same SHA before tagging.
-- Test suite: **60 passing** (`ruff` clean): 6 original + 13 P1 + 8 P2 +
-  9 P3 + 11 P4 captions + 13 quality/regression/headless.
+  with the macOS DMG/zip and Windows Setup.exe.
+- Test suite: **109 passing** (`ruff` clean): the previous 60 plus the
+  section-12 additions (timeline, diagnostics, design/theme tokens, appearance
+  action, export recommendation, project library, SAM prefs, PHI
+  progress/migration).
 - Remote auth: SSH remote failed (no key); remote switched to HTTPS
   (`https://github.com/v7sm25qk5v-ui/NeuroEdit.git`), PAT cached in keychain.
 - Roadmap status: P0 partially owner-blocked (repo visibility, signing, DMG
   smoke test), P1–P4 shipped, P5 (Stryker/DICOM) parked pending sample data.
 - **Immediate next steps:**
-  1. ~~Confirm the GitHub quality workflow is green~~ — done, green on `ffeb7f9`.
-  2. Visual smoke test of the v0.4.0-alpha build: first-run storage prompt,
-     guided review, checklist, captions preview/burn-in, export history
-     (offscreen tests can't judge look & feel). Copy the per-tag QA checklist
-     to `qa/QA_v0.4.0-alpha.md` and fill it in.
-  3. ~~Tag `v0.4.0-alpha`~~ — done, released 2026-06-11 (see above).
-  4. Owner decisions still pending: repo private, code signing, Intel Mac.
+  1. **Verify the `v0.5.0-alpha` release built green**: watch the `build.yml`
+     run on the tag (Actions tab), confirm the macOS DMG/zip + Windows Setup.exe
+     attached to the release, then visually smoke-test the packaged builds
+     (light + dark first-run chooser, theme switch from View → Appearance) per
+     [desktop/docs/VISUAL_QA_CHECKLIST.md](desktop/docs/VISUAL_QA_CHECKLIST.md).
+  2. Plan items that need the owner / hardware (not doable from this machine):
+     Windows installer smoke pass at 100/125/150% scaling; Figma Make asset
+     exports per [ASSET_CHECKLIST.md](desktop/docs/ASSET_CHECKLIST.md) and the
+     exact frame names for the design-language map; repo-privacy and
+     code-signing decisions; Intel Mac evaluation (deferred unless testers ask).
+  3. After the Figma token values land in `styles.py`, re-run
+     `pytest tests/test_design_tokens.py` + the screenshot capture and compare
+     against the pre-brand baseline.
+  4. Marker dragging: measure timeline paint with the fixture first (plan
+     gates it on the paint budget), then implement if headroom allows.
 - Heads-up: always `git fetch` and check HEAD before editing across sessions.

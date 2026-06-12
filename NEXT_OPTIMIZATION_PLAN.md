@@ -1,0 +1,203 @@
+# NeuroEdit Next Optimization + Feature Refinement Plan
+
+## Goal
+
+Make the current alpha feel fast, polished, and clinically trustworthy while folding
+in the Figma brand system without destabilizing the recently shipped P1–P4 workflow.
+This plan deliberately prioritizes finish, performance, and visual consistency over
+large new integrations. The Stryker/DICOM work remains parked until sample data is
+available.
+
+## Current baseline to protect
+
+- The roadmap has shipped the core editing workflow: timeline selection/snapping,
+  the mask workflow, PHI review, captions, export history, and advanced export
+  settings.
+- Remaining roadmap blockers are owner/release-channel decisions: deciding repository
+  privacy and deciding when to add signing and notarization. macOS DMG launch
+  verification is already part of the owner's active workflow, so this plan does
+  not treat it as a new blocker.
+- The desktop UI already has a centralized dark palette/QSS, a header logo slot,
+  a wordmark in the About dialog, and resize-safety logic that prevents clipped
+  side panels.
+- Performance work has already started in the right places: SAM propagation frame
+  loading, overlay cache bounds, deferred canvas refreshes during drags, memoized
+  timeline painting, and project-library metadata reads.
+
+## Phase 1 — Release confidence and baseline measurement
+
+**Why first:** smoothness work needs a measured baseline, and brand changes are easier
+to judge when the app can be launched and tested consistently.
+
+1. **Keep packaged-build smoke testing focused on gaps, not already-covered work.**
+   - Treat macOS DMG launch/import/scrub/export checks as already covered by the
+     owner's ongoing QA loop; keep noting regressions, but do not make this a new
+     planning blocker.
+   - Prioritize the Windows installer runtime pass at 100%, 125%, and 150% display
+     scaling because Windows UI verification is still the unresolved packaged-build
+     gap.
+   - Capture baseline screenshots for the header, timeline, right panels, dialogs,
+     project library, export completion, SAM setup/missing-backend state, and PHI
+     review stepper before applying the new design language.
+
+2. **Add lightweight performance instrumentation for manual QA.**
+   - Add a dev-only diagnostics toggle that logs timeline paint time, canvas paint
+     time, project-load time, export startup time, and SAM job queue state.
+   - Store logs outside project media folders and avoid PHI-bearing paths by default.
+   - Acceptance: a tester can reproduce a “feels sluggish” report with timestamps
+     and the active view/panel, without attaching patient content.
+
+3. **Create a repeatable “smoothness fixture” project.**
+   - One short 1080p clip, one 4K clip, several annotations, slides, captions,
+     masks, audio, and a few missing-media cases.
+   - Acceptance: QA can compare cold launch, project open, scrubbing, annotation
+     dragging, panel switching, and export startup across builds.
+
+## Phase 2 — Figma brand-system integration
+
+**Why second:** the app already has styling tokens, so convert Figma decisions into
+centralized code before touching individual widgets. Use the owner's Figma Make
+concept, [Redesign video editing app UI](https://www.figma.com/make/EwIb4hEXiKH6uq5NipTXEr/Redesign-video-editing-app-UI?t=GISE85bHg74npOdT-6),
+as the source of truth for the app's refreshed video-editor design language.
+
+1. **Translate the Figma Make design language into implementation rules.**
+   - Capture the concept's visual grammar as a short in-repo design brief: dark
+     editor canvas, clean high-contrast controls, modern rounded panels, clear
+     hierarchy between media/timeline/inspector areas, branded accent usage, and
+     restrained clinical trust cues.
+   - Map the concept to concrete NeuroEdit surfaces: header, transport controls,
+     media/project library, timeline tracks, inspector panels, SAM mask list, PHI
+     review, caption controls, export dialogs, and empty/error states.
+   - Acceptance: every planned UI change can point back to a Figma frame/section and
+     an implementation token or component target.
+
+2. **Extract Figma brand tokens into code.**
+   - Define the canonical color palette, typography scale, spacing scale, corner
+     radii, elevation/border rules, icon sizes, and state colors.
+   - Replace one-off inline styles where practical with named semantic tokens such
+     as `surface`, `surfaceRaised`, `accentPrimary`, `accentClinical`, `textMuted`,
+     `borderSubtle`, `focusRing`, `danger`, and `warning`.
+   - Acceptance: changing a brand color in one token file updates buttons, panels,
+     timeline selection, status UI, and dialogs consistently.
+
+3. **Refresh app identity surfaces.**
+   - Update the header logo treatment, About dialog wordmark, installer assets,
+     app icons, and release screenshots from the approved Figma exports.
+   - Add an asset checklist that records source Figma frame name, export size,
+     file path, and whether the asset is used on macOS, Windows, or in-app only.
+   - Acceptance: no placeholder identity remains in the normal app path.
+
+4. **Run an accessibility/color audit.**
+   - Check contrast for text, disabled controls, warnings, PHI confirmations,
+     timeline selected state, SAM mask colors, and caption previews.
+   - Keep red reserved for destructive/privacy risk states and avoid red SAM masks,
+     matching the existing palette direction.
+   - Acceptance: every major text/control state meets target contrast in screenshots
+     and destructive states are visually distinct from primary actions.
+
+## Phase 3 — Smoothness and interaction polish
+
+**Why third:** after the brand surface is stable, optimize the interactions users feel
+on every edit.
+
+1. **Timeline and canvas responsiveness.**
+   - Add a paint budget target: timeline and canvas interactions should stay under
+     16–33 ms per frame during common drags on the QA fixture.
+   - Cache static timeline layers separately from moving playhead/selection layers.
+   - Avoid full panel refreshes during scrubs, drags, and playhead movement.
+   - Acceptance: annotation drag, timeline scrub, marker drag/edit, and zoom-to-fit
+     feel immediate on the fixture project.
+
+2. **Panel switching and layout stability.**
+   - Precompute right-panel minimum widths after Figma spacing updates so the app
+     keeps the current no-clipping guarantee.
+   - Shorten or restructure wide labels and multi-button rows if the target design
+     should support a narrower minimum window than the current content-driven floor.
+   - Acceptance: no horizontal panel scrollbar at supported window sizes, including
+     high-DPI Windows.
+
+3. **Background work and progress clarity.**
+   - Keep thumbnail generation, media probing, SAM warmup/download, SAM propagation,
+     and export work off the UI thread.
+   - Add consistent cancellable progress components for long jobs.
+   - Disable or clearly mark controls that cannot safely run while a SAM job or
+     export is active.
+   - Acceptance: no app freeze during imports, thumbnail loading, SAM setup, SAM
+     tracking, or export startup.
+
+4. **Microinteractions that make the editor feel premium.**
+   - Add subtle hover/focus/pressed states from Figma tokens for toolbar buttons,
+     panel tabs, list rows, timeline blocks, and context menus.
+   - Add a visible snap guide line and keyboard-delete of selected timeline items,
+     both already deferred from P1.
+   - Add marker dragging only after the paint-budget work proves timeline updates
+     are cheap enough.
+   - Acceptance: interactions communicate state immediately without adding visual
+     clutter or clinical-risk ambiguity.
+
+## Phase 4 — Workflow refinement before new platform bets
+
+**Why fourth:** these are small trust and retention improvements that matter more than
+large integrations before broader alpha testing.
+
+1. **Project Library polish.**
+   - Keep thumbnails, relative timestamps, duration/media counts, missing-media
+     warnings, and reveal actions as a first-class entry point.
+   - Add search/filter and sort by recent/name/missing-media if testers accumulate
+     enough projects to need it.
+   - Acceptance: a returning tester can find the right case in under five seconds.
+
+2. **SAM workflow follow-ups.**
+   - Stamp `sam_last_run` for single-frame segmentation, persist track-window UI
+     preferences, disable mask-list rows while a SAM job is running, and decide
+     whether to remove the auto-shown setup dialog now that the inline explainer
+     exists.
+   - Acceptance: SAM setup/status feels like one coherent flow, not two competing
+     prompts.
+
+3. **PHI/storage follow-ups.**
+   - Persist guided-review progress per stop, not just final completion.
+   - Provide a safe migration flow when the storage root changes.
+   - Acceptance: users can pause/resume PHI review and move storage without losing
+     confidence in what has been reviewed.
+
+4. **Caption/export refinement.**
+   - Evaluate Intel Mac support only if testers need it.
+   - Add export preset recommendations based on source resolution and intended use
+     after the packaged-build smoke pass.
+   - Acceptance: the default export path stays simple, with advanced controls hidden
+     unless needed.
+
+## Phase 5 — Brand QA and release packaging
+
+1. **Create a visual regression checklist from Figma.**
+   - Header, toolbar row wrapping, primary/secondary/danger buttons, right panels,
+     dialogs, timeline states, project library rows, SAM mask list, PHI checklist,
+     captions preview, export completion, and empty/error states.
+
+2. **Package assets and documentation.**
+   - Update release notes and screenshots after brand integration.
+   - Make owner decisions on repository privacy and code signing/notarization before
+     widening tester distribution.
+
+3. **Gate every release candidate.**
+   - `ruff check src tests`
+   - `python -m pytest tests/ -q`
+   - owner's ongoing packaged macOS smoke notes reviewed for regressions
+   - packaged Windows smoke test
+   - visual QA against Figma checklist
+
+## Recommended immediate next sprint
+
+1. Keep macOS DMG notes in the owner's existing QA loop and focus new packaged-build
+   effort on Windows installer smoke testing.
+2. Add the smoothness fixture and diagnostics toggle.
+3. Convert the Figma Make `Redesign video editing app UI` concept into a concise
+   design-language brief and token/component map.
+4. Import Figma tokens into the centralized style layer.
+5. Apply the tokens to header/buttons/panels/dialogs before deeper timeline styling.
+6. Re-run resize tests and capture branded screenshots, with special attention to
+   Windows high-DPI behavior.
+
+This gives the project a safe optimization loop: measure first, centralize the brand,
+polish the highest-frequency interactions, and only then restart larger feature bets.

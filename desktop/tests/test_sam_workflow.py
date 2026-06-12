@@ -215,6 +215,45 @@ def test_sam_panel_refresh_preserves_selection(app) -> None:
     assert item.data(Qt.ItemDataRole.UserRole) == "m2"
 
 
+# ── Busy state / track-window prefs ───────────────────────────────────────
+
+
+def test_busy_disables_mask_list_and_shows_cancel(app) -> None:
+    project = ProjectState()
+    project.annotations.append(_mask_annotation("m1", "Mask 1"))
+    panel = SamPanel(project)
+    panel.refresh()
+
+    panel.set_busy(True)
+    assert not panel.masks_list.isEnabled()
+    assert not panel.cancel_button.isHidden()
+    assert not panel.segment_button.isEnabled()
+
+    panel.set_busy(False)
+    assert panel.masks_list.isEnabled()
+    assert panel.cancel_button.isHidden()
+
+
+def test_track_window_prefs_persist_across_panels(app) -> None:
+    from PySide6.QtCore import QSettings
+
+    settings = QSettings("NeuroEdit", "Desktop")
+    original_to_end = settings.value("sam/trackToEnd", True, type=bool)
+    original_window = settings.value("sam/trackWindowS", 5.0)
+    try:
+        panel = SamPanel(ProjectState())
+        panel.track_to_end_check.setChecked(False)
+        panel.track_window_spin.setValue(12.0)
+
+        fresh = SamPanel(ProjectState())
+        assert fresh.track_to_end_check.isChecked() is False
+        assert fresh.track_window_spin.value() == 12.0
+        assert fresh.track_window_spin.isEnabled()
+    finally:
+        settings.setValue("sam/trackToEnd", original_to_end)
+        settings.setValue("sam/trackWindowS", original_window)
+
+
 # ── Propagation window math ───────────────────────────────────────────────
 
 

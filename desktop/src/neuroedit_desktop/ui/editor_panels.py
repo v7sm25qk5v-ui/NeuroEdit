@@ -45,6 +45,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from neuroedit_desktop import diagnostics
 from neuroedit_desktop.models import (
     AudioTrack,
     ProjectState,
@@ -59,18 +60,23 @@ from neuroedit_desktop.ui.styles import (
     ACCENT_CYAN,
     ACCENT_EMERALD,
     ACCENT_RED,
+    ACCENT_SLIDES,
     BG_CARD,
     BG_PRIMARY,
     BG_SECONDARY,
     BG_TERTIARY,
     BORDER,
     BORDER_BRIGHT,
-    PRIMARY,
+    PLAYHEAD,
     SELECTION_OUTLINE,
     TEXT_DIM,
     TEXT_MUTED,
     TEXT_PRIMARY,
     TEXT_SECONDARY,
+    TIMELINE_AUDIO,
+    TIMELINE_MARKERS,
+    TIMELINE_SLIDES,
+    TIMELINE_VIDEO,
 )
 
 
@@ -249,15 +255,20 @@ class TimelineCanvas(QWidget):
     RULER_H = 30
     TRACK_H = 46
     TRACKS: list[tuple[str, str, str]] = [
-        ("video", "Video", PRIMARY),
-        ("audio", "Audio", ACCENT_RED),
-        ("slides", "Slides", "#8b5cf6"),
-        ("markers", "Markers", ACCENT_AMBER),
+        ("video", "Video", TIMELINE_VIDEO),
+        ("audio", "Audio", TIMELINE_AUDIO),
+        ("slides", "Slides", TIMELINE_SLIDES),
+        ("markers", "Markers", TIMELINE_MARKERS),
     ]
 
     HANDLE_PX = 6
     MARKER_HIT_PX = 12
     SNAP_PX = 10.0
+
+    # Cache the static layer (ruler, lanes, blocks, markers) only while the
+    # canvas stays a sane size; a long timeline at high zoom can be hundreds of
+    # thousands of px wide, where a full-canvas pixmap would eat real memory.
+    STATIC_CACHE_MAX_PIXELS = 4_000_000
 
     def __init__(self, project: ProjectState, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -268,12 +279,20 @@ class TimelineCanvas(QWidget):
         # Widget-level selection only — never serialized or snapshotted.
         self.selected_item: tuple[str, str] | None = None  # (kind, item_id)
         self.snap_enabled = True
+        # Static layer (everything except playhead + snap guide) rendered to a
+        # pixmap so playhead-only repaints during playback/scrub are one blit.
+        self._static_cache: QPixmap | None = None
+        self._static_cache_key: tuple | None = None
+        self._snap_indicator_time: float | None = None
+        self._hover_item: tuple[str, str] | None = None  # (kind, item_id)
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.refresh_geometry()
 
     def set_project(self, project: ProjectState) -> None:
         self.project = project
         self._prune_selection()
+        self._static_cache_key = None
         self.refresh_geometry()
         self.update()
 
@@ -298,13 +317,73 @@ class TimelineCanvas(QWidget):
             self.selected_item = None
 
     def paintEvent(self, _event) -> None:  # noqa: N802
+        paint_start = time.perf_counter()
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QColor(BG_SECONDARY))
-
         # Floor must match the hit-test floor (1.0) or paint and clicks disagree
         # once zoom-to-fit drops below the old 10 px/s minimum.
         zoom = max(1.0, self.project.zoom)
+
+        use_cache = self.width() * self.height() <= self.STATIC_CACHE_MAX_PIXELS
+        if use_cache:
+            key = self._static_fingerprint(zoom)
+            if self._static_cache is None or key != self._static_cache_key:
+                self._static_cache = self._render_static_layer(zoom)
+                self._static_cache_key = key
+            painter.drawPixmap(0, 0, self._static_cache)
+        else:
+            self._static_cache = None
+            self._static_cache_key = None
+            self._paint_static(painter, zoom)
+
+        self._paint_snap_indicator(painter, zoom)
+        self._paint_playhead(painter, zoom)
+        diagnostics.record_paint(
+            "timeline_paint",
+            (time.perf_counter() - paint_start) * 1000.0,
+            cached=int(use_cache),
+        )
+
+    def _static_fingerprint(self, zoom: float) -> tuple:
+        """Everything the static layer depends on. current_time is deliberately
+        absent: playhead motion must not invalidate the cache."""
+        p = self.project
+        return (
+            self.width(), self.height(), round(self.devicePixelRatioF(), 2),
+            round(zoom, 3),
+            p.active_clip_id,
+            self.selected_item,
+            self._hover_item,
+            self._drag[0:2] if self._drag else None,
+            # Over-guidance outlines depend on the goal/talk-length settings.
+            p.video_goal, round(p.target_presentation_minutes, 1),
+            tuple(
+                (c.id, round(c.start_time, 3), round(c.trim_start, 3),
+                 round(c.trim_end, 3), c.name, c.media_type)
+                for c in p.clips
+            ),
+            tuple(
+                (t.id, round(t.start_time, 3), round(t.duration, 3), t.name)
+                for t in p.audio_tracks
+            ),
+            tuple(
+                (s.id, round(s.start_time, 3), round(s.duration, 3), s.title)
+                for s in p.slides
+            ),
+            tuple((m.id, round(m.time, 3), m.label, m.color) for m in p.markers),
+        )
+
+    def _render_static_layer(self, zoom: float) -> QPixmap:
+        ratio = self.devicePixelRatioF()
+        pixmap = QPixmap(int(self.width() * ratio), int(self.height() * ratio))
+        pixmap.setDevicePixelRatio(ratio)
+        painter = QPainter(pixmap)
+        self._paint_static(painter, zoom)
+        painter.end()
+        return pixmap
+
+    def _paint_static(self, painter: QPainter, zoom: float) -> None:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.fillRect(QRectF(0, 0, self.width(), self.height()), QColor(BG_SECONDARY))
         end_time = project_end_time(self.project)
         width = self.width()
 
@@ -316,7 +395,15 @@ class TimelineCanvas(QWidget):
 
         self._paint_ruler(painter, zoom, end_time)
         self._paint_tracks(painter, zoom)
-        self._paint_playhead(painter, zoom)
+
+    def _paint_snap_indicator(self, painter: QPainter, zoom: float) -> None:
+        if self._snap_indicator_time is None or self._drag is None:
+            return
+        x = self.LABEL_W + self._snap_indicator_time * zoom
+        pen = QPen(QColor(SELECTION_OUTLINE), 1)
+        pen.setStyle(Qt.PenStyle.DashLine)
+        painter.setPen(pen)
+        painter.drawLine(QPointF(x, 0), QPointF(x, self.height()))
 
     def _paint_ruler(self, painter: QPainter, zoom: float, end_time: float) -> None:
         step = 1 if zoom >= 150 else 5 if zoom >= 60 else 10 if zoom >= 30 else 30
@@ -407,8 +494,15 @@ class TimelineCanvas(QWidget):
         fill_alpha: int = 46,
         *,
         selected: bool = False,
+        hovered: bool = False,
     ) -> None:
-        fill = QColor(color).lighter(112) if selected else QColor(color)
+        fill = QColor(color)
+        if selected:
+            fill = fill.lighter(112)
+        elif hovered:
+            # Subtle lift so the pointer target reads without extra chrome.
+            fill = fill.lighter(108)
+            fill_alpha += 14
         fill.setAlpha(fill_alpha)
         painter.setPen(QPen(QColor(color), 1.3))
         painter.setBrush(fill)
@@ -454,10 +548,14 @@ class TimelineCanvas(QWidget):
             painter.setBrush(glow_color)
             painter.drawRoundedRect(glow, 11, 11)
             rect = rect.adjusted(-4, -4, 4, 4)
-        color = ACCENT_CYAN if dragging else PRIMARY
+        color = ACCENT_CYAN if dragging else TIMELINE_VIDEO
         fill_alpha = 110 if dragging else 70 if active else 46
         selected = self.selected_item == ("clip", clip.id)
-        self._paint_block(painter, rect, clip.name, color, fill_alpha, selected=selected)
+        hovered = self._hover_item == ("clip", clip.id)
+        self._paint_block(
+            painter, rect, clip.name, color, fill_alpha,
+            selected=selected, hovered=hovered,
+        )
         max_clip_s, _guidance = recommended_continuous_clip_seconds(self.project)
         if clip.media_type == "video" and clip.display_duration > max_clip_s:
             painter.setPen(QPen(QColor(ACCENT_RED), 2))
@@ -486,8 +584,12 @@ class TimelineCanvas(QWidget):
         for track in self.project.audio_tracks:
             rect = self._block_rect(track.start_time, max(0.25, track.duration), 1, zoom)
             selected = self.selected_item == ("audio", track.id)
-            self._paint_block(painter, rect, track.name, ACCENT_RED, 42, selected=selected)
-            painter.setPen(QPen(QColor(ACCENT_RED), 1))
+            hovered = self._hover_item == ("audio", track.id)
+            self._paint_block(
+                painter, rect, track.name, TIMELINE_AUDIO, 42,
+                selected=selected, hovered=hovered,
+            )
+            painter.setPen(QPen(QColor(TIMELINE_AUDIO), 1))
             bars = max(6, min(42, int(rect.width() / 8)))
             for idx in range(bars):
                 x = rect.left() + 8 + idx * 7
@@ -501,8 +603,10 @@ class TimelineCanvas(QWidget):
         for slide in self.project.slides:
             rect = self._slide_block_rect(slide, zoom)
             selected = self.selected_item == ("slide", slide.id)
+            hovered = self._hover_item == ("slide", slide.id)
             self._paint_block(
-                painter, rect, slide.title or "(untitled slide)", "#8b5cf6", 42, selected=selected
+                painter, rect, slide.title or "(untitled slide)", TIMELINE_SLIDES, 42,
+                selected=selected, hovered=hovered,
             )
 
     def _paint_markers(self, painter: QPainter, zoom: float) -> None:
@@ -510,6 +614,8 @@ class TimelineCanvas(QWidget):
         for marker in self.project.markers:
             x = self.LABEL_W + marker.time * zoom
             color = QColor(marker.color)
+            if self._hover_item == ("marker", marker.id):
+                color = color.lighter(115)
             if self.selected_item == ("marker", marker.id):
                 color = color.lighter(112)
                 painter.setPen(QPen(QColor(SELECTION_OUTLINE), 2))
@@ -528,9 +634,9 @@ class TimelineCanvas(QWidget):
 
     def _paint_playhead(self, painter: QPainter, zoom: float) -> None:
         x = self.LABEL_W + self.project.current_time * zoom
-        painter.setPen(QPen(QColor(ACCENT_RED), 2))
+        painter.setPen(QPen(QColor(PLAYHEAD), 2))
         painter.drawLine(QPointF(x, 0), QPointF(x, self.height()))
-        painter.setBrush(QColor(ACCENT_RED))
+        painter.setBrush(QColor(PLAYHEAD))
         painter.drawEllipse(QPointF(x, 4), 5, 5)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
@@ -568,7 +674,7 @@ class TimelineCanvas(QWidget):
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
         if self._drag is None:
-            self._update_hover_cursor(event.position())
+            self._update_hover(event.position())
             return super().mouseMoveEvent(event)
         kind, item_id, offset, origin_start = self._drag
         zoom = max(1.0, self.project.zoom)
@@ -577,6 +683,8 @@ class TimelineCanvas(QWidget):
         # Shift bypasses snapping for the duration of the drag.
         snap = not (event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
         base_kind = "clip" if kind.startswith("clip") else kind
+        # _snap_time re-arms this when the drag actually snaps this move.
+        self._snap_indicator_time = None
 
         if kind == "clip":
             new_start = max(0.0, time_at - offset)
@@ -634,10 +742,56 @@ class TimelineCanvas(QWidget):
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         had_drag = self._drag is not None
         self._drag = None
+        self._snap_indicator_time = None
         self.setCursor(Qt.CursorShape.ArrowCursor)
         if had_drag:
+            self.update()
             self.project_changed.emit()
         super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        # Delete/Backspace removes the selected timeline item. Only fires when
+        # the canvas itself has focus (click-to-focus), so text fields are safe.
+        if (
+            event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace)
+            and self.selected_item is not None
+        ):
+            self._delete_selected_item()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def _delete_selected_item(self) -> None:
+        if self.selected_item is None:
+            return
+        kind, item_id = self.selected_item
+        if kind == "clip":
+            self.project.clips = [c for c in self.project.clips if c.id != item_id]
+            if self.project.active_clip_id == item_id:
+                self.project.active_clip_id = (
+                    self.project.clips[0].id if self.project.clips else None
+                )
+        elif kind == "audio":
+            self.project.audio_tracks = [
+                t for t in self.project.audio_tracks if t.id != item_id
+            ]
+        elif kind == "slide":
+            self.project.slides = [s for s in self.project.slides if s.id != item_id]
+        elif kind == "marker":
+            self.project.markers = [m for m in self.project.markers if m.id != item_id]
+        else:
+            return
+        self.selected_item = None
+        self.project.duration = project_end_time(self.project)
+        self.refresh_geometry()
+        self.update()
+        self.project_changed.emit()
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        if self._hover_item is not None:
+            self._hover_item = None
+            self.update()
+        super().leaveEvent(event)
 
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
         if event.button() != Qt.MouseButton.LeftButton:
@@ -762,14 +916,29 @@ class TimelineCanvas(QWidget):
             targets.append(slide.start_time + max(0.25, slide.duration))
         targets.extend(marker.time for marker in self.project.markers)
         best = min(targets, key=lambda target: abs(target - t))
-        return best if abs(best - t) <= threshold else t
+        if abs(best - t) <= threshold:
+            # Remember the engaged target so paint can draw the snap guide line.
+            self._snap_indicator_time = best
+            return best
+        return t
 
-    def _update_hover_cursor(self, pos: QPointF) -> None:
+    def _update_hover(self, pos: QPointF) -> None:
+        """Resize cursor on trim handles + hover highlight on blocks/markers."""
         hit = self._hit_block(pos.x(), pos.y())
         if hit is not None and hit[0] in ("clip-trim-start", "clip-trim-end"):
             self.setCursor(Qt.CursorShape.SizeHorCursor)
         else:
             self.setCursor(Qt.CursorShape.ArrowCursor)
+        hover: tuple[str, str] | None = None
+        if hit is not None:
+            hover = ("clip" if hit[0].startswith("clip") else hit[0], hit[1])
+        else:
+            marker = self._hit_marker(pos.x(), pos.y())
+            if marker is not None:
+                hover = ("marker", marker.id)
+        if hover != self._hover_item:
+            self._hover_item = hover
+            self.update()
 
     def _item_start_time(self, kind: str, item_id: str) -> float:
         if kind.startswith("clip"):
@@ -2625,7 +2794,7 @@ class TipsPanel(QWidget):
         sections = [
             ("Structure", ACCENT_AMBER, tips["structure"]),
             ("Anatomy to Label", ACCENT_CYAN, tips["anatomy"]),
-            ("Cut Strategy", "#8b5cf6", tips["cuts"]),
+            ("Cut Strategy", ACCENT_SLIDES, tips["cuts"]),
             ("Timing", ACCENT_EMERALD, tips["timing"]),
             ("Narration", ACCENT_RED, tips["narration"]),
         ]
