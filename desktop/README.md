@@ -48,6 +48,16 @@ ruff check src tests scripts
 python -m pytest tests/ -q
 ```
 
+For manual smoothness QA, build the synthetic no-PHI fixture once:
+
+```bash
+python scripts/make_smoothness_fixture.py --register
+```
+
+Then open it from Project Library with Help → Performance Diagnostics enabled
+to compare scrubbing, annotation dragging, panel switching, and export startup
+across builds.
+
 ## SAM 3 Direction
 
 The desktop backend uses Hugging Face Transformers' `facebook/sam3` tracker first:

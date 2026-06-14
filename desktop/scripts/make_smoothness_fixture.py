@@ -93,7 +93,9 @@ def _synthesize_mask(path: Path) -> bool:
     cv2.ellipse(mask, (960, 540), (300, 180), 0.0, 0.0, 360.0, 255, -1)
     rgba = np.zeros((height, width, 4), dtype=np.uint8)
     rgba[mask > 0] = (238, 211, 34, 200)  # BGRA cyan, matching SAM output style
-    cv2.imwrite(str(path), rgba)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not cv2.imwrite(str(path), rgba):
+        raise RuntimeError(f"Could not write fixture mask: {path}")
     return True
 
 

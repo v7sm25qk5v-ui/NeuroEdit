@@ -797,3 +797,19 @@ owner asked to test first.** `git add -A && git commit` once satisfied.
   `.venv/bin/python -m pytest tests/ -q` passed with 117 tests. Plain
   `python` is not on PATH in this shell; use the checked-in `.venv` symlink or
   `python3` after installing dev dependencies.
+
+## 15. Automation TODO sweep (2026-06-14)
+
+- Re-reviewed the same roadmap/docs. Remaining owner/hardware items are still
+  blocked (repo privacy, signing/notarization, packaged Windows/macOS smoke),
+  and P5 remains parked pending Stryker sample data.
+- Tightened the smoothness fixture generator from §12: `scripts/make_smoothness_fixture.py`
+  now creates the mask output folder before writing and raises if OpenCV cannot
+  write the synthetic SAM-style mask PNG.
+- Added `tests/test_smoothness_fixture.py` so the fixture generator is covered
+  without encoding real videos; it stubs ffmpeg media creation, opens the saved
+  project via `ProjectStore`, checks the 1080p/4K/missing-media cases, and
+  verifies the mask path exists.
+- Documented the manual smoothness-fixture QA loop in `desktop/README.md`.
+- Verification: `ruff check src tests scripts` passed and
+  `python -m pytest tests/ -q` passed with **118 tests**.
