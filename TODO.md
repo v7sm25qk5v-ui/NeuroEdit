@@ -25,6 +25,37 @@ bet and stays parked until sample data and a design pass exist.
 - [ ] Decide when to add Windows Authenticode signing and macOS Developer ID
   signing/notarization. **Owner action.**
 
+## Dependency security — needs floor bumps (audited 2026-06-14)
+
+`desktop/pyproject.toml` pins dependencies as `>=` floors with no upper bound
+and no lock file, so a fresh `pip install` already resolves to current secure
+releases. The risk is that the **floors still admit known-vulnerable versions**
+— harden by raising each floor to the fixed release. Prioritized:
+
+- [ ] **`pillow>=10` → `>=12.2.0` (HIGH, runtime).** Floor admits CVE-2023-50447
+  (ImageMath.eval code execution), CVE-2023-4863/5129 (libwebp heap overflow),
+  CVE-2024-28219 (`_imagingcms` buffer overflow), and CVE-2026-42308 /
+  CVE-2026-42310 (fixed in 12.2.0). Major bump (10→12): Pillow dropped the
+  long-deprecated `Image.ANTIALIAS`/mode constants — grep the codebase before
+  bumping.
+- [ ] **`torch>=2.7` → `>=2.10.0` (HIGH, SAM stack).** Floor admits a large
+  batch of 2025 CVEs (CVE-2025-3730, CVE-2025-2953, CVE-2025-55551/55552/
+  55553/55554/55557/55558/55560, CVE-2025-2999/3000/3001). Relevant because the
+  SAM backend loads HuggingFace model weights — several of these trigger on
+  malicious/crafted model loads. Note CVE-2025-3000 and CVE-2026-4538 have no
+  fixed release yet; 2.10.0 covers everything currently patched (latest 2.12.0).
+- [ ] **`pytest>=8.0` → `>=9.0.3` (LOW, dev-only).** Floor admits CVE-2025-71176
+  (fixed 9.0.3). Not shipped to users; bump opportunistically. Major bump
+  (8→9).
+
+Outdated but **no advisories** (functional updates, low urgency):
+`huggingface-hub>=0.30 → 1.19.0` (MAJOR 0.x→1.x — verify `transformers` 5.x
+compat and removed deprecated APIs), `transformers>=5.6 → 5.12.0`,
+`numpy>=2.0 → 2.4.6`, `opencv-python>=4.10 → 4.13`, `PySide6>=6.8 → 6.11.1`,
+`torchvision>=0.22 → 0.27` (keep aligned with torch), `safetensors>=0.5 → 0.8`,
+`imageio-ffmpeg>=0.5 → 0.6`, `ruff>=0.8 → 0.15`, `pyinstaller>=6.11 → 6.21`,
+`hatchling>=1.25 → 1.30` (build dep). All minor/major-but-clean.
+
 ## P1 — Timeline editing gaps — ✅ SHIPPED 2026-06-10
 
 All five items implemented (selection outlines, marker edit/delete, clip
