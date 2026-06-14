@@ -783,3 +783,17 @@ owner asked to test first.** `git add -A && git commit` once satisfied.
   4. Marker dragging: measure timeline paint with the fixture first (plan
      gates it on the paint budget), then implement if headroom allows.
 - Heads-up: always `git fetch` and check HEAD before editing across sessions.
+
+## 14. Automation TODO sweep (2026-06-14)
+
+- Reviewed `TODO.md` plus recently updated markdown (`README.md`,
+  `NEXT_OPTIMIZATION_PLAN.md`, `desktop/README.md`, and `desktop/docs/*`).
+  No code-ready TODO was available: P1-P4 are shipped, P5 remains parked
+  pending Stryker sample data, and remaining P0/release items require owner
+  decisions or packaged-build/hardware smoke testing.
+- Fetched `origin`; local `main` matched `origin/main`, and latest release tag
+  `v0.5.1-alpha` is already on `HEAD`, so no release tag was needed.
+- Verification rerun: `ruff check src tests scripts` passed, and
+  `.venv/bin/python -m pytest tests/ -q` passed with 117 tests. Plain
+  `python` is not on PATH in this shell; use the checked-in `.venv` symlink or
+  `python3` after installing dev dependencies.
