@@ -41,8 +41,11 @@ def _window(project: ProjectState | None = None) -> MainWindow:
     window = MainWindow.__new__(MainWindow)
     window.project = project or ProjectState()
     window.dirty = False
-    window._undo_stack = [window._snapshot()]
+    snapshot = window._snapshot()
+    window._undo_stack = [snapshot]
     window._redo_stack = []
+    window._undo_hashes = [window._snapshot_hash(snapshot)]
+    window._redo_hashes = []
     window._history_limit = 50
     window._restoring = False
     window.labels_panel = _StubPanel()
@@ -84,8 +87,21 @@ def test_net_zero_document_mutation_clears_redo_stack() -> None:
     project.annotations.append(_annotation())
     window = _window(project)
     window._redo_stack = [{"annotations": [{"label": "future"}]}]
+    window._redo_hashes = ["future"]
 
     window._push_history()
 
     assert len(window._undo_stack) == 1
     assert window._redo_stack == []
+    assert window._redo_hashes == []
+
+
+def test_history_dedup_uses_snapshot_hash() -> None:
+    project = ProjectState()
+    project.annotations.append(_annotation())
+    window = _window(project)
+
+    window._push_history()
+
+    assert len(window._undo_stack) == 1
+    assert len(window._undo_hashes) == 1

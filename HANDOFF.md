@@ -760,8 +760,8 @@ owner asked to test first.** `git add -A && git commit` once satisfied.
 - 2026-06-11: tag `v0.4.0-alpha` (at `ffeb7f9`) —
   https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.4.0-alpha
   with the macOS DMG/zip and Windows Setup.exe.
-- Test suite: **117 passing** (`ruff` clean): §12's 109 plus the §13 delete +
-  preview-blank tests.
+- Test suite: **119 passing** (`ruff` clean): §12's 109, the §13 delete +
+  preview-blank tests, §15's smoothness-fixture test, and §17's undo hash test.
 - Remote auth: SSH remote failed (no key); remote switched to HTTPS
   (`https://github.com/v7sm25qk5v-ui/NeuroEdit.git`), PAT cached in keychain.
 - Roadmap status: P0 partially owner-blocked (repo visibility, signing, DMG
@@ -813,3 +813,56 @@ owner asked to test first.** `git add -A && git commit` once satisfied.
 - Documented the manual smoothness-fixture QA loop in `desktop/README.md`.
 - Verification: `ruff check src tests scripts` passed and
   `python -m pytest tests/ -q` passed with **118 tests**.
+
+## 16. Automation optimization sweep (2026-06-14, docs only)
+
+Scheduled daily-optimization run. No code changed — planning markdown only.
+
+- **Reviewed the source for fresh, code-grounded optimization targets** (not
+  already shipped in §12's Phases 1–5). Findings: `ui/main_window.py` is ~6,500
+  lines and bundles `MainWindow`, `VideoGraphicsView`, `AnnotationGraphicsItem`,
+  the three SAM worker QObjects, the Project Library dialog, and most dialogs;
+  undo/redo stores full `ProjectState.to_dict()` snapshots (cap 50) deduped by
+  full-dict `==` on every push; the iCloud conflict copies (`* 2.py`) are still
+  physically present under `src/`. The mask-overlay LRU cache and timeline
+  static-layer cache from earlier sessions are already in place, so the canvas
+  paint path is not a fresh target.
+- **Added Phase 6 — Code health and runtime cost** to
+  [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md): modularize
+  `main_window.py`, reduce undo-snapshot cost, audit cold-start imports, and
+  drop the conflict copies. Every item is measurement-first and
+  behavior-preserving. Mirrored as a new **P4.5** section in
+  [TODO.md](TODO.md).
+- **Markdown consistency pass.** Corrected the handoff's current-state test
+  count (117 → **118**, matching §15 and `pytest --collect-only`); normalized
+  the lint command in the TODO Quality gate and the plan's release gate to
+  `ruff check src tests scripts` (the form already used in `desktop/README.md`
+  and §12+). Historical per-session entries left as written.
+- Did **not** run the suite this sweep (docs-only change); `pytest
+  --collect-only` reports **118 tests** collected. The plan-listed work remains
+  unimplemented by design — this run only updated the markdown.
+
+## 17. Automation TODO implementation sweep (2026-06-14)
+
+Implemented the first low-risk Phase 6 code-health items from `TODO.md` /
+`NEXT_OPTIMIZATION_PLAN.md`:
+
+- **Project Library extraction:** moved `ProjectLibraryDialog`,
+  `ThumbnailWorker`, metadata reads, thumbnail placeholder creation, and the
+  shared relative-time formatter into
+  `desktop/src/neuroedit_desktop/ui/project_library.py`. `main_window.py`
+  imports/re-exports `ProjectLibraryDialog`, so existing tests and callers that
+  import from `neuroedit_desktop.ui.main_window` remain stable. This is a
+  mechanical move only; behavior and UI strings are preserved.
+- **Undo dedup cost:** undo/redo history still stores the same snapshot dicts,
+  but now tracks parallel BLAKE2 snapshot hashes so `_push_history()` can skip
+  net-zero history entries without comparing full nested project dictionaries.
+  Existing undo semantics and mask-cleanup snapshot scanning are unchanged.
+- **Housekeeping:** removed the four iCloud conflict copies under `desktop/src`
+  (`__init__ 2.py`, `__main__ 2.py`, `video_probe 2.py`,
+  `ui/__init__ 2.py`).
+- **Roadmap status:** `TODO.md` now marks only the conflict-copy cleanup as
+  complete; the larger `main_window.py` modularization and undo memory cap /
+  measurement work remain open.
+- Verification: `ruff check src tests scripts` passed and
+  `python -m pytest tests/ -q` passed with **119 tests**.

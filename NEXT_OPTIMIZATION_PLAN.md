@@ -181,11 +181,67 @@ large integrations before broader alpha testing.
      widening tester distribution.
 
 3. **Gate every release candidate.**
-   - `ruff check src tests`
+   - `ruff check src tests scripts`
    - `python -m pytest tests/ -q`
    - owner's ongoing packaged macOS smoke notes reviewed for regressions
    - packaged Windows smoke test
    - visual QA against Figma checklist
+
+## Phase 6 — Code health and runtime cost
+
+**Why now:** Phases 1–5 shipped the brand system, smoothness caching, and the
+workflow refinements. The remaining roadmap work is owner/hardware-blocked
+(packaged-build smoke, signing, Stryker sample data), so the highest-leverage
+engineering work left is structural: keep the codebase cheap to change and
+cheap to run. Every item below is measurement-first and behavior-preserving —
+the 119-test suite and `ruff` must stay green with no user-visible change.
+
+1. **Modularize `ui/main_window.py` (currently ~6,500 lines).**
+   - The file holds `MainWindow` plus `VideoGraphicsView`,
+     `AnnotationGraphicsItem`, the three SAM worker `QObject`s
+     (`SamProbeWorker`/`SamSegmentWorker`/`SamPropagationWorker`), the Project
+     Library dialog + `ThumbnailWorker`, and most other dialogs — a single file
+     that is hard to navigate and risky to edit.
+   - Extract by responsibility into sibling modules under `ui/` (e.g.
+     `ui/canvas.py` for the graphics view + annotation item, `ui/sam_workers.py`
+     for the worker QObjects, `ui/library_dialog.py` for the Project Library),
+     re-exporting names from `main_window` so existing imports keep working.
+   - Pure mechanical moves only — no logic changes — so the diff is reviewable
+     and the suite proves equivalence.
+   - Acceptance: no single `ui/` module over ~2,500 lines; tests and `ruff`
+     green; the rendering hot path can be read and profiled in isolation.
+
+2. **Reduce undo/redo snapshot cost.**
+   - Undo/redo stores full `ProjectState.to_dict()` copies (cap 50) and dedups
+     by comparing the whole dict with `==` on every `_push_history`. For
+     mask-heavy or long-transcript projects this both serializes the entire
+     project per edit and can hold many MB across the undo + redo stacks.
+   - Options to evaluate (pick the simplest that measures well): dedup via a
+     cheap content hash instead of full-dict equality; store compact JSON
+     strings rather than nested dicts; or cap the stacks by cumulative size in
+     addition to the 50-entry count. Keep the existing transient-key stripping.
+   - Measure before/after on the smoothness fixture with the diagnostics log
+     (snapshot time around an annotation drag; resident memory after 50 edits).
+   - Acceptance: no behavior change to undo/redo semantics; lower per-edit
+     snapshot time and bounded memory on the fixture; undo-history tests green.
+
+3. **Audit cold-start import cost.**
+   - `__main__.py` → `MainWindow` pulls in the full module graph eagerly. Confirm
+     heavy or rarely-needed imports (subprocess/ffmpeg helpers, captions, export)
+     are deferred where they are only used on demand, keeping the `[sam]`/torch
+     stack optional as documented in `CLAUDE.md`.
+   - Use the diagnostics project-load/startup timing to quantify any change.
+   - Acceptance: measured cold-start to first window stays flat or improves; no
+     feature regresses; torch remains lazy.
+
+4. **Housekeeping: drop the iCloud conflict copies.**
+   - `src/neuroedit_desktop/__init__ 2.py`, `__main__ 2.py`, `video_probe 2.py`,
+     and `ui/__init__ 2.py` are iCloud sync artifacts (already `.gitignore`d but
+     physically present). They confuse tooling (`wc`, search) and contributors.
+   - Remove the stray copies; they are not imported. No code change to real
+     modules.
+   - Acceptance: only the canonical `*.py` files remain under `src/`; tests and
+     `ruff` green.
 
 ## Recommended immediate next sprint
 
@@ -198,6 +254,10 @@ large integrations before broader alpha testing.
 5. Apply the tokens to header/buttons/panels/dialogs before deeper timeline styling.
 6. Re-run resize tests and capture branded screenshots, with special attention to
    Windows high-DPI behavior.
+7. Once brand work settles, take the Phase 6 code-health items in order — start
+   with modularizing `ui/main_window.py`, since smaller modules make every later
+   change (including the runtime-cost work) safer to review.
 
 This gives the project a safe optimization loop: measure first, centralize the brand,
-polish the highest-frequency interactions, and only then restart larger feature bets.
+polish the highest-frequency interactions, keep the codebase cheap to change, and
+only then restart larger feature bets.
