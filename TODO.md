@@ -25,6 +25,42 @@ bet and stays parked until sample data and a design pass exist.
 - [ ] Decide when to add Windows Authenticode signing and macOS Developer ID
   signing/notarization. **Owner action.**
 
+## P0.5 — Dependency security audit (2026-06-15)
+
+Audit of `desktop/pyproject.toml`. All deps use `>=` floors with **no
+lockfile**, so a fresh `pip install` pulls the latest (patched) release and the
+*running* env is likely fine. The risk is that the declared **floors permit
+known-vulnerable versions** — a resolver, CI cache, or transitive pin could
+install them. This app decodes untrusted user media (clinical PHI video), so
+image-decoder floors matter most. Raise these floors:
+
+- [ ] **`pillow>=10` → `>=12.2.0`** (HIGH). Floor permits 2026 image-parser
+  CVEs on untrusted media: buffer overflow CVE-2026-42308, FITS decompression
+  DoS CVE-2026-40192 (10.3.0–12.1.1), PSD OOB write CVE-2026-25990 (fixed
+  12.1.1). Pillow parses arbitrary user images/frames here. Latest 12.2.0.
+- [ ] **`opencv-python>=4.10` → `>=4.12`** (MEDIUM/HIGH). Floor permits 4.10.0
+  and 4.11.0, which have an uninitialized-stack-pointer → heap buffer write on
+  crafted JPEGs (fixed 4.12.0). OpenCV does frame extraction on user video.
+  Latest 4.13.0.92.
+- [ ] **`huggingface-hub>=0.30` → `>=1.5`** (correctness, not security). The
+  `[sam]` extra's `transformers` 5.12 already requires `huggingface-hub>=1.5,<2`
+  (major 0→1 jump). The 0.30 floor is misleadingly low / inconsistent. Latest
+  1.19.0.
+
+Not urgent (floor already above the patch line — safe as declared):
+`torch>=2.7` (CVE-2025-32434 RCE fixed 2.6.0), `transformers>=5.6`
+(CVE-2026-4372 RCE fixed 5.3.0; CVE-2026-1839 fixed 5.0.0rc3),
+`pyinstaller>=6.11` (CVE-2025-59042 affects <6.0.0).
+
+Routine maintenance bumps (no known CVE; floors lag latest): `numpy` 2.0→2.4.6,
+`PySide6` 6.8→6.11.1, `imageio-ffmpeg` 0.5→0.6.0, `safetensors` 0.5→0.8.0,
+`torchvision` 0.22→0.27.0, `ruff` 0.8→0.15.17. Dev `pytest>=8.0`→9.1.0 is a
+major bump (removed deprecated nose-style/hookimpl) — verify the suite on 9.x.
+
+> Note: the original request named a macOS path
+> (`/Users/alangordillo/.../video editing app/TODO.md`) that does not exist in
+> this Linux container; recorded here in the repo's tracked TODO instead.
+
 ## P1 — Timeline editing gaps — ✅ SHIPPED 2026-06-10
 
 All five items implemented (selection outlines, marker edit/delete, clip
