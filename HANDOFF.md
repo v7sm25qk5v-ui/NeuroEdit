@@ -866,3 +866,51 @@ Implemented the first low-risk Phase 6 code-health items from `TODO.md` /
   measurement work remain open.
 - Verification: `ruff check src tests scripts` passed and
   `python -m pytest tests/ -q` passed with **119 tests**.
+
+## 18. Automation optimization sweep (2026-06-15, docs only)
+
+Scheduled daily-optimization run. No code changed — planning markdown only.
+
+- **Re-measured the Phase 6 targets against the current tree** (`wc -l`,
+  `pytest --collect-only`). Findings: `ui/main_window.py` is now **6,114 lines**
+  (down from the ~6,500 recorded before the Project Library extraction);
+  `ui/editor_panels.py` is **2,963 lines** and is *also* over the plan's
+  ~2,500-line `ui/` ceiling, with `AudioPanel` (~970 lines) its largest
+  extractable class; the suite collects **119 tests**; the iCloud `* 2.py`
+  conflict copies are confirmed gone.
+- **Code-grounded refinement of the undo item.** `_push_history` still calls
+  `_snapshot()` (full `ProjectState.to_dict()` + `json.dumps`) on every dirty
+  tick *before* the BLAKE2 hash decides whether to discard a net-zero edit — so
+  a no-op edit still pays an O(project size) serialize. Recorded a pre-serialize
+  short-circuit as the next concrete sub-task alongside the still-open
+  compact-storage and cumulative-size-cap work.
+- **Markdown updates** (planning files only): corrected the stale `~6,500`
+  main_window figure to `~6,100` in [TODO.md](TODO.md) P4.5 and
+  [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md) Phase 6; added
+  `editor_panels.py` / `AudioPanel` as an explicit second modularization target
+  in both; marked the conflict-copy housekeeping done in the plan (it was
+  already `[x]` in the TODO); sharpened the undo-cost item with the
+  pre-serialize finding. This §16-style historical entry and earlier
+  per-session entries are left as written.
+- Did **not** run the suite this sweep (docs-only change); `pytest
+  --collect-only` reports **119 tests** collected. The plan-listed work remains
+  unimplemented by design — this run only updated the markdown.
+
+## 19. Automation TODO implementation sweep (2026-06-15)
+
+Implemented the `ui/editor_panels.py` modularization item from `TODO.md` /
+`NEXT_OPTIMIZATION_PLAN.md`:
+
+- **Audio panel extraction:** moved `AudioPanel` into
+  `desktop/src/neuroedit_desktop/ui/audio_panel.py` and kept
+  `neuroedit_desktop.ui.editor_panels.AudioPanel` available as a re-export for
+  existing imports.
+- **Shared timeline helpers:** moved `fmt_time` and `project_end_time` into
+  `desktop/src/neuroedit_desktop/ui/timeline_utils.py`, then imported them from
+  both `editor_panels.py` and `audio_panel.py` to avoid circular imports.
+- **Roadmap status:** `TODO.md` now marks the `editor_panels.py` / `AudioPanel`
+  modularization item complete. `main_window.py` modularization remains open.
+  Current line counts: `editor_panels.py` **2,245**, `audio_panel.py` **727**,
+  `timeline_utils.py` **22**.
+- Verification: `ruff check src tests scripts` passed and
+  `python -m pytest tests/ -q` passed with **119 tests**.

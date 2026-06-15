@@ -196,30 +196,37 @@ engineering work left is structural: keep the codebase cheap to change and
 cheap to run. Every item below is measurement-first and behavior-preserving —
 the 119-test suite and `ruff` must stay green with no user-visible change.
 
-1. **Modularize `ui/main_window.py` (currently ~6,500 lines).**
-   - The file holds `MainWindow` plus `VideoGraphicsView`,
-     `AnnotationGraphicsItem`, the three SAM worker `QObject`s
-     (`SamProbeWorker`/`SamSegmentWorker`/`SamPropagationWorker`), the Project
-     Library dialog + `ThumbnailWorker`, and most other dialogs — a single file
-     that is hard to navigate and risky to edit.
+1. **Modularize `ui/main_window.py` (currently ~6,100 lines).**
+   - `main_window.py` holds `MainWindow` plus `VideoGraphicsView`,
+     `AnnotationGraphicsItem`, four SAM worker `QObject`s
+     (`SamProbeWorker`/`SamSegmentWorker`/`SamPropagationWorker`/`SamDownloadWorker`),
+     and most other dialogs — a single file that is hard to navigate and risky
+     to edit. The Project Library dialog + `ThumbnailWorker` were already
+     extracted to `ui/project_library.py` (2026-06-14).
    - Extract by responsibility into sibling modules under `ui/` (e.g.
-     `ui/canvas.py` for the graphics view + annotation item, `ui/sam_workers.py`
-     for the worker QObjects, `ui/library_dialog.py` for the Project Library),
-     re-exporting names from `main_window` so existing imports keep working.
+     `ui/canvas.py` for the graphics view + annotation item and
+     `ui/sam_workers.py` for the worker QObjects), re-exporting names from the
+     original module so existing imports keep working.
    - Pure mechanical moves only — no logic changes — so the diff is reviewable
      and the suite proves equivalence.
    - Acceptance: no single `ui/` module over ~2,500 lines; tests and `ruff`
      green; the rendering hot path can be read and profiled in isolation.
+   - Done 2026-06-15: `AudioPanel` was extracted from `ui/editor_panels.py` to
+     `ui/audio_panel.py`, shared timeline helpers moved to
+     `ui/timeline_utils.py`, and `editor_panels.py` is now ~2,245 lines.
 
 2. **Reduce undo/redo snapshot cost.**
-   - Undo/redo stores full `ProjectState.to_dict()` copies (cap 50) and dedups
-     by comparing the whole dict with `==` on every `_push_history`. For
-     mask-heavy or long-transcript projects this both serializes the entire
-     project per edit and can hold many MB across the undo + redo stacks.
-   - Options to evaluate (pick the simplest that measures well): dedup via a
-     cheap content hash instead of full-dict equality; store compact JSON
-     strings rather than nested dicts; or cap the stacks by cumulative size in
-     addition to the 50-entry count. Keep the existing transient-key stripping.
+   - Undo/redo stores full `ProjectState.to_dict()` copies (cap 50) and can hold
+     many MB across the undo + redo stacks for mask-heavy or long-transcript
+     projects. Dedup by full-dict `==` was replaced with a cheap BLAKE2 content
+     hash (2026-06-14), but `_push_history` still builds the entire snapshot
+     (`to_dict()` + `json.dumps`) on every dirty tick *before* the hash decides
+     whether to keep it — so a net-zero edit still pays an O(project size)
+     serialize.
+   - Options still to evaluate (pick the simplest that measures well): a cheaper
+     change-check ahead of the full serialize; store compact JSON strings rather
+     than nested dicts; or cap the stacks by cumulative size in addition to the
+     50-entry count. Keep the existing transient-key stripping.
    - Measure before/after on the smoothness fixture with the diagnostics log
      (snapshot time around an annotation drag; resident memory after 50 edits).
    - Acceptance: no behavior change to undo/redo semantics; lower per-edit
@@ -234,14 +241,13 @@ the 119-test suite and `ruff` must stay green with no user-visible change.
    - Acceptance: measured cold-start to first window stays flat or improves; no
      feature regresses; torch remains lazy.
 
-4. **Housekeeping: drop the iCloud conflict copies.**
+4. **Housekeeping: drop the iCloud conflict copies. — ✅ DONE 2026-06-14.**
    - `src/neuroedit_desktop/__init__ 2.py`, `__main__ 2.py`, `video_probe 2.py`,
-     and `ui/__init__ 2.py` are iCloud sync artifacts (already `.gitignore`d but
-     physically present). They confuse tooling (`wc`, search) and contributors.
-   - Remove the stray copies; they are not imported. No code change to real
-     modules.
-   - Acceptance: only the canonical `*.py` files remain under `src/`; tests and
-     `ruff` green.
+     and `ui/__init__ 2.py` were iCloud sync artifacts (already `.gitignore`d but
+     physically present) that confused tooling (`wc`, search) and contributors.
+   - The four stray copies were removed; they were not imported, so no real
+     module changed. Only the canonical `*.py` files remain under `src/`; tests
+     and `ruff` stayed green.
 
 ## Recommended immediate next sprint
 
