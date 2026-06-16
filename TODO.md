@@ -25,6 +25,43 @@ bet and stays parked until sample data and a design pass exist.
 - [ ] Decide when to add Windows Authenticode signing and macOS Developer ID
   signing/notarization. **Owner action.**
 
+## P0.5 — Dependency security hardening (audit 2026-06-16)
+
+Context: `desktop/pyproject.toml` pins every dependency as a `>=` floor with no
+lock file, so a clean `pip install` already resolves to the latest *patched*
+release — the practical risk is an environment that resolves or caches an
+older in-range version. Action below is to raise the floors above the last
+known-vulnerable version so the resolver can never select one. Ordered by
+severity. Latest versions confirmed against PyPI on 2026-06-16.
+
+- [ ] **opencv-python `>=4.10` → `>=4.12` (latest 4.13.0.92).** Floor permits
+  CVE-2025-53644 (medium, CVSS 6.6): uninitialized stack pointer → arbitrary
+  heap write when reading a crafted JPEG; affects 4.10.0 and 4.11.0, fixed in
+  4.12.0. Directly relevant — `sam_backend.py` decodes user-supplied
+  video/image frames via OpenCV. Patch bump, no API breaks expected.
+- [ ] **pillow `>=10` → `>=12.2.0` (latest 12.2.0).** Floor permits two recent
+  CVEs: CVE-2026-25990 (high) buffer overflow / out-of-bounds write via crafted
+  PSD images (10.3.0–12.1.0, fixed 12.1.1) and CVE-2026-40192 (DoS) FITS
+  decompression bomb (10.3.0–12.1.1, fixed 12.2.0). Pillow is in the optional
+  `[sam]` stack and handles model image I/O. Crossing 10→12 is two majors —
+  review Pillow 11/12 changelogs (notably removal of deprecated constants like
+  `Image.ANTIALIAS`) before bumping.
+- [ ] **torch `>=2.7` → `>=2.7.1` (latest 2.12.0).** The critical RCE
+  CVE-2025-32434 (`torch.load(weights_only=True)` → arbitrary code execution,
+  CVSS 9.3, fixed 2.6.0) is *already* excluded by the current floor. Remaining
+  gap: floor still allows 2.7.0, which is exposed to CVE-2025-2953 (low, local
+  DoS in `torch.mkldnn_max_pool2d`, fixed 2.7.1). Minor hardening bump; relevant
+  because the SAM path loads HuggingFace model weights.
+- [ ] transformers `>=5.6` — **no action.** The recent config-injection RCE
+  CVE-2026-4372 (4.56.0–5.2.x, fixed 5.3.0) is already excluded by the floor.
+  Latest 5.12.1; consider bumping the floor opportunistically, not urgently.
+
+Non-security version drift (no advisories found; upgrade opportunistically when
+touching the SAM/build stack): huggingface-hub 0.30→1.19.0 (major), pytest
+8.0→9.1.0 (major, dev-only), numpy 2.0→2.4.6, PySide6 6.8→6.11.1, safetensors
+0.5→0.8.0, torchvision 0.22→0.27.0, ruff 0.8→0.15.17, pyinstaller 6.11→6.21.0,
+imageio-ffmpeg 0.5→0.6.0, hatchling 1.25→1.30.1.
+
 ## P1 — Timeline editing gaps — ✅ SHIPPED 2026-06-10
 
 All five items implemented (selection outlines, marker edit/delete, clip
