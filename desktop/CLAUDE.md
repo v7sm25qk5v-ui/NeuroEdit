@@ -91,8 +91,8 @@ python -c "import py_compile; py_compile.compile('src/neuroedit_desktop/<file>.p
 hf auth login
 ```
 
-`pyproject.toml` declares `pytest` as a dev dep but **no tests exist yet** —
-don't pretend to "run tests" without writing one first.
+The suite under `tests/` collects **119 tests** (`python -m pytest tests/ -q`).
+Keep it and `ruff check src tests scripts` green before every release tag.
 
 ### venv-location note (current setup is intentional)
 
@@ -111,10 +111,11 @@ sync delay — not to move the venv off iCloud.
 ### Process and threading model
 
 - Single `QApplication` process. UI on the main thread.
-- SAM (PyTorch + transformers) runs on background `QThread`s via three worker
-  `QObject`s in `ui/main_window.py`: `SamProbeWorker`, `SamSegmentWorker`,
-  `SamPropagationWorker`. Each emits `progress(str)` and `finished(...)`.
-  Workers wrap calls into `sam_backend.SamBackend`.
+- SAM (PyTorch + transformers) runs on background `QThread`s via four worker
+  `QObject`s in `ui/sam_workers.py`: `SamProbeWorker`, `SamSegmentWorker`,
+  `SamPropagationWorker`, and `SamDownloadWorker`. `ui/main_window.py`
+  re-exports them for import stability. Each emits `progress(str)` and
+  `finished(...)`. Workers wrap calls into `sam_backend.SamBackend`.
 - Because torch import + first weight download can take tens of seconds, every
   long-running stage is paired with a 500 ms heartbeat timer
   (`_start_sam_heartbeat` / `_tick_sam_heartbeat`) that appends elapsed
@@ -233,5 +234,7 @@ Other PHI safeguards:
 
 ### Files to ignore
 
-- `__init__ 2.py`, `__main__ 2.py`, `video_probe 2.py` etc. are iCloud sync
-  conflict copies. Don't import or edit them.
+- iCloud sync conflict copies (`__init__ 2.py`, `__main__ 2.py`,
+  `video_probe 2.py`, etc.) are `.gitignore`d. The stray copies under `src/`
+  were physically removed on 2026-06-14; if iCloud regenerates any, don't
+  import or edit them.

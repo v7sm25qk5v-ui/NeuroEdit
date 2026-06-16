@@ -201,8 +201,10 @@ the 119-test suite and `ruff` must stay green with no user-visible change.
      `AnnotationGraphicsItem`, four SAM worker `QObject`s
      (`SamProbeWorker`/`SamSegmentWorker`/`SamPropagationWorker`/`SamDownloadWorker`),
      and most other dialogs — a single file that is hard to navigate and risky
-     to edit. The Project Library dialog + `ThumbnailWorker` were already
-     extracted to `ui/project_library.py` (2026-06-14).
+     to edit. The Project Library dialog + `ThumbnailWorker` were extracted to
+     `ui/project_library.py` (2026-06-14), and the canvas graphics classes plus
+     SAM worker QObjects were extracted to `ui/canvas.py` and `ui/sam_workers.py`
+     (2026-06-16).
    - Extract by responsibility into sibling modules under `ui/` (e.g.
      `ui/canvas.py` for the graphics view + annotation item and
      `ui/sam_workers.py` for the worker QObjects), re-exporting names from the
@@ -214,19 +216,25 @@ the 119-test suite and `ruff` must stay green with no user-visible change.
    - Done 2026-06-15: `AudioPanel` was extracted from `ui/editor_panels.py` to
      `ui/audio_panel.py`, shared timeline helpers moved to
      `ui/timeline_utils.py`, and `editor_panels.py` is now ~2,245 lines.
+   - Progress 2026-06-16: `main_window.py` now re-exports `VideoGraphicsView`,
+     `AnnotationGraphicsItem`, and the four SAM worker classes from sibling
+     modules. Remaining modularization target: dialogs and the still-large
+     `MainWindow` class.
 
 2. **Reduce undo/redo snapshot cost.**
    - Undo/redo stores full `ProjectState.to_dict()` copies (cap 50) and can hold
      many MB across the undo + redo stacks for mask-heavy or long-transcript
      projects. Dedup by full-dict `==` was replaced with a cheap BLAKE2 content
      hash (2026-06-14), but `_push_history` still builds the entire snapshot
-     (`to_dict()` + `json.dumps`) on every dirty tick *before* the hash decides
-     whether to keep it — so a net-zero edit still pays an O(project size)
-     serialize.
+     (`to_dict()`) and then runs a *second* full `json.dumps` over it for the
+     hash on every dirty tick *before* the hash decides whether to keep it — so a
+     net-zero edit pays two O(project size) serializes. Autosave then serializes
+     the same `ProjectState` a third time (`store.save`, every 2 s when dirty).
    - Options still to evaluate (pick the simplest that measures well): a cheaper
-     change-check ahead of the full serialize; store compact JSON strings rather
-     than nested dicts; or cap the stacks by cumulative size in addition to the
-     50-entry count. Keep the existing transient-key stripping.
+     change-check ahead of the full serialize; a single shared per-dirty-tick
+     serialization reused by both the history hash and autosave; store compact
+     JSON strings rather than nested dicts; or cap the stacks by cumulative size
+     in addition to the 50-entry count. Keep the existing transient-key stripping.
    - Measure before/after on the smoothness fixture with the diagnostics log
      (snapshot time around an annotation drag; resident memory after 50 edits).
    - Acceptance: no behavior change to undo/redo semantics; lower per-edit
@@ -249,21 +257,26 @@ the 119-test suite and `ruff` must stay green with no user-visible change.
      module changed. Only the canonical `*.py` files remain under `src/`; tests
      and `ruff` stayed green.
 
-## Recommended immediate next sprint
+## Recommended immediate next sprint (updated 2026-06-16)
 
-1. Keep macOS DMG notes in the owner's existing QA loop and focus new packaged-build
-   effort on Windows installer smoke testing.
-2. Add the smoothness fixture and diagnostics toggle.
-3. Convert the Figma Make `Redesign video editing app UI` concept into a concise
-   design-language brief and token/component map.
-4. Import Figma tokens into the centralized style layer.
-5. Apply the tokens to header/buttons/panels/dialogs before deeper timeline styling.
-6. Re-run resize tests and capture branded screenshots, with special attention to
-   Windows high-DPI behavior.
-7. Once brand work settles, take the Phase 6 code-health items in order — start
-   with modularizing `ui/main_window.py`, since smaller modules make every later
-   change (including the runtime-cost work) safer to review.
+Phases 1–5 shipped (smoothness fixture + diagnostics, the Figma brand system and
+tokens, accessibility audit, smoothness caching, and the workflow refinements).
+The Phase 6 code-health work is now the active front, since the remaining roadmap
+blockers are owner/hardware-bound (Windows installer smoke at 100/125/150 % DPI,
+signing/notarization, Stryker sample data). Take the code-health items in order —
+each is measurement-first and behavior-preserving:
 
-This gives the project a safe optimization loop: measure first, centralize the brand,
-polish the highest-frequency interactions, keep the codebase cheap to change, and
-only then restart larger feature bets.
+1. **Continue modularizing `ui/main_window.py`** (now ~4,764 lines after the
+   canvas and SAM worker extraction). Extract remaining dialogs into sibling
+   `ui/` modules, re-exported for import stability, before touching behavior.
+2. **Reduce undo/redo snapshot cost** — collapse the per-tick double serialize and
+   share one serialization with autosave; add the pre-serialize change-check and a
+   cumulative-size cap. Measure on the smoothness fixture with the diagnostics log.
+3. **Audit cold-start import cost** — confirm subprocess/ffmpeg, captions, and export
+   imports are deferred and torch stays lazy; quantify with the startup timing.
+4. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (119 tests)
+   green before every release tag; feed any new regressions back into the roadmap.
+
+This keeps the project on a safe optimization loop: measure first, keep the codebase
+cheap to change and cheap to run, and only then restart larger feature bets
+(Windows packaging hardening, then the parked Stryker/DICOM work).

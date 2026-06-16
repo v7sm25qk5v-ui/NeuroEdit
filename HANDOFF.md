@@ -914,3 +914,23 @@ Implemented the `ui/editor_panels.py` modularization item from `TODO.md` /
   `timeline_utils.py` **22**.
 - Verification: `ruff check src tests scripts` passed and
   `python -m pytest tests/ -q` passed with **119 tests**.
+
+## 20. Automation TODO implementation sweep (2026-06-16)
+
+Implemented the next `ui/main_window.py` modularization slice from `TODO.md` /
+`NEXT_OPTIMIZATION_PLAN.md`:
+
+- **Canvas extraction:** moved `AnnotationGraphicsItem`, `VideoGraphicsView`,
+  and the canvas-only distance helper into
+  `desktop/src/neuroedit_desktop/ui/canvas.py`. `main_window.py` imports and
+  re-exports the classes so existing import paths stay stable.
+- **SAM worker extraction:** moved `SamProbeWorker`, `SamSegmentWorker`,
+  `SamPropagationWorker`, and `SamDownloadWorker` into
+  `desktop/src/neuroedit_desktop/ui/sam_workers.py`; `main_window.py` keeps
+  re-exporting them.
+- **Roadmap status:** `main_window.py` is now ~4,764 lines, with `canvas.py`
+  ~1,238 lines and `sam_workers.py` ~146 lines. Remaining Phase 6
+  modularization work is the dialog/MainWindow split; undo snapshot cost and
+  cold-start import audit remain open.
+- Verification: `ruff check src tests scripts` passed and
+  `.venv/bin/python -m pytest tests/ -q` passed with **119 tests**.

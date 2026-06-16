@@ -88,13 +88,26 @@ behavior-preserving — the 119-test suite and `ruff` must stay green with no
 user-visible change. Full rationale and acceptance criteria in
 [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md) Phase 6.
 
+**Optimization sweep 2026-06-16:** with Phases 1–5 (brand system, smoothness
+caching, workflow refinement) shipped, this section is now the active work
+front. Verified the three open items still stand against the current tree:
+`ui/main_window.py` was 6,114 lines with 17 classes still co-located; the undo
+path still double-serializes per tick (see below); and cold-start import
+deferral is unaudited. No new test regressions. Recommended order is unchanged:
+modularize first (makes the rest safer to review), then undo cost, then the
+import audit.
+
 - [ ] Modularize `ui/main_window.py` (~6,100 lines) by responsibility —
   extract the graphics view + annotation item, the SAM worker QObjects, and
   the remaining dialogs into sibling `ui/` modules, re-exported from
   `main_window` so imports stay stable. Mechanical moves only; no logic
   changes. Target: no `ui/` module over ~2,500 lines. **Progress 2026-06-14:**
   Project Library dialog + thumbnail worker extracted to `ui/project_library.py`
-  and re-exported from `main_window`; canvas/SAM/dialog split still open.
+  and re-exported from `main_window`. **Progress 2026-06-16:** canvas graphics
+  moved to `ui/canvas.py`, SAM worker QObjects moved to `ui/sam_workers.py`, and
+  both are re-exported from `main_window`; remaining dialogs/MainWindow split
+  still open. Current line counts: `main_window.py` ~4,764, `canvas.py` ~1,238,
+  `sam_workers.py` ~146.
 - [x] Modularize `ui/editor_panels.py` (~2,960 lines) — it is also over the
   ~2,500-line `ui/` target. Extract `AudioPanel` (~970 lines, the largest
   class) into its own `ui/audio_panel.py`, re-exported from `editor_panels`;
@@ -103,15 +116,18 @@ user-visible change. Full rationale and acceptance criteria in
   timeline helpers moved to `ui/timeline_utils.py`, `editor_panels.py` now
   re-exports `AudioPanel` and is ~2,245 lines.
 - [ ] Reduce undo/redo snapshot cost: every dirty tick still calls full
-  `ProjectState.to_dict()` + `json.dumps` to build the snapshot *before* the
-  hash dedup decides to discard it, so mask-heavy or long-transcript projects
-  pay an O(project size) serialize per edit even when nothing changed. Evaluate
-  a cheaper change-check ahead of the full serialize, compact JSON storage, and
-  a cumulative-size cap (in addition to the 50-entry count); measure snapshot
-  time + resident memory on the smoothness fixture before/after. Keep undo
-  semantics identical. **Progress 2026-06-14:** dedup now uses compact BLAKE2
-  hashes; pre-serialize short-circuit, compact storage, cumulative-size cap, and
-  the memory measurement are still open.
+  `ProjectState.to_dict()` *and then* a second full `json.dumps` (for the BLAKE2
+  hash) *before* the dedup decides to discard the snapshot, so mask-heavy or
+  long-transcript projects pay two O(project size) serializes per edit even when
+  nothing changed. Autosave (`store.save`, every 2 s when dirty) then serializes
+  the same `ProjectState` a third time, independently. Evaluate a cheaper
+  change-check ahead of the full serialize, a single shared per-dirty-tick
+  serialization reused by both the history hash and autosave, compact JSON
+  storage, and a cumulative-size cap (in addition to the 50-entry count); measure
+  snapshot time + resident memory on the smoothness fixture before/after. Keep
+  undo semantics identical. **Progress 2026-06-14:** dedup now uses compact
+  BLAKE2 hashes; pre-serialize short-circuit, shared serialization, compact
+  storage, cumulative-size cap, and the memory measurement are still open.
 - [ ] Audit cold-start import cost — confirm heavy/on-demand imports
   (subprocess/ffmpeg, captions, export) are deferred where possible and torch
   stays lazy; quantify with the diagnostics startup timing.
