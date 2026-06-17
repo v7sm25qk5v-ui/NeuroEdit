@@ -25,6 +25,41 @@ bet and stays parked until sample data and a design pass exist.
 - [ ] Decide when to add Windows Authenticode signing and macOS Developer ID
   signing/notarization. **Owner action.**
 
+## P0.5 — Dependency security audit (2026-06-17)
+
+Automated audit of `desktop/pyproject.toml`. All constraints are unbounded
+`>=` floors, so a *fresh* `pip install` resolves to a patched latest — but the
+floors currently **document known-vulnerable versions as acceptable**. Raise
+the floors so the constraint itself guarantees a patched build (defense in
+depth; matters for a clinical/PHI app that loads model checkpoints downloaded
+from Hugging Face). No lock file exists, so the floor is the only guard.
+
+- [ ] **torch `>=2.7` → `>=2.10` (CRITICAL).** The `>=2.7` floor admits
+  ≤2.9.1, vulnerable to CVE-2026-24747 (CVSS 9.8) — RCE via `torch.load(...,
+  weights_only=True)` from a crafted `.pth`. Directly relevant: `sam_backend`
+  loads SAM weights via the torch/transformers/hf-hub path. Fixed in 2.10.0
+  (latest 2.12.0). Also CVE-2025-32434 (RCE, fixed 2.6.0) — already above floor.
+- [ ] **torchvision `>=0.22` → `>=0.25`** to stay paired with torch ≥2.10
+  (torch 2.10 ↔ tv 0.25; 2.12 ↔ tv 0.27). No standalone CVE; compatibility bump.
+- [ ] **pillow `>=10` → `>=12.2.0` (HIGH).** Floor admits versions hit by
+  CVE-2026-25990 (out-of-bounds write on crafted PSD, fixed 12.1.1) and
+  CVE-2026-42308 / CVE-2026-40192 (font integer overflow / FITS decompression
+  DoS, fixed 12.2.0). Pillow handles imported/SAM-pipeline images. Latest 12.2.0.
+- [ ] **opencv-python `>=4.10` → `>=4.12` (MEDIUM-HIGH).** 4.10.0/4.11.0 have a
+  heap buffer write on crafted JPEG (uninitialized stack pointer), fixed in
+  4.12.0. OpenCV decodes untrusted media frames here. Latest 4.13.0.92.
+
+Not vulnerable at the current floor (no action needed for security):
+transformers `>=5.6` already clears CVE-2026-4372 (RCE, fixed 5.3.0);
+numpy `>=2.0` has no relevant 2.x CVE.
+
+Non-security version drift (informational — unbounded floors already let fresh
+installs pull these; bump floors only when convenient): huggingface-hub
+`>=0.30` → 1.19.0 (**major 0.x→1.x — check API breakage with transformers**),
+PySide6 `>=6.8` → 6.11.1, safetensors `>=0.5` → 0.8.0, imageio-ffmpeg
+`>=0.5` → 0.6.0. Dev/build only: pytest `>=8.0` → 9.1.0 (major), ruff `>=0.8`
+→ 0.15.17, pyinstaller `>=6.11` → 6.21.0, hatchling `>=1.25` → 1.30.1.
+
 ## P1 — Timeline editing gaps — ✅ SHIPPED 2026-06-10
 
 All five items implemented (selection outlines, marker edit/delete, clip
