@@ -11,6 +11,25 @@ PHI story (P3) which is the trust-critical feature for clinical users. Captions
 and export polish (P4) widen the audience. Stryker/DICOM (P5) is the largest
 bet and stays parked until sample data and a design pass exist.
 
+## Optimization Backlog
+_(automation-maintained — new findings appended below, checked off when implemented)_
+
+The primary open code-health/runtime work lives in **P4.5** (modularize the
+`main_window.py` dialog/MainWindow split, reduce undo-snapshot serialize cost,
+audit cold-start imports). The items here are smaller, fresh findings surfaced
+by the optimization automation; they are not duplicated into P4.5.
+
+- [ ] **Playback loop does steady O(n) work + two repaints per 33 ms tick.**
+  `_tick_timeline_playback` (`ui/main_window.py:3208`) recomputes
+  `project_end_time()` — four full list comprehensions over
+  clips+audio+slides+markers (`ui/timeline_utils.py:13`) — and unconditionally
+  calls both `self.timeline.refresh()` and `self.video_view.update_annotations()`
+  on every 30 fps tick, even when the playhead hasn't crossed a clip/annotation
+  boundary. Low-priority (negligible for small projects), but it is constant CPU
+  during playback that scales with timeline length. Mitigation: cache
+  `project_end_time` and invalidate it on edit instead of per tick, and skip the
+  `timeline.refresh()` when the visible frame is unchanged.
+
 ## P0 — Unblock and ship the current alpha
 
 - [x] Fix the dev environment — Python 3.13 reinstalled 2026-06-10; venv
@@ -97,17 +116,20 @@ deferral is unaudited. No new test regressions. Recommended order is unchanged:
 modularize first (makes the rest safer to review), then undo cost, then the
 import audit.
 
-- [ ] Modularize `ui/main_window.py` (~6,100 lines) by responsibility —
-  extract the graphics view + annotation item, the SAM worker QObjects, and
-  the remaining dialogs into sibling `ui/` modules, re-exported from
-  `main_window` so imports stay stable. Mechanical moves only; no logic
-  changes. Target: no `ui/` module over ~2,500 lines. **Progress 2026-06-14:**
+- [ ] Modularize `ui/main_window.py` (~4,020 lines) by responsibility — the
+  graphics view + annotation item and the SAM worker QObjects are already
+  extracted (see Progress below), and the app dialogs now live in `ui/dialogs.py`;
+  the remaining slice is the still-large `MainWindow` class. Mechanical moves
+  only; no logic changes. Target: no `ui/` module over ~2,500 lines. **Progress
+  2026-06-14:**
   Project Library dialog + thumbnail worker extracted to `ui/project_library.py`
   and re-exported from `main_window`. **Progress 2026-06-16:** canvas graphics
   moved to `ui/canvas.py`, SAM worker QObjects moved to `ui/sam_workers.py`, and
-  both are re-exported from `main_window`; remaining dialogs/MainWindow split
-  still open. Current line counts: `main_window.py` ~4,764, `canvas.py` ~1,238,
-  `sam_workers.py` ~146.
+  both are re-exported from `main_window`. **Progress 2026-06-17:** SAM setup,
+  storage location, PHI review, export checklist, export, and export history
+  dialogs moved to `ui/dialogs.py` and are re-exported from `main_window`.
+  Current line counts: `main_window.py` ~4,020, `dialogs.py` ~798, `canvas.py`
+  ~1,238, `sam_workers.py` ~146.
 - [x] Modularize `ui/editor_panels.py` (~2,960 lines) — it is also over the
   ~2,500-line `ui/` target. Extract `AudioPanel` (~970 lines, the largest
   class) into its own `ui/audio_panel.py`, re-exported from `editor_panels`;

@@ -196,7 +196,7 @@ engineering work left is structural: keep the codebase cheap to change and
 cheap to run. Every item below is measurement-first and behavior-preserving —
 the 119-test suite and `ruff` must stay green with no user-visible change.
 
-1. **Modularize `ui/main_window.py` (currently ~6,100 lines).**
+1. **Modularize `ui/main_window.py` (currently ~4,020 lines, down from ~6,500).**
    - `main_window.py` holds `MainWindow` plus `VideoGraphicsView`,
      `AnnotationGraphicsItem`, four SAM worker `QObject`s
      (`SamProbeWorker`/`SamSegmentWorker`/`SamPropagationWorker`/`SamDownloadWorker`),
@@ -218,7 +218,10 @@ the 119-test suite and `ruff` must stay green with no user-visible change.
      `ui/timeline_utils.py`, and `editor_panels.py` is now ~2,245 lines.
    - Progress 2026-06-16: `main_window.py` now re-exports `VideoGraphicsView`,
      `AnnotationGraphicsItem`, and the four SAM worker classes from sibling
-     modules. Remaining modularization target: dialogs and the still-large
+     modules.
+   - Progress 2026-06-17: `main_window.py` now re-exports the SAM setup, storage
+     location, PHI review, export checklist, export, and export history dialogs
+     from `ui/dialogs.py`. Remaining modularization target: the still-large
      `MainWindow` class.
 
 2. **Reduce undo/redo snapshot cost.**
@@ -266,9 +269,9 @@ blockers are owner/hardware-bound (Windows installer smoke at 100/125/150 % DPI,
 signing/notarization, Stryker sample data). Take the code-health items in order —
 each is measurement-first and behavior-preserving:
 
-1. **Continue modularizing `ui/main_window.py`** (now ~4,764 lines after the
-   canvas and SAM worker extraction). Extract remaining dialogs into sibling
-   `ui/` modules, re-exported for import stability, before touching behavior.
+1. **Continue modularizing `ui/main_window.py`** (now ~4,020 lines after the
+   canvas, SAM worker, and dialog extractions). Split the still-large
+   `MainWindow` class mechanically before touching behavior.
 2. **Reduce undo/redo snapshot cost** — collapse the per-tick double serialize and
    share one serialization with autosave; add the pre-serialize change-check and a
    cumulative-size cap. Measure on the smoothness fixture with the diagnostics log.

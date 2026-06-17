@@ -934,3 +934,55 @@ Implemented the next `ui/main_window.py` modularization slice from `TODO.md` /
   cold-start import audit remain open.
 - Verification: `ruff check src tests scripts` passed and
   `.venv/bin/python -m pytest tests/ -q` passed with **119 tests**.
+
+## 21. Automation optimization sweep (2026-06-17, docs only)
+
+Scheduled daily-optimization run — first run with the **Optimization Automation
+Memory** section live in `desktop/CLAUDE.md` (marker was empty → treated as a
+full sweep). No code changed; planning/memory markdown only.
+
+- **Reviewed range:** through `22085f9` (canvas + SAM-worker extraction, §20).
+  Confirmed against the tree: `main_window.py` **4,764** lines, `canvas.py`
+  1,238, `sam_workers.py` 146, `audio_panel.py` 726, `editor_panels.py` 2,244;
+  suite collects **119 tests**.
+- **Fresh finding → TODO Optimization Backlog:** `_tick_timeline_playback`
+  (`ui/main_window.py:3953`) recomputes `project_end_time()` (four list
+  comprehensions over clips+audio+slides+markers, `ui/timeline_utils.py:13`) and
+  unconditionally calls `timeline.refresh()` + `video_view.update_annotations()`
+  on every 33 ms playback tick. Low-priority steady CPU that scales with timeline
+  length; mitigation = cache `project_end_time` (invalidate on edit) and skip the
+  refresh when the visible frame is unchanged. The major code-health work
+  (dialog/MainWindow split, undo triple-serialize, cold-start import audit)
+  stays tracked in **P4.5** and was not duplicated.
+- **Memory:** set "Last reviewed" to `22085f9` (2026-06-17); recorded
+  out-of-scope paths, two false positives (per-paint Qt allocations in
+  `canvas.py`; linear `_clip_at_time` scans), and high-signal architecture
+  bullets so the next run can go incremental.
+- **Markdown consistency:** fixed the stale "~6,100 lines" current-state figure
+  for `main_window.py` (now 4,764) in `TODO.md` P4.5 and
+  `NEXT_OPTIMIZATION_PLAN.md` §1 header, and rewrote the modularize item's lead
+  so it no longer lists the already-extracted canvas/SAM pieces as open work.
+  Historical per-session entries (incl. 117/118 test counts) left as written.
+- Did **not** run the suite (docs-only); `pytest --collect-only` = 119.
+
+## 22. Automation TODO implementation sweep (2026-06-17)
+
+Implemented the next low-risk `ui/main_window.py` modularization slice from
+`TODO.md` / `NEXT_OPTIMIZATION_PLAN.md`:
+
+- **Dialog extraction:** moved `SamSetupDialog`, `StorageLocationDialog`,
+  `PhiReviewDialog`, `ExportChecklistDialog`, `ExportDialog`, and
+  `ExportHistoryDialog` into
+  `desktop/src/neuroedit_desktop/ui/dialogs.py`.
+- **Shared dialog helpers:** moved `legacy_project_root`,
+  `recommended_project_root`, `default_project_root`, `migrate_storage_root`,
+  export-history helpers, and `recommended_preset_key` with the dialogs.
+  `main_window.py` imports and re-exports the public names so existing tests and
+  callers that import from `neuroedit_desktop.ui.main_window` remain stable.
+- **Roadmap status:** `main_window.py` is now ~4,020 lines and `dialogs.py` is
+  ~798 lines. Remaining Phase 6 modularization work is the still-large
+  `MainWindow` class; undo snapshot cost, cold-start import audit, and the
+  lower-priority playback-loop optimization remain open.
+- **Verification:** `ruff check src tests scripts` passed; focused
+  export/PHI/regression tests passed with 37 tests; full suite passed with
+  **119 tests** via `.venv/bin/python -m pytest tests/ -q`.

@@ -2,6 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+
 ## 1. Think Before Coding
 
 **Don't assume. Don't hide confusion. Surface tradeoffs.**
@@ -171,10 +172,13 @@ slides. Don't try to feed image paths into QMediaPlayer.
   kwargs for cross-version model compatibility.
 - `video_probe.py` — fast `probe_video(path) → (duration, w, h)` via ffmpeg.
 - `exporter.py` — timeline → ffmpeg composition (export pipeline).
-- `ui/main_window.py` — `MainWindow` plus `VideoGraphicsView`,
-  `AnnotationGraphicsItem`, `LabelsPanel`, `SamPanel`, `TimelineWidget`, and
-  the SAM worker QObjects. The biggest file; mouse/keyboard tool routing all
-  lives in `VideoGraphicsView`.
+- `ui/main_window.py` — `MainWindow` plus `LabelsPanel`, `SamPanel`, and
+  `TimelineWidget`. Still the biggest file; high-level app wiring lives here.
+- `ui/canvas.py` — `VideoGraphicsView` and `AnnotationGraphicsItem`.
+- `ui/sam_workers.py` — SAM worker QObjects.
+- `ui/dialogs.py` — SAM setup, storage location, PHI review, export checklist,
+  export settings, and export history dialogs. `main_window.py` re-exports
+  these names for import stability.
 - `ui/editor_panels.py` — `TimelineCanvas` + `RichTimelineWidget` (the actual
   scrollable timeline with trim handles, fade controls, cut), plus
   `SlideEditorPanel`, `SlidePreview`, `TipsPanel`, `AudioPanel`. Cut splits a
@@ -238,3 +242,38 @@ Other PHI safeguards:
   `video_probe 2.py`, etc.) are `.gitignore`d. The stray copies under `src/`
   were physically removed on 2026-06-14; if iCloud regenerates any, don't
   import or edit them.
+
+
+## Optimization Automation Memory
+
+- **Last reviewed:** `22085f9` (2026-06-17) — first full-sweep run with this
+  memory section in place.
+- **Mode:** full-sweep until a "Last reviewed" marker exists, then incremental.
+  Next run is incremental: deep-dive only files in `22085f9..HEAD` plus one hop.
+- **Out-of-scope paths:** root React/Vite prototype (legacy, superseded by
+  `desktop/`); `desktop/dist/` and any build output; `node_modules/`; `*.lock`;
+  `.venv/` (symlinked into iCloud, see venv note); vendored deps; iCloud
+  conflict copies (`* 2.py`, `.gitignore`d).
+- **Known false positives / intentionally not optimized:**
+  - `AnnotationGraphicsItem.paint` (`ui/canvas.py:86+`) allocates
+    `QColor`/`QPen`/`QBrush`/`QFont` from string literals per paint — idiomatic
+    Qt; the overlay only repaints on annotation change or playback tick, so
+    caching pens is a micro-optimization with marginal payoff. Skip.
+  - `_clip_at_time` / `_slide_at_time` linear scans per playback tick are O(n)
+    but n is small (a few dozen clips); not worth an index until projects grow.
+  - Historical per-session test counts in HANDOFF (§ entries) are left as
+    written by prior sweeps — do not "correct" 117/118 there.
+- **Architecture notes (high-signal):**
+  - Undo/redo = full `ProjectState.to_dict()` JSON snapshots (cap 50), deduped
+    by BLAKE2 hash; `_snapshot()` still serializes on every dirty tick *before*
+    the hash decides to discard a no-op, and autosave (`store.save`, 2 s when
+    dirty) serializes a third time independently — the open P4.5 undo-cost item.
+  - Modularization is mid-flight: `main_window.py` ~4,020 lines (down from
+    ~6,500); canvas → `ui/canvas.py`, SAM workers → `ui/sam_workers.py`,
+    dialogs → `ui/dialogs.py`, audio → `ui/audio_panel.py`, project library →
+    `ui/project_library.py`, all re-exported from their origin module so import
+    paths stay stable. Remaining: split the still-large `MainWindow` class.
+  - Suite is **119 tests**; gate is `ruff check src tests scripts` +
+    `python -m pytest tests/ -q`, both green at this marker.
+  - torch/SAM stack is lazy by design (venv has no torch → SAM no-ops);
+    cold-start import audit (P4.5) is still unquantified.
