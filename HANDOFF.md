@@ -986,3 +986,53 @@ Implemented the next low-risk `ui/main_window.py` modularization slice from
 - **Verification:** `ruff check src tests scripts` passed; focused
   export/PHI/regression tests passed with 37 tests; full suite passed with
   **119 tests** via `.venv/bin/python -m pytest tests/ -q`.
+
+## 23. Automation optimization sweep (2026-06-18, docs only)
+
+Scheduled daily-optimization run — first **incremental** run (prior marker
+`22085f9` set a full-sweep baseline). No code changed; markdown only.
+
+- **Reviewed range:** `22085f9..873b74d` — a single commit, the dialog
+  extraction (§22). The diff is a pure mechanical move: 799 lines of dialog
+  classes/helpers added to `ui/dialogs.py`, the same removed from
+  `ui/main_window.py`, and a 13-name import/re-export block added back. No new
+  logic, so **no new optimization findings**. That code was already in scope
+  during the `22085f9` full sweep, so it needed no re-review beyond confirming
+  the move.
+- **Backlog:** the one open finding (`_tick_timeline_playback` recomputes
+  `project_end_time()` + double-repaints per 33 ms tick) is unchanged and stays
+  in TODO. Its line reference `ui/main_window.py:3208` is now correct again —
+  the extraction shifted the method back up from §21's `:3953`. Major
+  code-health work stays in **P4.5** (dialog/MainWindow split, undo
+  triple-serialize, cold-start import audit).
+- **Line counts confirmed:** `main_window.py` 4,019, `dialogs.py` 799 — matches
+  the `~4,020` / `~798` figures already in `TODO.md` and
+  `NEXT_OPTIMIZATION_PLAN.md`; no markdown drift to fix.
+- **Memory:** set "Last reviewed" to `873b74d` (2026-06-18), switched mode to
+  incremental, and recorded `ui/dialogs.py` as a "skip — verbatim move" entry so
+  the next run doesn't re-review it unless its logic changes.
+- Did **not** run the suite (docs-only); no `.py` files touched.
+
+## 24. Automation TODO implementation sweep (2026-06-18)
+
+Implemented the next low-risk Phase 6 undo-cost slice from `TODO.md` /
+`NEXT_OPTIMIZATION_PLAN.md`:
+
+- **Autosave snapshot reuse:** `_push_history()` now builds the full
+  `ProjectState.to_dict()` once, derives the transient-stripped undo snapshot
+  from that dict, and caches the full dict for the next autosave. If a later
+  UI-only or direct dirty path changes project state without a history snapshot,
+  the cache is invalidated so autosave falls back to the live project.
+- **ProjectStore save helper:** added `ProjectStore.save_data()` so autosave can
+  persist a known-current project dict without calling `to_dict()` again. The
+  on-disk JSON format is unchanged.
+- **Coverage:** added undo-history tests proving autosave reuses the cached
+  snapshot after a history push and invalidates it after a UI-only dirty change.
+- **Roadmap status:** `TODO.md` and `NEXT_OPTIMIZATION_PLAN.md` now record this
+  sub-slice as complete. The pre-serialize short-circuit, compact history
+  storage, cumulative-size cap, smoothness-fixture timing/memory measurement,
+  `MainWindow` class split, cold-start import audit, and playback-loop
+  optimization remain open.
+- Verification: `ruff check src tests scripts` passed; focused
+  `tests/test_undo_history.py` passed with 6 tests; full suite passed with
+  **121 tests** via `.venv/bin/python -m pytest tests/ -q`.

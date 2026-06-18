@@ -103,7 +103,7 @@ template); see Completed section.
 
 Highest-leverage engineering work while P0 release items stay owner/hardware
 blocked and P5 stays parked. All items are measurement-first and
-behavior-preserving — the 119-test suite and `ruff` must stay green with no
+behavior-preserving — the 121-test suite and `ruff` must stay green with no
 user-visible change. Full rationale and acceptance criteria in
 [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md) Phase 6.
 
@@ -150,6 +150,11 @@ import audit.
   undo semantics identical. **Progress 2026-06-14:** dedup now uses compact
   BLAKE2 hashes; pre-serialize short-circuit, shared serialization, compact
   storage, cumulative-size cap, and the memory measurement are still open.
+  **Progress 2026-06-18:** history pushes now reuse the same `ProjectState.to_dict()`
+  result for the next autosave when no later UI-only/direct dirty change invalidates
+  it; focused tests cover reuse and invalidation. Pre-serialize short-circuit,
+  compact storage, cumulative-size cap, and smoothness-fixture memory measurement
+  remain open.
 - [ ] Audit cold-start import cost — confirm heavy/on-demand imports
   (subprocess/ffmpeg, captions, export) are deferred where possible and torch
   stays lazy; quantify with the diagnostics startup timing.

@@ -92,7 +92,7 @@ python -c "import py_compile; py_compile.compile('src/neuroedit_desktop/<file>.p
 hf auth login
 ```
 
-The suite under `tests/` collects **119 tests** (`python -m pytest tests/ -q`).
+The suite under `tests/` collects **121 tests** (`python -m pytest tests/ -q`).
 Keep it and `ruff check src tests scripts` green before every release tag.
 
 ### venv-location note (current setup is intentional)
@@ -246,10 +246,10 @@ Other PHI safeguards:
 
 ## Optimization Automation Memory
 
-- **Last reviewed:** `22085f9` (2026-06-17) — first full-sweep run with this
-  memory section in place.
-- **Mode:** full-sweep until a "Last reviewed" marker exists, then incremental.
-  Next run is incremental: deep-dive only files in `22085f9..HEAD` plus one hop.
+- **Last reviewed:** `873b74d` (2026-06-18) — incremental run over
+  `22085f9..HEAD` (one commit: the dialog extraction).
+- **Mode:** incremental. Next run: deep-dive only files in `873b74d..HEAD` plus
+  one hop. (Full-sweep baseline was `22085f9`, 2026-06-17.)
 - **Out-of-scope paths:** root React/Vite prototype (legacy, superseded by
   `desktop/`); `desktop/dist/` and any build output; `node_modules/`; `*.lock`;
   `.venv/` (symlinked into iCloud, see venv note); vendored deps; iCloud
@@ -263,6 +263,9 @@ Other PHI safeguards:
     but n is small (a few dozen clips); not worth an index until projects grow.
   - Historical per-session test counts in HANDOFF (§ entries) are left as
     written by prior sweeps — do not "correct" 117/118 there.
+  - `ui/dialogs.py` (`873b74d`) is a verbatim mechanical move of dialog code
+    that was already reviewed in the `22085f9` full sweep — no new findings.
+    Skip re-reviewing it unless its logic (not just its location) changes.
 - **Architecture notes (high-signal):**
   - Undo/redo = full `ProjectState.to_dict()` JSON snapshots (cap 50), deduped
     by BLAKE2 hash; `_snapshot()` still serializes on every dirty tick *before*
@@ -273,7 +276,7 @@ Other PHI safeguards:
     dialogs → `ui/dialogs.py`, audio → `ui/audio_panel.py`, project library →
     `ui/project_library.py`, all re-exported from their origin module so import
     paths stay stable. Remaining: split the still-large `MainWindow` class.
-  - Suite is **119 tests**; gate is `ruff check src tests scripts` +
+  - Suite is **121 tests**; gate is `ruff check src tests scripts` +
     `python -m pytest tests/ -q`, both green at this marker.
   - torch/SAM stack is lazy by design (venv has no torch → SAM no-ops);
     cold-start import audit (P4.5) is still unquantified.

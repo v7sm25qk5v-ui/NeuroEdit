@@ -4,6 +4,7 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from neuroedit_desktop.models import ProjectState
 
@@ -26,8 +27,11 @@ class ProjectStore:
         return cls(project_path=project_path), ProjectState.from_dict(data)
 
     def save(self, project: ProjectState) -> None:
+        self.save_data(project.to_dict())
+
+    def save_data(self, data: dict[str, Any]) -> None:
         self.project_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = self.project_path.with_suffix(".json.tmp")
         with tmp_path.open("w", encoding="utf-8") as handle:
-            json.dump(project.to_dict(), handle, indent=2)
+            json.dump(data, handle, indent=2)
         os.replace(tmp_path, self.project_path)

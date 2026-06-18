@@ -25,6 +25,24 @@ class _StubView:
         pass
 
 
+class _StubStatusBar:
+    def showMessage(self, *_args: object) -> None:
+        pass
+
+
+class _StubStore:
+    def __init__(self) -> None:
+        self.project_path = "project.json"
+        self.saved_project: ProjectState | None = None
+        self.saved_data: dict | None = None
+
+    def save(self, project: ProjectState) -> None:
+        self.saved_project = project
+
+    def save_data(self, data: dict) -> None:
+        self.saved_data = data
+
+
 def _annotation(annotation_id: str = "ann-1", label: str = "Tumor") -> Annotation:
     return Annotation(
         id=annotation_id,
@@ -46,10 +64,13 @@ def _window(project: ProjectState | None = None) -> MainWindow:
     window._redo_stack = []
     window._undo_hashes = [window._snapshot_hash(snapshot)]
     window._redo_hashes = []
+    window._autosave_snapshot = None
     window._history_limit = 50
     window._restoring = False
     window.labels_panel = _StubPanel()
     window.video_view = _StubView()
+    window.store = _StubStore()
+    window.statusBar = lambda: _StubStatusBar()
     window.refresh = lambda: None
     window._update_title = lambda: None
     window._update_history_actions = lambda: None
@@ -105,3 +126,33 @@ def test_history_dedup_uses_snapshot_hash() -> None:
 
     assert len(window._undo_stack) == 1
     assert len(window._undo_hashes) == 1
+
+
+def test_autosave_reuses_snapshot_from_history_push() -> None:
+    project = ProjectState()
+    project.annotations.append(_annotation())
+    window = _window(project)
+
+    window._update_annotation_label("ann-1", "Updated")
+    window._autosave()
+
+    assert window.store.saved_project is None
+    assert window.store.saved_data is not None
+    assert window.store.saved_data["annotations"][0]["label"] == "Updated"
+    assert window._autosave_snapshot is None
+    assert window.dirty is False
+
+
+def test_ui_only_dirty_invalidates_cached_autosave_snapshot() -> None:
+    project = ProjectState()
+    project.annotations.append(_annotation())
+    window = _window(project)
+
+    window._update_annotation_label("ann-1", "Updated")
+    assert window._autosave_snapshot is not None
+
+    window._set_tool("rect")
+    window._autosave()
+
+    assert window.store.saved_data is None
+    assert window.store.saved_project is project

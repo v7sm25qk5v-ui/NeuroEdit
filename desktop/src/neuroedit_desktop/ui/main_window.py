@@ -1170,6 +1170,7 @@ class MainWindow(QMainWindow):
         self._redo_stack: list[dict] = []
         self._undo_hashes: list[str] = []
         self._redo_hashes: list[str] = []
+        self._autosave_snapshot: dict | None = None
         self._history_limit = 50
         self._restoring = False  # True while applying a history snapshot
         self._media_warnings_shown: set[str] = set()
@@ -1980,6 +1981,8 @@ class MainWindow(QMainWindow):
     def _mark_dirty(self, *, history: bool = True) -> None:
         if history and not self._restoring:
             self._push_history()
+        elif not history:
+            self._autosave_snapshot = None
         self.dirty = True
         self.refresh()
         self._update_title()
@@ -1987,6 +1990,8 @@ class MainWindow(QMainWindow):
     def _mark_project_dirty(self) -> None:
         if not self._restoring:
             self._push_history()
+        else:
+            self._autosave_snapshot = None
         self.dirty = True
         self._update_title()
         self.video_view.set_project(self.project)
@@ -1999,6 +2004,7 @@ class MainWindow(QMainWindow):
         self.media_panel.refresh()
 
     def _mark_project_metadata_dirty(self) -> None:
+        self._autosave_snapshot = None
         self.dirty = True
         self._update_title()
 
@@ -2021,8 +2027,8 @@ class MainWindow(QMainWindow):
         "draw_label",
     )
 
-    def _snapshot(self) -> dict:
-        snapshot = self.project.to_dict()
+    def _snapshot(self, project_data: dict | None = None) -> dict:
+        snapshot = dict(project_data if project_data is not None else self.project.to_dict())
         for key in self._TRANSIENT_SNAPSHOT_KEYS:
             snapshot.pop(key, None)
         return snapshot
@@ -2032,8 +2038,10 @@ class MainWindow(QMainWindow):
         return hashlib.blake2b(payload, digest_size=16).hexdigest()
 
     def _push_history(self) -> None:
-        snapshot = self._snapshot()
+        project_data = self.project.to_dict()
+        snapshot = self._snapshot(project_data)
         snapshot_hash = self._snapshot_hash(snapshot)
+        self._autosave_snapshot = project_data
         self._redo_stack.clear()
         self._redo_hashes.clear()
         if self._undo_hashes and self._undo_hashes[-1] == snapshot_hash:
@@ -2084,6 +2092,7 @@ class MainWindow(QMainWindow):
             old_clip = self.project.active_clip
             old_path = old_clip.path if old_clip else None
             self.project = ProjectState.from_dict(snapshot)
+            self._autosave_snapshot = None
             for key, value in transient.items():
                 if key == "selected_annotation_id":
                     # Only carry the selection over if the annotation survived.
@@ -2304,9 +2313,13 @@ class MainWindow(QMainWindow):
         if not self.dirty:
             return
         try:
-            self.store.save(self.project)
+            if self._autosave_snapshot is not None:
+                self.store.save_data(self._autosave_snapshot)
+            else:
+                self.store.save(self.project)
             self.statusBar().showMessage(f"Autosaved {self.store.project_path}", 2500)
             self.dirty = False
+            self._autosave_snapshot = None
             self._update_title()
         except Exception as exc:
             self.statusBar().showMessage(f"Autosave failed: {exc}", 5000)
@@ -2332,6 +2345,7 @@ class MainWindow(QMainWindow):
         self.project = ProjectState()
         self.store = ProjectStore.create(default_project_root())
         self.dirty = False
+        self._autosave_snapshot = None
         self._load_active_clip()
         self.refresh()
         self._update_title()
@@ -2364,6 +2378,7 @@ class MainWindow(QMainWindow):
         try:
             self.store.save(self.project)
             self.dirty = False
+            self._autosave_snapshot = None
             self._update_title()
             self.statusBar().showMessage(f"Saved {self.store.project_path}", 3000)
         except Exception as exc:
@@ -2397,6 +2412,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Save failed", str(exc))
             return
         self.dirty = False
+        self._autosave_snapshot = None
         self._update_title()
         self._add_to_recent(self.store.project_path)
         self.statusBar().showMessage(f"Saved {self.store.project_path}", 3000)
@@ -3439,6 +3455,7 @@ class MainWindow(QMainWindow):
         # annotation geometry, so rebuilding them per move only made drags
         # stutter. The full refresh happens once on edit_committed.
         self.dirty = True
+        self._autosave_snapshot = None
         self._update_title()
 
     def _commit_canvas_edit(self) -> None:

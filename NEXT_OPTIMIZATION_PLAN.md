@@ -194,7 +194,7 @@ workflow refinements. The remaining roadmap work is owner/hardware-blocked
 (packaged-build smoke, signing, Stryker sample data), so the highest-leverage
 engineering work left is structural: keep the codebase cheap to change and
 cheap to run. Every item below is measurement-first and behavior-preserving —
-the 119-test suite and `ruff` must stay green with no user-visible change.
+the 121-test suite and `ruff` must stay green with no user-visible change.
 
 1. **Modularize `ui/main_window.py` (currently ~4,020 lines, down from ~6,500).**
    - `main_window.py` holds `MainWindow` plus `VideoGraphicsView`,
@@ -242,6 +242,13 @@ the 119-test suite and `ruff` must stay green with no user-visible change.
      (snapshot time around an annotation drag; resident memory after 50 edits).
    - Acceptance: no behavior change to undo/redo semantics; lower per-edit
      snapshot time and bounded memory on the fixture; undo-history tests green.
+   - Progress 2026-06-18: history pushes now cache the full project dict they
+     already build and the next autosave reuses that dict if no later UI-only or
+     direct dirty change invalidates it. `ProjectStore.save_data()` keeps the
+     existing JSON output format while avoiding a repeated `to_dict()` on that
+     autosave. Remaining work: pre-serialize short-circuit, compact history
+     storage, cumulative-size cap, and smoothness-fixture timing/memory
+     measurement.
 
 3. **Audit cold-start import cost.**
    - `__main__.py` → `MainWindow` pulls in the full module graph eagerly. Confirm
@@ -277,7 +284,7 @@ each is measurement-first and behavior-preserving:
    cumulative-size cap. Measure on the smoothness fixture with the diagnostics log.
 3. **Audit cold-start import cost** — confirm subprocess/ffmpeg, captions, and export
    imports are deferred and torch stays lazy; quantify with the startup timing.
-4. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (119 tests)
+4. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (121 tests)
    green before every release tag; feed any new regressions back into the roadmap.
 
 This keeps the project on a safe optimization loop: measure first, keep the codebase
