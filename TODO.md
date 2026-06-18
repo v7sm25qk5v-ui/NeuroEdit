@@ -30,6 +30,35 @@ by the optimization automation; they are not duplicated into P4.5.
   `project_end_time` and invalidate it on edit instead of per tick, and skip the
   `timeline.refresh()` when the visible frame is unchanged.
 
+## Security — Dependency Floor Updates (added 2026-06-18, automation)
+
+_Audit of `desktop/pyproject.toml`. All constraints are open-ended `>=`, so a
+fresh `pip install` already pulls clean latest versions — but the declared
+**floors still permit known-vulnerable releases**, which bites any pinned /
+reproducible / lockfile install. Fix = raise the floor to the patched version._
+
+- [ ] **HIGH — bump `pillow>=10` → `pillow>=12.2.0`.** Floor `>=10` allows
+  releases with: CVE-2023-4863 / CVE-2023-5129 (libwebp heap overflow, RCE-class;
+  fixed 10.0.1), CVE-2023-50447 (arbitrary code execution via `ImageMath.eval`;
+  fixed 10.2.0), CVE-2024-28219 (`_imagingcms` buffer overflow; fixed 10.3.0),
+  and CVE-2026-42308 / CVE-2026-42310 (fixed 12.2.0). Latest is 12.2.0. Pillow is
+  a core `[sam]` image-loading dep. **No code changes expected** — verify image
+  load/SAM paths after bump.
+- [ ] **MEDIUM — bump `torch>=2.7` → `torch>=2.9.1` (or latest 2.12.1).** Floor
+  `>=2.7` allows 2.7.0, which carries a dozen advisories (CVE-2025-3730,
+  CVE-2025-2953, CVE-2025-55551..55560, CVE-2025-2999/3001, etc.) — mostly
+  DoS / unsafe-deserialization on malicious-model load; fixes land across
+  2.7.1 → 2.10.0. Note CVE-2026-4538 and CVE-2025-3000 have **no fix yet**, so
+  this lowers but doesn't eliminate exposure. `torch` is an optional `[sam]`
+  dep (lazy-loaded, no-ops when uninstalled), hence MEDIUM not HIGH. Re-bump
+  `torchvision>=0.22` → `>=0.27.1` in lockstep to keep the pair compatible.
+- [ ] **LOW — bump dev dep `pytest>=8.0` → `pytest>=9.0.3`.** CVE-2025-71176
+  (fixed 9.0.3). Dev/test only, never shipped to users. Latest 9.1.0.
+
+_No advisories found for: imageio-ffmpeg, numpy, opencv-python, PySide6,
+huggingface-hub, safetensors, transformers, ruff, pyinstaller (all clean at
+their declared floors as of this audit)._
+
 ## P0 — Unblock and ship the current alpha
 
 - [x] Fix the dev environment — Python 3.13 reinstalled 2026-06-10; venv
