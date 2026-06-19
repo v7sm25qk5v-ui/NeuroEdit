@@ -194,9 +194,9 @@ workflow refinements. The remaining roadmap work is owner/hardware-blocked
 (packaged-build smoke, signing, Stryker sample data), so the highest-leverage
 engineering work left is structural: keep the codebase cheap to change and
 cheap to run. Every item below is measurement-first and behavior-preserving —
-the 121-test suite and `ruff` must stay green with no user-visible change.
+the 123-test suite and `ruff` must stay green with no user-visible change.
 
-1. **Modularize `ui/main_window.py` (currently ~4,020 lines, down from ~6,500).**
+1. **Modularize `ui/main_window.py` (currently ~4,050 lines, down from ~6,500).**
    - `main_window.py` holds `MainWindow` plus `VideoGraphicsView`,
      `AnnotationGraphicsItem`, four SAM worker `QObject`s
      (`SamProbeWorker`/`SamSegmentWorker`/`SamPropagationWorker`/`SamDownloadWorker`),
@@ -223,6 +223,10 @@ the 121-test suite and `ruff` must stay green with no user-visible change.
      location, PHI review, export checklist, export, and export history dialogs
      from `ui/dialogs.py`. Remaining modularization target: the still-large
      `MainWindow` class.
+   - Progress 2026-06-19: `MainWindow` gained a cached project-end-time helper
+     used by seek/playback/export and invalidated on document edits/project
+     loads. This addressed the playback loop's per-tick `project_end_time()`
+     scan without changing playback semantics; repaint throttling remains open.
 
 2. **Reduce undo/redo snapshot cost.**
    - Undo/redo stores full `ProjectState.to_dict()` copies (cap 50) and can hold
@@ -267,7 +271,7 @@ the 121-test suite and `ruff` must stay green with no user-visible change.
      module changed. Only the canonical `*.py` files remain under `src/`; tests
      and `ruff` stayed green.
 
-## Recommended immediate next sprint (updated 2026-06-16)
+## Recommended immediate next sprint (updated 2026-06-19)
 
 Phases 1–5 shipped (smoothness fixture + diagnostics, the Figma brand system and
 tokens, accessibility audit, smoothness caching, and the workflow refinements).
@@ -276,15 +280,19 @@ blockers are owner/hardware-bound (Windows installer smoke at 100/125/150 % DPI,
 signing/notarization, Stryker sample data). Take the code-health items in order —
 each is measurement-first and behavior-preserving:
 
-1. **Continue modularizing `ui/main_window.py`** (now ~4,020 lines after the
+1. **Continue modularizing `ui/main_window.py`** (now ~4,050 lines after the
    canvas, SAM worker, and dialog extractions). Split the still-large
    `MainWindow` class mechanically before touching behavior.
 2. **Reduce undo/redo snapshot cost** — collapse the per-tick double serialize and
-   share one serialization with autosave; add the pre-serialize change-check and a
-   cumulative-size cap. Measure on the smoothness fixture with the diagnostics log.
+   add the pre-serialize change-check, compact history storage, and a cumulative-size
+   cap. The common push-then-autosave path already shares one serialization as of
+   2026-06-18. Measure on the smoothness fixture with the diagnostics log.
 3. **Audit cold-start import cost** — confirm subprocess/ffmpeg, captions, and export
    imports are deferred and torch stays lazy; quantify with the startup timing.
-4. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (121 tests)
+4. **Finish the playback-loop repaint slice** — now that project end time is cached,
+   only skip `timeline.refresh()` / annotation refresh on ticks where the visible
+   frame has not changed, and cover it with a focused headless playback test.
+5. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (123 tests)
    green before every release tag; feed any new regressions back into the roadmap.
 
 This keeps the project on a safe optimization loop: measure first, keep the codebase

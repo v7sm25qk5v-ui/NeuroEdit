@@ -1036,3 +1036,55 @@ Implemented the next low-risk Phase 6 undo-cost slice from `TODO.md` /
 - Verification: `ruff check src tests scripts` passed; focused
   `tests/test_undo_history.py` passed with 6 tests; full suite passed with
   **121 tests** via `.venv/bin/python -m pytest tests/ -q`.
+
+## 25. Automation optimization sweep (2026-06-19, docs only)
+
+Scheduled daily-optimization run — incremental. No code changed; markdown only.
+
+- **Reviewed range:** `873b74d..HEAD` (`6700b67`) — a single commit, the
+  autosave snapshot reuse implemented in §24. Deep-dived `main_window.py`,
+  `project_store.py`, `test_undo_history.py`, plus the one-hop callers of the
+  changed undo/autosave paths.
+- **Correctness audit (the one real risk in this change):** verified every path
+  that sets `self.dirty = True` also refreshes or nulls `_autosave_snapshot`, so
+  autosave can never persist a snapshot older than the latest edit. All five
+  `dirty = True` sites are in `main_window.py` and each is handled; no other
+  module sets `dirty` directly (panels route through `_mark_dirty`). The
+  shallow-copy undo snapshot aliases nested dicts with the cached autosave dict,
+  but neither is mutated in place — safe. **No new finding.**
+- **Backlog:** no new items. The one open automation finding
+  (`_tick_timeline_playback` recomputes `project_end_time()` + double-repaints
+  per tick) is unchanged; its line reference drifted `:3208 → :3224` from this
+  commit and was corrected in `TODO.md`. Major code-health work stays in
+  **P4.5** (`MainWindow` split, remaining undo serialize cost, cold-start audit).
+- **Memory:** set "Last reviewed" to `6700b67` (2026-06-19); refined the
+  undo/redo architecture note to reflect that autosave now reuses the cached
+  `to_dict()` via `ProjectStore.save_data()`; recorded the autosave-reuse audit
+  as a "no re-audit unless a new dirty write path is added" entry.
+- Did **not** run the suite (docs-only); no `.py` files touched.
+
+## 26. Automation TODO implementation sweep (2026-06-19)
+
+Implemented the smallest actionable Phase 6 runtime-cost item from `TODO.md` /
+`NEXT_OPTIMIZATION_PLAN.md`: remove the playback loop's repeated
+`project_end_time()` scan.
+
+- **Project end-time cache:** `MainWindow` now keeps a private
+  `_project_end_time_cache` and routes seek/playback/export duration reads through
+  `_project_end_time()`. The helper still writes `project.duration`, preserving
+  the existing behavior of callers that expect that field to stay current.
+- **Invalidation:** document edits via `_mark_dirty()` / `_mark_project_dirty()`,
+  new/open project flows, undo/redo snapshot restores, and still insertion clear
+  the cache before the next read. UI-only invalidation is intentionally harmless
+  and keeps the rule simple.
+- **Coverage:** `tests/test_undo_history.py` gained focused headless tests for
+  cache reuse, dirty invalidation, and playback ticks reusing the cached end
+  time. The focused undo/playback test file now has 8 tests.
+- **Roadmap status:** `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, and
+  `desktop/CLAUDE.md` now mark the `project_end_time()` playback scan as done.
+  Remaining Phase 6 work: mechanical `MainWindow` class split, remaining
+  undo-history memory/serialize reductions, cold-start import audit, and the
+  playback-loop repaint-throttling follow-up.
+- Verification: `ruff check src tests scripts` passed; focused
+  `tests/test_undo_history.py` passed with 8 tests; full suite passed with
+  **123 tests** via `.venv/bin/python -m pytest tests/ -q`.

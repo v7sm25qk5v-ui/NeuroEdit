@@ -1175,6 +1175,7 @@ class MainWindow(QMainWindow):
         self._restoring = False  # True while applying a history snapshot
         self._media_warnings_shown: set[str] = set()
         self._media_problem_cache: dict[tuple[str, str, int, int], str | None] = {}
+        self._project_end_time_cache: float | None = None
 
         if self.store.project_path.exists():
             try:
@@ -1979,6 +1980,7 @@ class MainWindow(QMainWindow):
     # ── Helpers ───────────────────────────────────────────────────────────
 
     def _mark_dirty(self, *, history: bool = True) -> None:
+        self._invalidate_project_end_time()
         if history and not self._restoring:
             self._push_history()
         elif not history:
@@ -1988,6 +1990,7 @@ class MainWindow(QMainWindow):
         self._update_title()
 
     def _mark_project_dirty(self) -> None:
+        self._invalidate_project_end_time()
         if not self._restoring:
             self._push_history()
         else:
@@ -2007,6 +2010,17 @@ class MainWindow(QMainWindow):
         self._autosave_snapshot = None
         self.dirty = True
         self._update_title()
+
+    def _invalidate_project_end_time(self) -> None:
+        self._project_end_time_cache = None
+
+    def _project_end_time(self) -> float:
+        cached = self._project_end_time_cache
+        if cached is None:
+            cached = project_end_time(self.project)
+            self._project_end_time_cache = cached
+        self.project.duration = cached
+        return cached
 
     # ── Undo/redo ─────────────────────────────────────────────────────────
 
@@ -2346,6 +2360,7 @@ class MainWindow(QMainWindow):
         self.store = ProjectStore.create(default_project_root())
         self.dirty = False
         self._autosave_snapshot = None
+        self._invalidate_project_end_time()
         self._load_active_clip()
         self.refresh()
         self._update_title()
@@ -2364,6 +2379,7 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "Open failed", str(exc))
             return
+        self._invalidate_project_end_time()
         self._add_to_recent(Path(path))
         self._validate_loaded_project_media("Open project")
         self._load_active_clip()
@@ -2620,7 +2636,8 @@ class MainWindow(QMainWindow):
             font_size=20,
         )
         self.project.slides.append(slide)
-        self.project.duration = project_end_time(self.project)
+        self._invalidate_project_end_time()
+        self.project.duration = self._project_end_time()
         self.project.active_panel = "slides"
         self._seek_global(time_s)
         self._mark_dirty()
@@ -2720,7 +2737,7 @@ class MainWindow(QMainWindow):
         self.project.clips.insert(idx + 1, right)
 
     def _export_project(self) -> None:
-        self.project.duration = project_end_time(self.project)
+        self.project.duration = self._project_end_time()
         if self.project.duration <= 0 or (not self.project.clips and not self.project.slides):
             QMessageBox.information(self, "Export", "Add at least one clip or slide before exporting.")
             return
@@ -3198,7 +3215,7 @@ class MainWindow(QMainWindow):
         self._seek_global(self.project.current_time + direction / 30)
 
     def _seek_global(self, time_s: float) -> None:
-        self.project.duration = project_end_time(self.project)
+        self.project.duration = self._project_end_time()
         time_s = max(0.0, min(time_s, self.project.duration))
         self.project.current_time = time_s
         self._sync_player_to_timeline(play=self._timeline_playing)
@@ -3238,7 +3255,7 @@ class MainWindow(QMainWindow):
         ):
             return
 
-        self.project.duration = project_end_time(self.project)
+        self.project.duration = self._project_end_time()
         next_time = self.project.current_time + elapsed * self.project.playback_rate
         if next_time >= self.project.duration:
             self.project.current_time = self.project.duration

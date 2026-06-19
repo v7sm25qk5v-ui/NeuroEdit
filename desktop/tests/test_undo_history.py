@@ -8,7 +8,10 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from neuroedit_desktop.models import Annotation, ProjectState  # noqa: E402
+from PySide6.QtMultimedia import QMediaPlayer  # noqa: E402
+
+from neuroedit_desktop.models import Annotation, ProjectState, VideoClip  # noqa: E402
+from neuroedit_desktop.ui import main_window as main_window_module  # noqa: E402
 from neuroedit_desktop.ui.main_window import MainWindow  # noqa: E402
 
 
@@ -23,6 +26,49 @@ class _StubPanel:
 class _StubView:
     def update_annotations(self) -> None:
         pass
+
+
+class _StubTimeline:
+    def __init__(self) -> None:
+        self.refresh_count = 0
+
+    def refresh(self) -> None:
+        self.refresh_count += 1
+
+
+class _StubPlayer:
+    def __init__(self) -> None:
+        self.pause_count = 0
+
+    def pause(self) -> None:
+        self.pause_count += 1
+
+    def playbackState(self) -> QMediaPlayer.PlaybackState:
+        return QMediaPlayer.PlaybackState.StoppedState
+
+
+class _StubTimer:
+    def __init__(self) -> None:
+        self.stop_count = 0
+
+    def stop(self) -> None:
+        self.stop_count += 1
+
+
+class _StubButton:
+    def __init__(self) -> None:
+        self.text = ""
+
+    def setText(self, value: str) -> None:
+        self.text = value
+
+
+class _StubLabel:
+    def __init__(self) -> None:
+        self.text = ""
+
+    def setText(self, value: str) -> None:
+        self.text = value
 
 
 class _StubStatusBar:
@@ -67,8 +113,10 @@ def _window(project: ProjectState | None = None) -> MainWindow:
     window._autosave_snapshot = None
     window._history_limit = 50
     window._restoring = False
+    window._project_end_time_cache = None
     window.labels_panel = _StubPanel()
     window.video_view = _StubView()
+    window.timeline = _StubTimeline()
     window.store = _StubStore()
     window.statusBar = lambda: _StubStatusBar()
     window.refresh = lambda: None
@@ -156,3 +204,73 @@ def test_ui_only_dirty_invalidates_cached_autosave_snapshot() -> None:
 
     assert window.store.saved_data is None
     assert window.store.saved_project is project
+
+
+def test_project_end_time_cache_reused_until_dirty(monkeypatch: pytest.MonkeyPatch) -> None:
+    project = ProjectState()
+    project.clips.append(
+        VideoClip(
+            id="clip-1",
+            path="clip.mp4",
+            name="Clip",
+            duration=10.0,
+            trim_end=10.0,
+        )
+    )
+    calls = 0
+
+    def fake_project_end_time(_project: ProjectState) -> float:
+        nonlocal calls
+        calls += 1
+        return 10.0
+
+    monkeypatch.setattr(main_window_module, "project_end_time", fake_project_end_time)
+    window = _window(project)
+
+    assert window._project_end_time() == 10.0
+    assert window._project_end_time() == 10.0
+    assert calls == 1
+
+    window._mark_dirty(history=False)
+
+    assert window._project_end_time() == 10.0
+    assert calls == 2
+
+
+def test_timeline_playback_reuses_cached_project_end_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = ProjectState(playback_rate=1.0)
+    project.clips.append(
+        VideoClip(
+            id="clip-1",
+            path="clip.mp4",
+            name="Clip",
+            duration=10.0,
+            trim_end=10.0,
+        )
+    )
+    calls = 0
+
+    def fake_project_end_time(_project: ProjectState) -> float:
+        nonlocal calls
+        calls += 1
+        return 10.0
+
+    monotonic_values = iter([1.0, 1.1])
+    monkeypatch.setattr(main_window_module, "project_end_time", fake_project_end_time)
+    monkeypatch.setattr(main_window_module.time, "monotonic", lambda: next(monotonic_values))
+    window = _window(project)
+    window._timeline_playing = True
+    window._last_timeline_tick = 0.0
+    window.player = _StubPlayer()
+    window.timeline_clock = _StubTimer()
+    window.play_button = _StubButton()
+    window.time_label = _StubLabel()
+    window._sync_player_to_timeline = lambda *, play: None
+
+    window._tick_timeline_playback()
+    window._tick_timeline_playback()
+
+    assert calls == 1
+    assert window.timeline.refresh_count == 2

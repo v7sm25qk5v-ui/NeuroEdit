@@ -92,7 +92,7 @@ python -c "import py_compile; py_compile.compile('src/neuroedit_desktop/<file>.p
 hf auth login
 ```
 
-The suite under `tests/` collects **121 tests** (`python -m pytest tests/ -q`).
+The suite under `tests/` collects **123 tests** (`python -m pytest tests/ -q`).
 Keep it and `ruff check src tests scripts` green before every release tag.
 
 ### venv-location note (current setup is intentional)
@@ -246,10 +246,12 @@ Other PHI safeguards:
 
 ## Optimization Automation Memory
 
-- **Last reviewed:** `873b74d` (2026-06-18) — incremental run over
-  `22085f9..HEAD` (one commit: the dialog extraction).
-- **Mode:** incremental. Next run: deep-dive only files in `873b74d..HEAD` plus
-  one hop. (Full-sweep baseline was `22085f9`, 2026-06-17.)
+- **Last implementation:** 2026-06-19 — playback project-end-time cache in
+  `ui/main_window.py`, with two focused tests in `tests/test_undo_history.py`.
+- **Last reviewed:** `6700b67` (2026-06-19) — incremental run over
+  `873b74d..HEAD` (one commit: autosave snapshot reuse).
+- **Mode:** incremental. Next optimization review should deep-dive files changed
+  after `6700b67` plus one hop. (Full-sweep baseline was `22085f9`, 2026-06-17.)
 - **Out-of-scope paths:** root React/Vite prototype (legacy, superseded by
   `desktop/`); `desktop/dist/` and any build output; `node_modules/`; `*.lock`;
   `.venv/` (symlinked into iCloud, see venv note); vendored deps; iCloud
@@ -266,17 +268,32 @@ Other PHI safeguards:
   - `ui/dialogs.py` (`873b74d`) is a verbatim mechanical move of dialog code
     that was already reviewed in the `22085f9` full sweep — no new findings.
     Skip re-reviewing it unless its logic (not just its location) changes.
+  - Autosave snapshot reuse (`6700b67`) was audited for the stale-snapshot risk:
+    all five `self.dirty = True` sites live in `main_window.py` and each either
+    refreshes `_autosave_snapshot` (the history push) or nulls it; no other
+    module sets `dirty` directly (panels route through `_mark_dirty`). The
+    shallow-copy snapshot shares nested dicts with the cached autosave dict, but
+    neither is mutated in place, so the aliasing is safe. No correctness issue,
+    no new finding — don't re-audit unless a new `dirty` write path is added.
 - **Architecture notes (high-signal):**
   - Undo/redo = full `ProjectState.to_dict()` JSON snapshots (cap 50), deduped
     by BLAKE2 hash; `_snapshot()` still serializes on every dirty tick *before*
-    the hash decides to discard a no-op, and autosave (`store.save`, 2 s when
-    dirty) serializes a third time independently — the open P4.5 undo-cost item.
-  - Modularization is mid-flight: `main_window.py` ~4,020 lines (down from
+    the hash decides to discard a no-op. As of `6700b67`, `_push_history()`
+    builds `to_dict()` once and caches the full dict in `_autosave_snapshot`;
+    autosave (2 s when dirty) reuses it via `ProjectStore.save_data(dict)` when
+    still valid, so the third independent serialize is gone on the common
+    push-then-autosave path. Still open in P4.5: pre-serialize short-circuit,
+    compact history storage, cumulative-size cap, fixture timing/memory.
+  - Modularization is mid-flight: `main_window.py` ~4,050 lines (down from
     ~6,500); canvas → `ui/canvas.py`, SAM workers → `ui/sam_workers.py`,
     dialogs → `ui/dialogs.py`, audio → `ui/audio_panel.py`, project library →
     `ui/project_library.py`, all re-exported from their origin module so import
     paths stay stable. Remaining: split the still-large `MainWindow` class.
-  - Suite is **121 tests**; gate is `ruff check src tests scripts` +
+  - Playback-loop optimization is partially complete: `MainWindow._project_end_time()`
+    caches `project_end_time()` for seek/playback/export and invalidates on
+    document edits/project load. Still open: skip timeline/annotation repaint on
+    ticks where the visible frame is unchanged.
+  - Suite is **123 tests**; gate is `ruff check src tests scripts` +
     `python -m pytest tests/ -q`, both green at this marker.
   - torch/SAM stack is lazy by design (venv has no torch → SAM no-ops);
     cold-start import audit (P4.5) is still unquantified.

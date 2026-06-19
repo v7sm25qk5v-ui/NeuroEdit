@@ -19,16 +19,16 @@ The primary open code-health/runtime work lives in **P4.5** (modularize the
 audit cold-start imports). The items here are smaller, fresh findings surfaced
 by the optimization automation; they are not duplicated into P4.5.
 
-- [ ] **Playback loop does steady O(n) work + two repaints per 33 ms tick.**
-  `_tick_timeline_playback` (`ui/main_window.py:3208`) recomputes
+- [ ] **Playback loop still does two repaints per 33 ms tick.**
+  `_tick_timeline_playback` (`ui/main_window.py:3241`) used to recompute
   `project_end_time()` — four full list comprehensions over
   clips+audio+slides+markers (`ui/timeline_utils.py:13`) — and unconditionally
-  calls both `self.timeline.refresh()` and `self.video_view.update_annotations()`
-  on every 30 fps tick, even when the playhead hasn't crossed a clip/annotation
-  boundary. Low-priority (negligible for small projects), but it is constant CPU
-  during playback that scales with timeline length. Mitigation: cache
-  `project_end_time` and invalidate it on edit instead of per tick, and skip the
-  `timeline.refresh()` when the visible frame is unchanged.
+  call both `self.timeline.refresh()` and `self.video_view.update_annotations()`
+  on every 30 fps tick. **Progress 2026-06-19:** `MainWindow` now caches
+  `project_end_time` and invalidates it on document edits/project load, so
+  playback/seek/export no longer recompute the timeline end each tick. Remaining
+  low-priority mitigation: skip `timeline.refresh()` / annotation refresh when
+  the visible frame has not changed.
 
 ## P0 — Unblock and ship the current alpha
 
@@ -103,7 +103,7 @@ template); see Completed section.
 
 Highest-leverage engineering work while P0 release items stay owner/hardware
 blocked and P5 stays parked. All items are measurement-first and
-behavior-preserving — the 121-test suite and `ruff` must stay green with no
+behavior-preserving — the 123-test suite and `ruff` must stay green with no
 user-visible change. Full rationale and acceptance criteria in
 [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md) Phase 6.
 
@@ -116,7 +116,7 @@ deferral is unaudited. No new test regressions. Recommended order is unchanged:
 modularize first (makes the rest safer to review), then undo cost, then the
 import audit.
 
-- [ ] Modularize `ui/main_window.py` (~4,020 lines) by responsibility — the
+- [ ] Modularize `ui/main_window.py` (~4,050 lines) by responsibility — the
   graphics view + annotation item and the SAM worker QObjects are already
   extracted (see Progress below), and the app dialogs now live in `ui/dialogs.py`;
   the remaining slice is the still-large `MainWindow` class. Mechanical moves
@@ -128,7 +128,7 @@ import audit.
   both are re-exported from `main_window`. **Progress 2026-06-17:** SAM setup,
   storage location, PHI review, export checklist, export, and export history
   dialogs moved to `ui/dialogs.py` and are re-exported from `main_window`.
-  Current line counts: `main_window.py` ~4,020, `dialogs.py` ~798, `canvas.py`
+  Current line counts: `main_window.py` ~4,050, `dialogs.py` ~798, `canvas.py`
   ~1,238, `sam_workers.py` ~146.
 - [x] Modularize `ui/editor_panels.py` (~2,960 lines) — it is also over the
   ~2,500-line `ui/` target. Extract `AudioPanel` (~970 lines, the largest
