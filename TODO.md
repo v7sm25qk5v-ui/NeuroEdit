@@ -30,6 +30,30 @@ by the optimization automation; they are not duplicated into P4.5.
   `project_end_time` and invalidate it on edit instead of per tick, and skip the
   `timeline.refresh()` when the visible frame is unchanged.
 
+## Dependency Audit — security (2026-06-19)
+
+Audit of `desktop/pyproject.toml`. All deps use unpinned `>=` floors with no
+lockfile, so a clean `pip install` already pulls the (currently CVE-free)
+latest. Risk is only realized if an environment is resolved/pinned to the
+declared floor — so raise the floors below to prevent installing a known-
+vulnerable version.
+
+- [ ] **Raise `pillow` floor `>=10` → `>=12.2.0`.** The `>=10` floor permits
+  Pillow 10.0.0, which carries multiple CVEs: CVE-2023-4863 (libwebp heap
+  overflow, RCE — critical, fixed 10.0.1), CVE-2023-50447 (arbitrary code exec
+  via `ImageMath.eval`, fixed 10.2.0), CVE-2024-28219 (`_imagingcms` buffer
+  overflow, fixed 10.3.0), and CVE-2026-42308 / CVE-2026-42310 (fixed 12.2.0).
+  12.2.0 has no known advisories. Major bump (10→12); Pillow's typical API is
+  stable, project is already Python 3.12+, so low breakage risk.
+- [ ] **Raise `torch` floor `>=2.7` (and `torchvision >=0.22`) → `>=2.12`.**
+  The `>=2.7` floor permits torch 2.7.0, which has ~13 advisories incl.
+  CVE-2025-3730, CVE-2025-2953, CVE-2025-55551/52/53/54/57/58/60,
+  CVE-2025-2999/3000/3001, CVE-2026-4538 (RCE/DoS, fixed across 2.7.1→2.10.0).
+  torch 2.12.1 is clean. Note: torch is the optional `[sam]` extra and is not
+  installed in the current venv (SAM no-ops per CLAUDE.md), so practical
+  exposure is low today, but the floor should still move. Keep torchvision
+  matched to the torch release.
+
 ## P0 — Unblock and ship the current alpha
 
 - [x] Fix the dev environment — Python 3.13 reinstalled 2026-06-10; venv
