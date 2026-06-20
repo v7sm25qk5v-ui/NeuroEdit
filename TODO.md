@@ -19,6 +19,11 @@ The primary open code-health/runtime work lives in **P4.5** (modularize the
 audit cold-start imports). The items here are smaller, fresh findings surfaced
 by the optimization automation; they are not duplicated into P4.5.
 
+- [x] **Stale `project_end_time` cache after undo/redo (correctness).** Fixed
+  2026-06-20: `_apply_snapshot()` now clears `_project_end_time_cache` after
+  replacing the project, so undo/redo cannot reuse a duration from the prior
+  document state. A focused regression test restores a longer snapshot after
+  caching a shorter duration.
 - [ ] **Playback loop still does two repaints per 33 ms tick.**
   `_tick_timeline_playback` (`ui/main_window.py:3241`) used to recompute
   `project_end_time()` — four full list comprehensions over
@@ -103,7 +108,7 @@ template); see Completed section.
 
 Highest-leverage engineering work while P0 release items stay owner/hardware
 blocked and P5 stays parked. All items are measurement-first and
-behavior-preserving — the 123-test suite and `ruff` must stay green with no
+behavior-preserving — the 124-test suite and `ruff` must stay green with no
 user-visible change. Full rationale and acceptance criteria in
 [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md) Phase 6.
 

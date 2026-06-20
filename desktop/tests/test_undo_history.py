@@ -237,6 +237,28 @@ def test_project_end_time_cache_reused_until_dirty(monkeypatch: pytest.MonkeyPat
     assert calls == 2
 
 
+def test_apply_snapshot_invalidates_project_end_time_cache() -> None:
+    project = ProjectState()
+    project.clips.append(
+        VideoClip(
+            id="clip-1",
+            path="clip.mp4",
+            name="Clip",
+            duration=10.0,
+            trim_end=10.0,
+        )
+    )
+    window = _window(project)
+    restored = window._snapshot()
+    project.clips[0].trim_end = 5.0
+
+    assert window._project_end_time() == 5.0
+
+    window._apply_snapshot(restored)
+
+    assert window._project_end_time() == 10.0
+
+
 def test_timeline_playback_reuses_cached_project_end_time(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

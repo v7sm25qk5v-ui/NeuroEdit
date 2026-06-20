@@ -271,7 +271,7 @@ the 123-test suite and `ruff` must stay green with no user-visible change.
      module changed. Only the canonical `*.py` files remain under `src/`; tests
      and `ruff` stayed green.
 
-## Recommended immediate next sprint (updated 2026-06-19)
+## Recommended immediate next sprint (updated 2026-06-20)
 
 Phases 1–5 shipped (smoothness fixture + diagnostics, the Figma brand system and
 tokens, accessibility audit, smoothness caching, and the workflow refinements).
@@ -292,7 +292,7 @@ each is measurement-first and behavior-preserving:
 4. **Finish the playback-loop repaint slice** — now that project end time is cached,
    only skip `timeline.refresh()` / annotation refresh on ticks where the visible
    frame has not changed, and cover it with a focused headless playback test.
-5. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (123 tests)
+5. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (124 tests)
    green before every release tag; feed any new regressions back into the roadmap.
 
 This keeps the project on a safe optimization loop: measure first, keep the codebase

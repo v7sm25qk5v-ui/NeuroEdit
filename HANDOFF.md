@@ -1088,3 +1088,25 @@ Implemented the smallest actionable Phase 6 runtime-cost item from `TODO.md` /
 - Verification: `ruff check src tests scripts` passed; focused
   `tests/test_undo_history.py` passed with 8 tests; full suite passed with
   **123 tests** via `.venv/bin/python -m pytest tests/ -q`.
+
+## 27. Undo/redo project-end-time cache fix (2026-06-20)
+
+Implemented the correctness finding from the incremental optimization review.
+
+- **Reviewed range:** `6700b67..HEAD` (`cbe6679`) — one commit, the playback
+  project-end-time cache (implemented in §26). Deep-dived `main_window.py` (the
+  cache + all invalidation/read sites), `ui/timeline_utils.py` (`project_end_time`),
+  the undo/redo path (`undo`/`redo`/`_apply_snapshot`), and `test_undo_history.py`.
+- **Fix:** `_apply_snapshot()` now clears `_project_end_time_cache` immediately
+  after replacing `self.project`, matching the invalidation already performed
+  for normal document edits and project load/new flows.
+- **Coverage:** `test_apply_snapshot_invalidates_project_end_time_cache` first
+  caches a shortened project duration, restores a longer snapshot, and proves
+  the next duration read recomputes to the restored value. The focused
+  undo/playback file now has 9 tests; the full suite has **124 tests**.
+- **Roadmap:** marked the cache correctness item complete in `TODO.md`. Next
+  Phase 6 work remains the `MainWindow` class split, remaining undo history
+  cost reductions, cold-start import audit, and playback repaint throttling.
+- **Verification:** `ruff check src tests scripts` passed; focused
+  `tests/test_undo_history.py` passed with 9 tests; full suite passed with
+  **124 tests** via `.venv/bin/python -m pytest tests/ -q`.

@@ -2107,6 +2107,7 @@ class MainWindow(QMainWindow):
             old_path = old_clip.path if old_clip else None
             self.project = ProjectState.from_dict(snapshot)
             self._autosave_snapshot = None
+            self._project_end_time_cache = None
             for key, value in transient.items():
                 if key == "selected_annotation_id":
                     # Only carry the selection over if the annotation survived.

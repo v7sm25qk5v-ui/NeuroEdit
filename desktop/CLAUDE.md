@@ -92,7 +92,7 @@ python -c "import py_compile; py_compile.compile('src/neuroedit_desktop/<file>.p
 hf auth login
 ```
 
-The suite under `tests/` collects **123 tests** (`python -m pytest tests/ -q`).
+The suite under `tests/` collects **124 tests** (`python -m pytest tests/ -q`).
 Keep it and `ruff check src tests scripts` green before every release tag.
 
 ### venv-location note (current setup is intentional)
@@ -246,12 +246,14 @@ Other PHI safeguards:
 
 ## Optimization Automation Memory
 
-- **Last implementation:** 2026-06-19 — playback project-end-time cache in
-  `ui/main_window.py`, with two focused tests in `tests/test_undo_history.py`.
-- **Last reviewed:** `6700b67` (2026-06-19) — incremental run over
-  `873b74d..HEAD` (one commit: autosave snapshot reuse).
+- **Last implementation:** 2026-06-20 — undo/redo snapshot restoration now
+  invalidates the project-end-time cache, with a focused regression test in
+  `tests/test_undo_history.py`.
+- **Last reviewed:** `cbe6679` (2026-06-20) — incremental run over
+  `6700b67..HEAD` (one commit: playback project-end-time cache). The stale-cache
+  correctness issue found in that review was fixed on 2026-06-20.
 - **Mode:** incremental. Next optimization review should deep-dive files changed
-  after `6700b67` plus one hop. (Full-sweep baseline was `22085f9`, 2026-06-17.)
+  after `cbe6679` plus one hop. (Full-sweep baseline was `22085f9`, 2026-06-17.)
 - **Out-of-scope paths:** root React/Vite prototype (legacy, superseded by
   `desktop/`); `desktop/dist/` and any build output; `node_modules/`; `*.lock`;
   `.venv/` (symlinked into iCloud, see venv note); vendored deps; iCloud
@@ -291,9 +293,9 @@ Other PHI safeguards:
     paths stay stable. Remaining: split the still-large `MainWindow` class.
   - Playback-loop optimization is partially complete: `MainWindow._project_end_time()`
     caches `project_end_time()` for seek/playback/export and invalidates on
-    document edits/project load. Still open: skip timeline/annotation repaint on
-    ticks where the visible frame is unchanged.
-  - Suite is **123 tests**; gate is `ruff check src tests scripts` +
+    document edits/project load/undo/redo restores. Still open: skip timeline
+    and annotation repaint on ticks where the visible frame is unchanged.
+  - Suite is **124 tests**; gate is `ruff check src tests scripts` +
     `python -m pytest tests/ -q`, both green at this marker.
   - torch/SAM stack is lazy by design (venv has no torch → SAM no-ops);
     cold-start import audit (P4.5) is still unquantified.
