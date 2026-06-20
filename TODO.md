@@ -11,6 +11,38 @@ PHI story (P3) which is the trust-critical feature for clinical users. Captions
 and export polish (P4) widen the audience. Stryker/DICOM (P5) is the largest
 bet and stays parked until sample data and a design pass exist.
 
+## Dependency Security (audit 2026-06-20, automation-maintained)
+
+Audit of `desktop/pyproject.toml`. Deps are declared as `>=` floors with **no
+lock file**, so a fresh install resolves to the latest (clean) release. The risk
+below is that the floors still *permit* known-vulnerable versions for any
+pinned/cached/offline environment — raise the floors to enforce the fixes.
+
+**P0 — security (raise floor to enforce CVE fixes):**
+- [ ] **pillow `>=10` → `>=12.2.0`** (major). Floor allows 10.0–10.1.x, exposed to
+  CVE-2023-50447 (ImageMath.eval arbitrary code execution, fixed 10.2.0),
+  CVE-2023-4863/5129 (libwebp heap overflow, critical, fixed 10.0.1),
+  CVE-2024-28219 (buffer overflow, fixed 10.3.0), and CVE-2026-42308 /
+  CVE-2026-42310 (DoS, fixed 12.2.0). Latest 12.2.0 is clean. Major bump
+  (10→12) — review Pillow 11 & 12 release notes for removed APIs before bumping.
+- [ ] **torch `>=2.7` → `>=2.12.1`** (minor). Floor 2.7.0 carries multiple CVEs,
+  several rated critical: CVE-2025-2999 / -3000 / -3001 (critical), plus
+  CVE-2025-3730, -2953 and the CVE-2025-5555x DoS/overflow series (fixed across
+  2.7.1–2.10.0). Latest 2.12.1 is clean. In the optional `[sam]` extra.
+- [ ] **pytest `>=8.0` → `>=9.0.3`** (major, dev-only). CVE-2025-71176 — insecure
+  `/tmp/pytest-of-*` dir on UNIX (fixed 9.0.3). Low severity (local, dev tool);
+  major bump may need test-suite touch-ups. Latest 9.1.1 clean.
+
+**P3 — housekeeping (no known CVEs; floors lag latest):**
+- [ ] huggingface-hub `>=0.30` → 1.20.1 — **major (0.x→1.x), breaking API**; review carefully.
+- [ ] numpy `>=2.0` → 2.4.6 (minor) · opencv-python `>=4.10` → 4.13 (minor) ·
+  PySide6 `>=6.8` → 6.11.1 (minor) · transformers `>=5.6` → 5.12.1 (minor) ·
+  torchvision `>=0.22` → 0.27.1 (minor) · imageio-ffmpeg `>=0.5` → 0.6.0 (minor) ·
+  safetensors `>=0.5` → 0.8.0 (minor) · ruff `>=0.8` → 0.15.18 (minor, dev) ·
+  pyinstaller `>=6.11` → 6.21.0 (minor) · hatchling `>=1.25` → 1.30.1 (minor, build).
+
+_Note: the request asked to write this to `/Users/alangordillo/Documents/Claude/Code/video editing app/TODO.md`, which does not exist in this remote Linux container. Recorded here in the repo TODO.md (the committable artifact) instead._
+
 ## Optimization Backlog
 _(automation-maintained — new findings appended below, checked off when implemented)_
 
