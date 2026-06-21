@@ -35,6 +35,34 @@ by the optimization automation; they are not duplicated into P4.5.
   low-priority mitigation: skip `timeline.refresh()` / annotation refresh when
   the visible frame has not changed.
 
+## Dependency Security — raise floors above known-CVE versions
+_(audit 2026-06-21 — `desktop/pyproject.toml`. Constraints are `>=` floors;
+the latest release of every dependency is CVE-free, but these floors still
+permit installing vulnerable versions. Bump the floors so a clean resolve is
+guaranteed. No code changes needed — only `pyproject.toml` constraint edits.)_
+
+- [ ] **`pillow>=10` → `pillow>=12.2.0` (SECURITY, high).** The `>=10` floor
+  permits 7 advisories, including CVE-2023-50447 (arbitrary code execution via
+  `ImageMath.eval`), CVE-2024-28219 (buffer overflow in `_imagingcms`), and the
+  recent CVE-2026-42308 / CVE-2026-42310. All fixed by 12.2.0 (current latest).
+  Major bump (10→12); review Pillow 11 & 12 release notes for API removals
+  before raising. Used in the optional `[sam]` extra.
+- [ ] **`torch>=2.7` → `torch>=2.12.1` (SECURITY, high).** The `>=2.7` floor
+  permits ~13 advisories (CVE-2025-3730, CVE-2025-2953, the CVE-2025-5555x
+  cluster, CVE-2025-2999/3000/3001). Latest 2.12.1 reports zero. Minor bump
+  within 2.x. Only installed via the optional `[sam]` extra, so default installs
+  are not exposed today — still pin the floor before SAM ships.
+- [ ] **`pytest>=8.0` → `pytest>=9.0.3` (SECURITY, low).** The `>=8.0` floor
+  permits CVE-2025-71176 (fixed in 9.0.3). Dev/test-only dependency, so
+  production exposure is nil; low priority. Major bump (8→9) — re-run the
+  124-test suite after raising.
+
+Non-security floor catch-up (optional, no CVEs at any version): bump
+`huggingface-hub>=0.30`→`>=1.20` (major), `numpy 2.0`→`2.4`, `opencv-python
+4.10`→`4.13`, `PySide6 6.8`→`6.11`, `transformers 5.6`→`5.12`, `torchvision
+0.22`→`0.27`, `ruff 0.8`→`0.15`, `pyinstaller 6.11`→`6.21`, `safetensors
+0.5`→`0.8`, `imageio-ffmpeg 0.5`→`0.6`, `hatchling 1.25`→`1.30`.
+
 ## P0 — Unblock and ship the current alpha
 
 - [x] Fix the dev environment — Python 3.13 reinstalled 2026-06-10; venv
