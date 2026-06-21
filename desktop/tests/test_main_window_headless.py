@@ -144,6 +144,59 @@ def test_sync_shows_black_when_no_clip_under_playhead(window):
     assert window.player.source().isEmpty()
 
 
+def test_position_changed_ignored_when_source_cleared(window):
+    """Regression: after a clip plays into a still/gap, _sync_player_to_timeline
+    clears the source and QMediaPlayer emits positionChanged(0). That stale
+    event must NOT snap current_time back to the active clip's start (which
+    looped playback on the first clip instead of advancing to the still)."""
+    clip = VideoClip(id=new_id(), path="/tmp/x.mp4", name="X", duration=10.0,
+                     start_time=0.0, trim_start=0.0, trim_end=2.5)
+    window.project.clips.append(clip)
+    window.project.active_clip_id = clip.id
+    window.project.current_time = 3.0  # advanced past the clip, into the gap
+
+    # Source is empty (cleared on entering the gap); a spurious 0 arrives.
+    assert window.player.source().isEmpty()
+    window._position_changed(0)
+
+    assert window.project.current_time == 3.0
+
+
+def test_position_changed_ignored_while_seek_pending(window):
+    """Regression: crossing into a trimmed next clip mid-playback,
+    _sync_player_to_timeline stashes _pending_seek_ms and defers the seek until
+    the media loads. Until then QMediaPlayer plays from 0, whose position maps
+    to (start_time - trim_start) — back inside the preceding still. While a seek
+    is pending those events must be ignored so the playhead doesn't bounce."""
+    from PySide6.QtCore import QUrl
+
+    clip = VideoClip(id=new_id(), path="/tmp/x.mp4", name="after still",
+                     duration=120.0, start_time=6.865, trim_start=1.865, trim_end=114.0)
+    window.project.clips.append(clip)
+    window.project.active_clip_id = clip.id
+    window.project.current_time = 6.9
+    window.player.setSource(QUrl.fromLocalFile("/tmp/x.mp4"))  # non-empty
+    window._pending_seek_ms = 1887  # seek to trim_start not applied yet
+
+    window._position_changed(0)  # would map to 6.865 - 1.865 = 5.0
+    assert window.project.current_time == 6.9
+
+
+def test_media_status_applies_pending_seek_only_when_loaded(window):
+    """The deferred seek is applied once — and only once — the media reports
+    loaded; earlier statuses (LoadingMedia, etc.) leave it pending."""
+    from PySide6.QtMultimedia import QMediaPlayer
+
+    window._pending_seek_ms = 1887
+    window._pending_play = False
+
+    window._media_status_changed(QMediaPlayer.MediaStatus.LoadingMedia)
+    assert window._pending_seek_ms == 1887  # not yet
+
+    window._media_status_changed(QMediaPlayer.MediaStatus.LoadedMedia)
+    assert window._pending_seek_ms is None  # applied + cleared
+
+
 def test_autosave_restore_round_trip(tmp_path):
     store = ProjectStore.create(tmp_path / "proj")
     project = ProjectState(project_name="Round Trip")

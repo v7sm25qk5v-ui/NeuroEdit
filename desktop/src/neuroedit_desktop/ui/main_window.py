@@ -1214,6 +1214,13 @@ class MainWindow(QMainWindow):
         self.player.setAudioOutput(self.audio)
         self.player.positionChanged.connect(self._position_changed)
         self.player.durationChanged.connect(self._duration_changed)
+        self.player.mediaStatusChanged.connect(self._media_status_changed)
+        # A seek issued right after setSource() is silently dropped because the
+        # media isn't loaded yet, so a trimmed clip would play from 0 instead of
+        # its trim_start. We stash the intended seek (and whether to play) here
+        # and apply it from _media_status_changed once the media reports loaded.
+        self._pending_seek_ms: int | None = None
+        self._pending_play = False
         self.audio.setVolume(self.project.volume)
         self._timeline_playing = False
         self._last_timeline_tick = time.monotonic()
@@ -3226,6 +3233,18 @@ class MainWindow(QMainWindow):
         self.time_label.setText(format_time(self.project.current_time))
 
     def _position_changed(self, position_ms: int) -> None:
+        # Only let real playback drive the playhead. Ignore position events when
+        # the source is cleared (entering a still/gap), when a fresh source has
+        # not yet been sought to its trim_start (_pending_seek_ms outstanding),
+        # or when the player isn't actually playing — otherwise the transient
+        # reset QMediaPlayer emits around setSource/setPosition would snap the
+        # playhead back to (start_time - trim_start) and loop the previous clip.
+        if (
+            self._pending_seek_ms is not None
+            or self.player.source().isEmpty()
+            or self.player.playbackState() != QMediaPlayer.PlaybackState.PlayingState
+        ):
+            return
         clip = self.project.active_clip
         if not clip:
             return
@@ -3246,6 +3265,12 @@ class MainWindow(QMainWindow):
         now = time.monotonic()
         elapsed = now - self._last_timeline_tick
         self._last_timeline_tick = now
+
+        # A clip's source is still loading toward its deferred seek: hold the
+        # playhead here for the few ms until _media_status_changed seeks+plays,
+        # so we don't advance past it or re-issue a play() that starts at 0.
+        if self._pending_seek_ms is not None:
+            return
 
         active = self._clip_at_time(self.project.current_time)
         on_image = active is not None and active.media_type == "image"
@@ -3312,17 +3337,41 @@ class MainWindow(QMainWindow):
             self.video_view.update_annotations()
             return
 
-        if clip_changed or not self.video_view.video_item.isVisible():
+        new_source = clip_changed or not self.video_view.video_item.isVisible()
+        if new_source:
             self.video_view.set_image(None)
             self.player.setSource(QUrl.fromLocalFile(clip.path))
             self.player.setPlaybackRate(self.project.playback_rate)
 
         local_s = clip.trim_start + max(0.0, self.project.current_time - clip.start_time)
         target_ms = int(local_s * 1000)
+        if new_source:
+            # The fresh source can't be sought until it reports loaded; seeking
+            # or playing now makes a trimmed clip start at 0. Defer both to
+            # _media_status_changed so the clip enters at its trim_start.
+            self._pending_seek_ms = target_ms
+            self._pending_play = play
+            self.player.pause()
+            return
+        self._pending_seek_ms = None
         if abs(self.player.position() - target_ms) > 80:
             self.player.setPosition(target_ms)
         if play:
             self.player.play()
+
+    def _media_status_changed(self, status: QMediaPlayer.MediaStatus) -> None:
+        if self._pending_seek_ms is None:
+            return
+        if status not in (
+            QMediaPlayer.MediaStatus.LoadedMedia,
+            QMediaPlayer.MediaStatus.BufferedMedia,
+        ):
+            return
+        self.player.setPosition(self._pending_seek_ms)
+        self._pending_seek_ms = None
+        if self._pending_play and self._timeline_playing:
+            self.player.play()
+        self._pending_play = False
 
     def _duration_changed(self, duration_ms: int) -> None:
         clip = self.project.active_clip

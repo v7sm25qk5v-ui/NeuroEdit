@@ -1150,3 +1150,101 @@ sweep.
 - **Next optimization task:** reduce playback repaint work by skipping timeline
   and annotation refreshes when the visible frame has not changed, or continue
   the measurement-first undo snapshot/cold-start work in Phase 6.
+
+## 30. Playback loop-at-still bug fix (2026-06-21)
+
+Fixed a bug where, after a video clip played, playback looped back to the start
+of that clip instead of advancing to the following still/clip (reproduced via
+the Take Still feature, which splits a clip and inserts a slide-filled gap).
+
+- **Root cause:** when the playhead advances into a gap with no video clip,
+  `_sync_player_to_timeline` clears the player source (`setSource(QUrl())`).
+  QMediaPlayer then emits `positionChanged(0)`, and `_position_changed` mapped
+  that stale event onto `current_time = active_clip.start_time - trim_start`
+  (≈ 0), snapping the playhead back to the clip's start. The next tick replayed
+  the clip — an infinite loop that never reached the still. The same class of
+  spurious event (`setSource`/`setPosition` during a clip transition) also
+  risked a backward jump on the next clip.
+- **Fix:** `_position_changed` now returns early unless the player has a
+  non-empty source **and** is in `PlayingState`, so only genuine playback drives
+  the playhead. File: `desktop/src/neuroedit_desktop/ui/main_window.py`.
+- **Regression coverage:** `test_position_changed_ignored_when_source_cleared`
+  in `tests/test_main_window_headless.py` — active clip, source cleared,
+  `_position_changed(0)` must leave `current_time` unchanged.
+- **Verification:** `ruff check src tests scripts` passed; full suite passed
+  with **126 tests** via `.venv/bin/python -m pytest tests/ -q`. Also verified
+  headlessly against the real autosaved project (`Patient_1_v9.mov`, 114 s):
+  pre-fix, a scrub into the still region snapped the playhead backward
+  (`t=4.0 → 5.0`, i.e. `clip2.start 6.865 − trim_start 1.865`; `→ 0.0` when the
+  active clip was clip1); post-fix every seek stays where placed (4.0, 10, 30,
+  50). This was the same defect behind the user-reported "can't scrub from the
+  still to the next clip" and "can't click on the second clip" (double-clicking
+  clip2 seeks to its start, then the stray event bounced the playhead back into
+  the still) — both resolved by the §30 guard.
+
+### 30a. Follow-up: same bounce during PLAYBACK (2026-06-21)
+
+The §30 guard fixed scrubbing (player paused, `play=False`) but the user
+reported the bounce still happened during **playback**: starting from the
+beginning and letting it play, the playhead reached the still→clip2 boundary
+(~6.865 s) and bounced back into the still, never entering clip2.
+
+- **Why §30 missed it:** during playback the player IS in `PlayingState`, so the
+  `!= PlayingState` guard let the transient through. Crossing into clip2,
+  `_sync_player_to_timeline` does `setSource(clip2)` + a seek to the clip's
+  `trim_start`; before that seek lands QMediaPlayer emits `positionChanged(0)`,
+  which — while playing — maps to `start_time − trim_start` (6.865 − 1.865 =
+  5.0), a point back inside the still.
+- **Fix:** `_position_changed` now also drops a **large backward jump** while the
+  mapped time is more than 0.2 s before the current playhead
+  (`if mapped < current_time - 0.2: return`). Real playback only advances, so the
+  transient reset is ignored until the seek to `trim_start` settles and position
+  moves forward again. Same file.
+- **Regression coverage:** `test_position_changed_ignores_backward_jump_during_playback`
+  (monkeypatches `playbackState`→Playing + a non-empty source; `_position_changed(0)`
+  must not move the playhead off 6.9, and a real forward position is still honored).
+- **Verification:** `ruff check src tests` clean; full suite **127 tests** green.
+  Headless playback across the boundary now crosses 6.865 into clip2 instead of
+  snapping to 5.0 (confirmed against the real `Patient_1_v9.mov` project); clip1→
+  still still works (the position-0 reset at clip1's trimmed end is ignored too).
+  Forward decode *through* clip2 can't be fully exercised offscreen (QMediaPlayer
+  doesn't reliably advance position without a render surface) — needs a real-app
+  confirmation. NOTE: do not launch a second app instance to test — it races the
+  user's running instance on the shared `~/Documents/NeuroEdit/Autosave/project.json`.
+
+### 30b. ACTUAL root cause + real fix: seek dropped after setSource (2026-06-21)
+
+§30/§30a were treating symptoms. Driving the real app on a render surface (an
+isolated, save-disabled instance — see the §30a NOTE) and logging
+`player.position()` exposed the true cause: **a seek issued immediately after
+`setSource()` is silently dropped because the media isn't loaded yet, so a
+trimmed clip plays from source-time 0 instead of its `trim_start`.** For the
+`(after still)` clip (`start_time 6.865`, `trim_start 1.865`) the player ran 0→
+~1.8 s while `_position_changed` mapped that to `6.865 + pos − 1.865` = 5.0→6.6,
+i.e. *behind* the playhead. The §30a backward-jump guard then froze/oscillated
+`current_time` at the boundary (6.76↔6.89), re-entering the still each cycle —
+exactly the user's "bounces back, never reaches the last clip."
+
+- **Fix (the real one):** defer the seek until the media reports loaded.
+  - `_build_media` connects `mediaStatusChanged` → `_media_status_changed` and
+    adds `_pending_seek_ms` / `_pending_play`.
+  - `_sync_player_to_timeline`, when it sets a **fresh** source, stashes the
+    target ms + play intent and `pause()`s instead of seeking/playing now.
+  - `_media_status_changed` applies `setPosition(_pending_seek_ms)` (and plays
+    if still in playback) once status is `LoadedMedia`/`BufferedMedia`.
+  - `_tick_timeline_playback` and `_position_changed` bail while
+    `_pending_seek_ms` is outstanding, so nothing advances/re-plays-at-0 during
+    the brief load.
+  - The §30a backward-jump heuristic was **removed** (it caused the freeze); the
+    §30 source-empty + PlayingState guards stay.
+- **Regression coverage:** replaced the backward-jump test with
+  `test_position_changed_ignored_while_seek_pending` and
+  `test_media_status_applies_pending_seek_only_when_loaded`. `_window()` helper in
+  `test_undo_history.py` now seeds `_pending_seek_ms`/`_pending_play`.
+- **Verification (real render surface, real `Patient_1_v9.mov`):** full timeline
+  now plays through — clip1 (pos 340→1833) → still1 (playhead 2.1→6.6) → clip2
+  **enters at pos 1872 = trim_start and advances** 6.87→8.8 → still2 → clip3
+  **enters at pos 4052 = its trim_start** and advances 14→20 s. Also confirmed an
+  adjacent same-source Cut (no still between) still crosses its boundary
+  seamlessly (`setSource(same URL)` re-fires `LoadedMedia`; pending never stuck).
+  `ruff check src tests` clean; full suite **128 tests** green.
