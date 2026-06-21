@@ -2485,6 +2485,7 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "Open failed", str(exc))
             return
+        self._invalidate_project_end_time()
         self._add_to_recent(path)
         self._validate_loaded_project_media("Open recent project")
         self._load_active_clip()

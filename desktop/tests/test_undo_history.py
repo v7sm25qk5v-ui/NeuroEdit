@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -257,6 +258,36 @@ def test_apply_snapshot_invalidates_project_end_time_cache() -> None:
     window._apply_snapshot(restored)
 
     assert window._project_end_time() == 10.0
+
+
+def test_open_recent_project_invalidates_end_time_before_loading(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    path = tmp_path / "project.json"
+    path.touch()
+    window = _window()
+    window._project_end_time_cache = 10.0
+    opened_project = ProjectState()
+
+    monkeypatch.setattr(
+        main_window_module.ProjectStore,
+        "open",
+        lambda _path: (_StubStore(), opened_project),
+    )
+    window._add_to_recent = lambda _path: None
+
+    def validate_loaded_project_media(_context: str) -> None:
+        assert window._project_end_time_cache is None
+
+    window._validate_loaded_project_media = validate_loaded_project_media
+    window._load_active_clip = lambda: None
+    window._log_project_load = lambda _start, _source: None
+    window._mark_dirty = lambda: None
+
+    window._open_recent_project(str(path))
+
+    assert window.project is opened_project
+    assert window._project_end_time_cache is None
 
 
 def test_timeline_playback_reuses_cached_project_end_time(

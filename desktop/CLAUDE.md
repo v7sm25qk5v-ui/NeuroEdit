@@ -92,7 +92,7 @@ python -c "import py_compile; py_compile.compile('src/neuroedit_desktop/<file>.p
 hf auth login
 ```
 
-The suite under `tests/` collects **124 tests** (`python -m pytest tests/ -q`).
+The suite under `tests/` collects **125 tests** (`python -m pytest tests/ -q`).
 Keep it and `ruff check src tests scripts` green before every release tag.
 
 ### venv-location note (current setup is intentional)
@@ -246,14 +246,17 @@ Other PHI safeguards:
 
 ## Optimization Automation Memory
 
-- **Last implementation:** 2026-06-20 — undo/redo snapshot restoration now
-  invalidates the project-end-time cache, with a focused regression test in
-  `tests/test_undo_history.py`.
-- **Last reviewed:** `cbe6679` (2026-06-20) — incremental run over
-  `6700b67..HEAD` (one commit: playback project-end-time cache). The stale-cache
-  correctness issue found in that review was fixed on 2026-06-20.
+- **Last implementation:** 2026-06-21 — the recent-project open path now
+  invalidates the project-end-time cache immediately after the project swap,
+  with a focused ordering regression test in `tests/test_undo_history.py`.
+- **Last reviewed:** `35447b8` (2026-06-21) — incremental run over
+  `cbe6679..HEAD` (one commit: the `_apply_snapshot` project-end-time cache
+  invalidation, i.e. the fix the prior review recommended). Confirmed the fix is
+  correct and complete. One-hop audit of all `_project_end_time_cache`
+  read/write/invalidation sites surfaced a low-priority consistency gap in
+  `_open_recent_project` (no early invalidation; see TODO backlog).
 - **Mode:** incremental. Next optimization review should deep-dive files changed
-  after `cbe6679` plus one hop. (Full-sweep baseline was `22085f9`, 2026-06-17.)
+  after `35447b8` plus one hop. (Full-sweep baseline was `22085f9`, 2026-06-17.)
 - **Out-of-scope paths:** root React/Vite prototype (legacy, superseded by
   `desktop/`); `desktop/dist/` and any build output; `node_modules/`; `*.lock`;
   `.venv/` (symlinked into iCloud, see venv note); vendored deps; iCloud
@@ -295,7 +298,11 @@ Other PHI safeguards:
     caches `project_end_time()` for seek/playback/export and invalidates on
     document edits/project load/undo/redo restores. Still open: skip timeline
     and annotation repaint on ticks where the visible frame is unchanged.
-  - Suite is **124 tests**; gate is `ruff check src tests scripts` +
+    Note: both project-open paths end with `_mark_dirty()` (which invalidates
+    the cache), so the trailing dirty-mark is intentional — don't flag "opening
+    a project marks it dirty" as a bug. All project swap paths now also clear
+    the cache immediately after the swap.
+  - Suite is **125 tests**; gate is `ruff check src tests scripts` +
     `python -m pytest tests/ -q`, both green at this marker.
   - torch/SAM stack is lazy by design (venv has no torch → SAM no-ops);
     cold-start import audit (P4.5) is still unquantified.

@@ -24,6 +24,12 @@ by the optimization automation; they are not duplicated into P4.5.
   replacing the project, so undo/redo cannot reuse a duration from the prior
   document state. A focused regression test restores a longer snapshot after
   caching a shorter duration.
+- [x] **`_open_recent_project` lacked the early `project_end_time` cache
+  invalidation its sibling open paths have (consistency / defense-in-depth,
+  low priority).** Fixed 2026-06-21: `_open_recent_project` now invalidates the
+  cached duration immediately after `ProjectStore.open()` swaps the project,
+  matching the dialog-open and new-project paths. A focused ordering regression
+  test proves invalidation happens before loaded-project validation.
 - [ ] **Playback loop still does two repaints per 33 ms tick.**
   `_tick_timeline_playback` (`ui/main_window.py:3241`) used to recompute
   `project_end_time()` — four full list comprehensions over
@@ -108,7 +114,7 @@ template); see Completed section.
 
 Highest-leverage engineering work while P0 release items stay owner/hardware
 blocked and P5 stays parked. All items are measurement-first and
-behavior-preserving — the 124-test suite and `ruff` must stay green with no
+behavior-preserving — the 125-test suite and `ruff` must stay green with no
 user-visible change. Full rationale and acceptance criteria in
 [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md) Phase 6.
 

@@ -1110,3 +1110,43 @@ Implemented the correctness finding from the incremental optimization review.
 - **Verification:** `ruff check src tests scripts` passed; focused
   `tests/test_undo_history.py` passed with 9 tests; full suite passed with
   **124 tests** via `.venv/bin/python -m pytest tests/ -q`.
+
+## 28. Optimization automation sweep (2026-06-21, docs-only)
+
+Incremental optimization scan ran over `cbe6679..35447b8` (one commit:
+`35447b8`, the `_apply_snapshot` project-end-time cache invalidation — the fix
+the prior sweep recommended). No code changed in this run.
+
+- **Verified the fix:** `_apply_snapshot` clears `_project_end_time_cache` after
+  the project swap; the focused regression test is present and the item is
+  checked off in `TODO.md`.
+- **One-hop audit** of every `_project_end_time_cache` read/write/invalidation
+  site (`ui/main_window.py`) found one low-priority consistency gap:
+  `_open_recent_project` (`:2484`) does not call `_invalidate_project_end_time()`
+  immediately after swapping `self.project`, unlike `_open_project` (`:2383`),
+  `_new_project` (`:2364`), and `_apply_snapshot` (`:2110`). Currently masked by
+  the trailing `_mark_dirty()` (nothing in between reads the cache) — recorded as
+  a new unchecked item in the `TODO.md` Optimization Backlog, not a live bug.
+- **Markdown consistency:** fixed a stale `123-test` → `124-test` reference in
+  `NEXT_OPTIMIZATION_PLAN.md:197` (present-tense gate). Left the historical
+  `123 tests` in HANDOFF §26 as written (per-run record).
+- **Memory:** advanced the "Last reviewed" marker to `35447b8` (2026-06-21) and
+  noted the intentional trailing-`_mark_dirty()` pattern in `desktop/CLAUDE.md`.
+
+## 29. Recent-project duration cache defense (2026-06-21)
+
+Completed the low-priority cache-consistency item added by the optimization
+sweep.
+
+- **Implementation:** `_open_recent_project()` now calls
+  `_invalidate_project_end_time()` immediately after `ProjectStore.open()`
+  replaces the project, matching the dialog-open and new-project paths.
+- **Regression coverage:** added a focused test proving invalidation occurs
+  before loaded-project validation, so a future helper inserted before the
+  trailing `_mark_dirty()` cannot observe the previous project's duration.
+- **Verification:** `ruff check src tests scripts` passed; focused
+  `tests/test_undo_history.py` passed with 10 tests; full suite passed with
+  **125 tests** via `.venv/bin/python -m pytest tests/ -q`.
+- **Next optimization task:** reduce playback repaint work by skipping timeline
+  and annotation refreshes when the visible frame has not changed, or continue
+  the measurement-first undo snapshot/cold-start work in Phase 6.

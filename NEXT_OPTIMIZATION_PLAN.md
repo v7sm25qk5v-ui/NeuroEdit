@@ -194,7 +194,7 @@ workflow refinements. The remaining roadmap work is owner/hardware-blocked
 (packaged-build smoke, signing, Stryker sample data), so the highest-leverage
 engineering work left is structural: keep the codebase cheap to change and
 cheap to run. Every item below is measurement-first and behavior-preserving —
-the 123-test suite and `ruff` must stay green with no user-visible change.
+the 125-test suite and `ruff` must stay green with no user-visible change.
 
 1. **Modularize `ui/main_window.py` (currently ~4,050 lines, down from ~6,500).**
    - `main_window.py` holds `MainWindow` plus `VideoGraphicsView`,
@@ -227,6 +227,9 @@ the 123-test suite and `ruff` must stay green with no user-visible change.
      used by seek/playback/export and invalidated on document edits/project
      loads. This addressed the playback loop's per-tick `project_end_time()`
      scan without changing playback semantics; repaint throttling remains open.
+   - Progress 2026-06-21: the recent-project open path now clears the cached
+     project end time immediately after swapping projects, matching the sibling
+     open/new paths and preventing future pre-dirty reads from seeing stale data.
 
 2. **Reduce undo/redo snapshot cost.**
    - Undo/redo stores full `ProjectState.to_dict()` copies (cap 50) and can hold
