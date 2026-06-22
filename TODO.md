@@ -19,6 +19,38 @@ The primary open code-health/runtime work lives in **P4.5** (modularize the
 audit cold-start imports). The items here are smaller, fresh findings surfaced
 by the optimization automation; they are not duplicated into P4.5.
 
+### Dependency security audit (2026-06-22, automated routine)
+
+Audit of `desktop/pyproject.toml`. All deps use `>=` floors with no lockfile,
+so a fresh `pip install` resolves to the safe latest releases — but the
+declared floors below permit known-vulnerable versions in any pinned/locked
+or cached install. Floors that already sit above their relevant fix are noted
+as safe; no action needed there.
+
+- [ ] **SECURITY (high) — raise the `pillow` floor. `pillow>=10` permits
+  versions with multiple known CVEs, including RCE.** Latest is **12.2.0**;
+  the `>=10` floor allows 10.0/10.1, which are vulnerable to:
+  - CVE-2023-50447 — arbitrary code execution via `ImageMath.eval` (fixed 10.2.0)
+  - CVE-2024-28219 — buffer overflow in `_imagingcms` (fixed 10.3.0)
+  - CVE-2026-25990 — PSD out-of-bounds write / buffer overflow (fixed 12.1.1)
+  - CVE-2026-40192 — FITS decompression-bomb DoS (fixed 12.2.0)
+  - CVE-2026-42308 — font glyph integer overflow (fixed 12.2.0)
+  Pillow is reachable via the optional `[sam]` stack (transformers/torchvision)
+  and this app processes user-supplied PHI imagery, so unsafe image parsing is
+  in scope. **Action:** bump to `pillow>=12.2.0` in the `[sam]` extra.
+
+Floors already safe (informational, no action):
+- `transformers>=5.6` — already above 5.3.0, the fix for CVE-2026-4372
+  (config-injection RCE bypassing `trust_remote_code=False`). Latest 5.12.1.
+- `torch>=2.7` — already above 2.6.0, the fix for CVE-2025-32434
+  (`torch.load` RCE even with `weights_only=True`). Latest 2.12.1.
+
+Routine version drift (no known CVEs at the floor; bump opportunistically):
+PySide6 `>=6.8`→6.11.1, numpy `>=2.0`→2.5.0, opencv-python `>=4.10`→4.13.0.92,
+imageio-ffmpeg `>=0.5`→0.6.0, huggingface-hub `>=0.30`→1.20.1 (major),
+safetensors `>=0.5`→0.8.0, torchvision `>=0.22`→0.27.1; dev/build tooling:
+pytest `>=8.0`→9.1.1 (major), ruff `>=0.8`→0.15.18, pyinstaller `>=6.11`→6.21.0.
+
 - [x] **Stale `project_end_time` cache after undo/redo (correctness).** Fixed
   2026-06-20: `_apply_snapshot()` now clears `_project_end_time_cache` after
   replacing the project, so undo/redo cannot reuse a duration from the prior
