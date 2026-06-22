@@ -92,7 +92,7 @@ python -c "import py_compile; py_compile.compile('src/neuroedit_desktop/<file>.p
 hf auth login
 ```
 
-The suite under `tests/` collects **125 tests** (`python -m pytest tests/ -q`).
+The suite under `tests/` collects **130 tests** (`python -m pytest tests/ -q`).
 Keep it and `ruff check src tests scripts` green before every release tag.
 
 ### venv-location note (current setup is intentional)
@@ -137,10 +137,13 @@ everything in one `QGraphicsScene` owned by `VideoGraphicsView`:
   which is set from `nativeSizeChanged` for video and `pixmap.size()` for
   images. Slide title/body rectangles use the same normalized convention.
 
-When `clip.media_type == "image"`, the QMediaPlayer source is cleared, the
-pixmap item is shown, and the manual time-tick path
-(`_tick_timeline_playback`) advances `current_time` — the same path used for
-slides. Don't try to feed image paths into QMediaPlayer.
+The monotonic time-tick path (`_tick_timeline_playback`) is authoritative for
+`current_time` during all playback. `QMediaPlayer` renders video but its
+`positionChanged` events do not drive the playhead while playback is active;
+screen recordings can have sparse variable-frame-rate timestamps that would
+otherwise make the timeline pause and jump. When `clip.media_type == "image"`,
+the player source is cleared and the pixmap item is shown. Don't try to feed
+image paths into QMediaPlayer.
 
 ### State, persistence, and undo/redo
 
@@ -296,13 +299,15 @@ Other PHI safeguards:
     paths stay stable. Remaining: split the still-large `MainWindow` class.
   - Playback-loop optimization is partially complete: `MainWindow._project_end_time()`
     caches `project_end_time()` for seek/playback/export and invalidates on
-    document edits/project load/undo/redo restores. Still open: skip timeline
-    and annotation repaint on ticks where the visible frame is unchanged.
+    document edits/project load/undo/redo restores. Playback uses the monotonic
+    timeline clock rather than sparse media-position events so VFR recordings
+    keep smooth playhead motion. Still open: measure and reduce redundant
+    annotation repaint work; decoded-frame changes must not gate playhead refresh.
     Note: both project-open paths end with `_mark_dirty()` (which invalidates
     the cache), so the trailing dirty-mark is intentional — don't flag "opening
     a project marks it dirty" as a bug. All project swap paths now also clear
     the cache immediately after the swap.
-  - Suite is **125 tests**; gate is `ruff check src tests scripts` +
+  - Suite is **130 tests**; gate is `ruff check src tests scripts` +
     `python -m pytest tests/ -q`, both green at this marker.
   - torch/SAM stack is lazy by design (venv has no torch → SAM no-ops);
     cold-start import audit (P4.5) is still unquantified.

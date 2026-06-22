@@ -38,8 +38,12 @@ by the optimization automation; they are not duplicated into P4.5.
   on every 30 fps tick. **Progress 2026-06-19:** `MainWindow` now caches
   `project_end_time` and invalidates it on document edits/project load, so
   playback/seek/export no longer recompute the timeline end each tick. Remaining
-  low-priority mitigation: skip `timeline.refresh()` / annotation refresh when
-  the visible frame has not changed.
+  **Correctness fix 2026-06-21:** the monotonic 33 ms clock now remains the
+  authoritative playhead clock during video playback; sparse frame timestamps
+  from variable-frame-rate screen recordings no longer pause and jump the
+  timeline. Remaining low-priority mitigation: reduce annotation repaint work
+  when its visible state has not changed. Do not throttle playhead refreshes by
+  decoded-frame changes; static VFR sections still need smooth playhead motion.
 
 ## P0 — Unblock and ship the current alpha
 
@@ -114,7 +118,7 @@ template); see Completed section.
 
 Highest-leverage engineering work while P0 release items stay owner/hardware
 blocked and P5 stays parked. All items are measurement-first and
-behavior-preserving — the 125-test suite and `ruff` must stay green with no
+  behavior-preserving — the 130-test suite and `ruff` must stay green with no
 user-visible change. Full rationale and acceptance criteria in
 [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md) Phase 6.
 

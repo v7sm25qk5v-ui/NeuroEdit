@@ -9,6 +9,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
+from PySide6.QtCore import QUrl  # noqa: E402
 from PySide6.QtMultimedia import QMediaPlayer  # noqa: E402
 
 from neuroedit_desktop.models import Annotation, ProjectState, VideoClip  # noqa: E402
@@ -38,14 +39,21 @@ class _StubTimeline:
 
 
 class _StubPlayer:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        state: QMediaPlayer.PlaybackState = QMediaPlayer.PlaybackState.StoppedState,
+    ) -> None:
         self.pause_count = 0
+        self.state = state
 
     def pause(self) -> None:
         self.pause_count += 1
 
     def playbackState(self) -> QMediaPlayer.PlaybackState:
-        return QMediaPlayer.PlaybackState.StoppedState
+        return self.state
+
+    def source(self) -> QUrl:
+        return QUrl.fromLocalFile("/tmp/clip.mp4")
 
 
 class _StubTimer:
@@ -329,3 +337,36 @@ def test_timeline_playback_reuses_cached_project_end_time(
 
     assert calls == 1
     assert window.timeline.refresh_count == 2
+
+
+def test_timeline_clock_advances_while_variable_frame_rate_video_is_playing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = ProjectState(current_time=2.0, playback_rate=1.0)
+    clip = VideoClip(
+        id="clip-1",
+        path="clip.mp4",
+        name="Clip",
+        duration=10.0,
+        trim_end=10.0,
+    )
+    project.clips.append(clip)
+    project.active_clip_id = clip.id
+    window = _window(project)
+    window._timeline_playing = True
+    window._last_timeline_tick = 1.0
+    window.player = _StubPlayer(QMediaPlayer.PlaybackState.PlayingState)
+    window.timeline_clock = _StubTimer()
+    window.play_button = _StubButton()
+    window.time_label = _StubLabel()
+    sync_calls: list[bool] = []
+    window._sync_player_to_timeline = lambda *, play: sync_calls.append(play)
+    monkeypatch.setattr(main_window_module.time, "monotonic", lambda: 1.033)
+
+    # Sparse VFR frame timestamps must not drive or reset the timeline.
+    window._position_changed(5000)
+    window._tick_timeline_playback()
+
+    assert project.current_time == pytest.approx(2.033)
+    assert window.timeline.refresh_count == 1
+    assert sync_calls == []

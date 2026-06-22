@@ -8,7 +8,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QMimeData, QSettings, QUrl
 from PySide6.QtWidgets import QApplication
 
 from neuroedit_desktop.models import ProjectState, VideoClip, new_id
@@ -72,6 +72,40 @@ def test_construct_and_switch_all_panels(window, app):
         window._set_panel(panel)
         app.processEvents()
         assert window.project.active_panel == panel
+
+
+class _DropEvent:
+    def __init__(self, mime_data: QMimeData) -> None:
+        self._mime_data = mime_data
+        self.accepted = False
+
+    def mimeData(self) -> QMimeData:
+        return self._mime_data
+
+    def acceptProposedAction(self) -> None:
+        self.accepted = True
+
+    def ignore(self) -> None:
+        self.accepted = False
+
+
+def test_drop_imports_supported_local_media(window, tmp_path, monkeypatch):
+    video = tmp_path / "recording.mov"
+    image = tmp_path / "still.png"
+    unsupported = tmp_path / "notes.txt"
+    for path in (video, image, unsupported):
+        path.touch()
+    mime_data = QMimeData()
+    mime_data.setUrls([QUrl.fromLocalFile(str(path)) for path in (video, image, unsupported)])
+    event = _DropEvent(mime_data)
+    imported: list[str] = []
+    monkeypatch.setattr(window, "_import_media_file", imported.append)
+
+    window.dropEvent(event)
+
+    assert window.acceptDrops() is True
+    assert event.accepted is True
+    assert imported == [str(video), str(image)]
 
 
 def test_appearance_action_persists_and_reapplies_theme(window, app):

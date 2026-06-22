@@ -194,7 +194,7 @@ workflow refinements. The remaining roadmap work is owner/hardware-blocked
 (packaged-build smoke, signing, Stryker sample data), so the highest-leverage
 engineering work left is structural: keep the codebase cheap to change and
 cheap to run. Every item below is measurement-first and behavior-preserving —
-the 125-test suite and `ruff` must stay green with no user-visible change.
+the 130-test suite and `ruff` must stay green with no user-visible change.
 
 1. **Modularize `ui/main_window.py` (currently ~4,050 lines, down from ~6,500).**
    - `main_window.py` holds `MainWindow` plus `VideoGraphicsView`,
@@ -230,6 +230,11 @@ the 125-test suite and `ruff` must stay green with no user-visible change.
    - Progress 2026-06-21: the recent-project open path now clears the cached
      project end time immediately after swapping projects, matching the sibling
      open/new paths and preventing future pre-dirty reads from seeing stale data.
+   - Correctness fix 2026-06-21: the monotonic timeline clock now advances the
+     playhead during video playback instead of allowing sparse
+     `QMediaPlayer.positionChanged` events to drive it. This keeps
+     variable-frame-rate screen recordings smooth while avoiding per-tick
+     reseeks when the same video clip remains active.
 
 2. **Reduce undo/redo snapshot cost.**
    - Undo/redo stores full `ProjectState.to_dict()` copies (cap 50) and can hold
@@ -293,9 +298,10 @@ each is measurement-first and behavior-preserving:
 3. **Audit cold-start import cost** — confirm subprocess/ffmpeg, captions, and export
    imports are deferred and torch stays lazy; quantify with the startup timing.
 4. **Finish the playback-loop repaint slice** — now that project end time is cached,
-   only skip `timeline.refresh()` / annotation refresh on ticks where the visible
-   frame has not changed, and cover it with a focused headless playback test.
-5. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (124 tests)
+   measure and reduce redundant annotation repaint work. Keep the playhead refresh
+   clock-based: decoded-frame changes are sparse in variable-frame-rate screen
+   recordings and cannot safely gate timeline repainting.
+5. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (130 tests)
    green before every release tag; feed any new regressions back into the roadmap.
 
 This keeps the project on a safe optimization loop: measure first, keep the codebase

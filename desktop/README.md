@@ -5,7 +5,10 @@ desktop video editor built from one source tree. Memory-heavy work runs off the
 UI thread so the app stays responsive while editing operative video.
 
 - Native shell: PySide6
-- Video playback: Qt Multimedia, with OpenCV/PyAV available for frame extraction
+- Video playback: Qt Multimedia rendering with a monotonic timeline clock for
+  smooth constant- and variable-frame-rate media
+- Media import: file dialogs, Media Explorer double-click, or drag-and-drop from
+  Finder/File Explorer
 - Project persistence: project-folder JSON plus external mask/audio/video assets
 - SAM processing: separate Python backend boundary so SAM3 tracking runs outside
   the UI thread

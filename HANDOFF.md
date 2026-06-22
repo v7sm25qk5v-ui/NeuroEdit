@@ -1248,3 +1248,68 @@ exactly the user's "bounces back, never reaches the last clip."
   adjacent same-source Cut (no still between) still crosses its boundary
   seamlessly (`setSource(same URL)` re-fires `LoadedMedia`; pending never stuck).
   `ruff check src tests` clean; full suite **128 tests** green.
+
+## 31. Variable-frame-rate playback smoothing (2026-06-21)
+
+Fixed the reported pauses and timeline jumps when playing a macOS screen
+recording.
+
+- **Reproduction evidence:** the imported recording is H.264 variable-frame-rate
+  media with 254 frames over 11.955 s. Consecutive frame timestamps range from
+  8.3 ms to 1.63 s apart, which is normal for static screen-recording regions.
+- **Root cause:** while a video was playing, `_tick_timeline_playback` returned
+  early and `_position_changed` made sparse `QMediaPlayer.positionChanged`
+  callbacks authoritative for `current_time`. The playhead therefore held and
+  jumped at the recording's frame timestamps.
+- **Fix:** the existing monotonic 33 ms timeline clock now advances
+  `current_time` for video as well as slides/images/gaps. Media-position events
+  are ignored while timeline playback is active. The player is not reseeked on
+  ordinary same-clip ticks; synchronization still runs at clip/slide/gap
+  boundaries and while the player is not playing.
+- **Regression coverage:**
+  `test_timeline_clock_advances_while_variable_frame_rate_video_is_playing`
+  proves a sparse 5 s media-position event cannot jump a 2 s playhead and the
+  next 33 ms clock tick advances smoothly without a player resync.
+- **Verification:** `ruff check src tests scripts` passed; focused playback and
+  headless MainWindow tests passed with 26 tests; full suite passed with
+  **129 tests** via `.venv/bin/python -m pytest tests/ -q`.
+- **Remaining optimization:** measure and reduce redundant annotation repaint
+  work. Do not gate timeline playhead refreshes on decoded-frame changes because
+  VFR static regions intentionally have sparse frames.
+
+## 32. Finder drag-and-drop media import (2026-06-21)
+
+Added the expected ability to drag media files from Finder into NeuroEdit.
+
+- `MainWindow` now accepts drops anywhere in the app and routes supported local
+  files through the existing `_import_media_file` path, preserving the same
+  probing, active-clip selection, preview loading, dirty state, and undo behavior
+  as Media Explorer imports.
+- Supported video types are `.mp4`, `.mov`, `.m4v`, `.avi`, and `.webm`;
+  supported images are `.png`, `.jpg`, `.jpeg`, `.heic`, `.bmp`, and `.webp`.
+  Unsupported files, remote URLs, and folders are not accepted.
+- The Media Explorer hint now advertises drag-and-drop.
+- Regression coverage proves a mixed drop imports the supported local video and
+  image while ignoring an unsupported text file.
+- Verification: `ruff check src tests scripts` passed; focused headless and
+  playback tests passed with 27 tests; full suite passed with **130 tests** via
+  `.venv/bin/python -m pytest tests/ -q`.
+
+## 33. v0.5.3-alpha release (2026-06-21)
+
+Prepared and tagged the next patch release for the playback and media-import
+fixes completed in §§31–32.
+
+- Version bumped from `0.5.2-alpha` to `0.5.3-alpha` in
+  `desktop/src/neuroedit_desktop/__init__.py`.
+- Root `README.md` now points to the `v0.5.3-alpha` release and installer names,
+  with a concise What's New section for smooth variable-frame-rate playback and
+  drag-and-drop import.
+- `desktop/README.md` documents the monotonic playback clock and supported
+  import entry points. `desktop/ALPHA_QA_CHECKLIST.md` adds macOS and Windows
+  checks for drag-and-drop and variable-frame-rate screen recordings.
+- Release gate: `ruff check src tests scripts`, 130-test full suite, and
+  `git diff --check` all passed before the release commit and annotated tag.
+- CI release path: pushing `v0.5.3-alpha` triggers `.github/workflows/build.yml`
+  to build the unsigned macOS DMG/ZIP and Windows installer, then publish the
+  GitHub Release with those artifacts.

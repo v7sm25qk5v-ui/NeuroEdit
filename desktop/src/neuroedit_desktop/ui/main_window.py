@@ -11,8 +11,18 @@ import sys
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal
-from PySide6.QtGui import QAction, QActionGroup, QColor, QDesktopServices, QIcon, QImage, QPixmap
+from PySide6.QtCore import QMimeData, QObject, Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtGui import (
+    QAction,
+    QActionGroup,
+    QColor,
+    QDesktopServices,
+    QDragEnterEvent,
+    QDropEvent,
+    QIcon,
+    QImage,
+    QPixmap,
+)
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QApplication,
@@ -1185,6 +1195,7 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(f"NeuroEdit — {self.project.project_name}")
         self.setObjectName("mainWindow")
+        self.setAcceptDrops(True)
         # Minimum window size is computed from the real pane widths once the
         # central UI is built (see the end of _build_central_ui).
         self._build_media()
@@ -2594,6 +2605,34 @@ class MainWindow(QMainWindow):
         self._load_active_clip()
         self._mark_dirty()
 
+    @staticmethod
+    def _dropped_media_paths(mime_data: QMimeData) -> list[Path]:
+        if not mime_data.hasUrls():
+            return []
+        supported = VIDEO_EXTENSIONS | IMAGE_EXTENSIONS
+        return [
+            path
+            for url in mime_data.urls()
+            if url.isLocalFile()
+            and (path := Path(url.toLocalFile())).is_file()
+            and path.suffix.lower() in supported
+        ]
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802
+        if self._dropped_media_paths(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
+        paths = self._dropped_media_paths(event.mimeData())
+        if not paths:
+            event.ignore()
+            return
+        for path in paths:
+            self._import_media_file(str(path))
+        event.acceptProposedAction()
+
     def _select_media_clip(self, clip_id: str) -> None:
         clip = next((candidate for candidate in self.project.clips if candidate.id == clip_id), None)
         if clip is None:
@@ -3233,14 +3272,18 @@ class MainWindow(QMainWindow):
         self.time_label.setText(format_time(self.project.current_time))
 
     def _position_changed(self, position_ms: int) -> None:
-        # Only let real playback drive the playhead. Ignore position events when
+        # The monotonic timeline clock drives playback so variable-frame-rate
+        # media cannot make the playhead pause and jump between sparse frame
+        # timestamps. Ignore position events while timeline playback is active,
+        # and also ignore them when
         # the source is cleared (entering a still/gap), when a fresh source has
         # not yet been sought to its trim_start (_pending_seek_ms outstanding),
-        # or when the player isn't actually playing — otherwise the transient
-        # reset QMediaPlayer emits around setSource/setPosition would snap the
+        # or when the player isn't actually playing. Otherwise the transient
+        # reset QMediaPlayer emits around setSource/setPosition could snap the
         # playhead back to (start_time - trim_start) and loop the previous clip.
         if (
-            self._pending_seek_ms is not None
+            self._timeline_playing
+            or self._pending_seek_ms is not None
             or self.player.source().isEmpty()
             or self.player.playbackState() != QMediaPlayer.PlaybackState.PlayingState
         ):
@@ -3275,12 +3318,11 @@ class MainWindow(QMainWindow):
         active = self._clip_at_time(self.project.current_time)
         on_image = active is not None and active.media_type == "image"
 
-        if (
+        player_was_playing_video = (
             self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
             and self._slide_at_time(self.project.current_time) is None
             and not on_image
-        ):
-            return
+        )
 
         self.project.duration = self._project_end_time()
         next_time = self.project.current_time + elapsed * self.project.playback_rate
@@ -3292,7 +3334,15 @@ class MainWindow(QMainWindow):
             self.play_button.setText("▶")
         else:
             self.project.current_time = next_time
-            self._sync_player_to_timeline(play=True)
+            next_active = self._clip_at_time(self.project.current_time)
+            if (
+                not player_was_playing_video
+                or self._slide_at_time(self.project.current_time) is not None
+                or next_active is None
+                or active is None
+                or next_active.id != active.id
+            ):
+                self._sync_player_to_timeline(play=True)
         self.timeline.refresh()
         self.video_view.update_annotations()
         self.time_label.setText(format_time(self.project.current_time))

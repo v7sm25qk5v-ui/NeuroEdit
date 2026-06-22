@@ -4,11 +4,19 @@ NeuroEdit is a standalone desktop video editor for preparing operative video for
 conference, research, and educational use. It runs entirely on your own machine —
 no video, audio, or patient content ever leaves the computer.
 
-Current alpha release: [v0.5.2-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.2-alpha)
+Current alpha release: [v0.5.3-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.3-alpha)
+
+### What's new in v0.5.3-alpha
+
+- Smooth timeline playback for variable-frame-rate screen recordings, including
+  static sections with sparse encoded frames.
+- Drag supported video and image files from Finder or File Explorer directly
+  into the app to import them.
 
 ## Features
 
-- **Timeline editing** — clip trim/cut, drag-to-reorder with snapping, fades,
+- **Timeline editing** — smooth variable-frame-rate playback, clip trim/cut,
+  drag-to-reorder with snapping, fades,
   chapter markers, zoom-to-fit, and keyboard delete of selected items.
 - **Annotation tools** — rectangle, ellipse, arrow, text, and brush overlays
   with per-anatomy label presets and a duplicate-at-playhead shortcut.
@@ -26,8 +34,8 @@ Current alpha release: [v0.5.2-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit
 - **Export** — H.264 MP4 with resolution presets (a recommended preset is
   preselected from your source resolution and intended use), advanced CRF/fps/
   bitrate controls, export history, and a written export report next to each MP4.
-- **Project library** — recent projects with thumbnails, durations, missing-media
-  warnings, and search/sort.
+- **Media import and project library** — Finder/File Explorer drag-and-drop,
+  recent projects with thumbnails, durations, missing-media warnings, and search/sort.
 - **Appearance** — Light, Dark, or System theme, chosen on first launch and
   switchable any time from View → Appearance.
 
@@ -35,7 +43,7 @@ Current alpha release: [v0.5.2-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit
 
 ### macOS
 
-Download `NeuroEdit-v0.5.2-alpha-macOS-unsigned.dmg` from the release page.
+Download `NeuroEdit-v0.5.3-alpha-macOS-unsigned.dmg` from the release page.
 Open the DMG, drag `NeuroEdit.app` into Applications, then right-click the app
 and choose `Open` for the first launch.
 
@@ -45,7 +53,7 @@ If macOS blocks launch, open `System Settings` -> `Privacy & Security`, choose
 
 ### Windows
 
-Download `NeuroEdit-v0.5.2-alpha-Windows-Setup.exe` from the release page on a
+Download `NeuroEdit-v0.5.3-alpha-Windows-Setup.exe` from the release page on a
 Windows PC. If SmartScreen warns, choose `More info` -> `Run anyway`, then follow
 the installer.
 

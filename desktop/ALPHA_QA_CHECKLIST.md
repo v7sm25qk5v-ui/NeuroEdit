@@ -25,6 +25,8 @@ Result column values: **Pass**, **Fail** (link an issue/note), **Skip** (say why
 | Launch with right-click → Open and note any Gatekeeper prompts. | | |
 | Start from the restored project prompt or create/open a project. | | |
 | Import a short non-PHI video and image. | | |
+| Drag a non-PHI video and image from Finder into the app; both appear on the timeline. | | |
+| Play a variable-frame-rate screen recording; video and playhead advance smoothly through static sections. | | |
 | Playback controls work: play, pause, prev/next frame, scrub. | | |
 | Switch every right-side panel: SAM, Labels, Tips, Slides, Audio. | | |
 | Add one rectangle annotation and edit its label. | | |
@@ -50,6 +52,8 @@ run the Windows installer on macOS for runtime validation.
 | Capture full-window toolbar screenshots at 100%, 125%, 150% scaling. | | |
 | App launches from the Start menu and optional desktop shortcut. | | |
 | Import a short non-PHI video and image. | | |
+| Drag a non-PHI video and image from File Explorer into the app; both appear on the timeline. | | |
+| Play a variable-frame-rate screen recording; video and playhead advance smoothly through static sections. | | |
 | Playback controls work: play, pause, prev/next frame, scrub. | | |
 | Switch every right-side panel: SAM, Labels, Tips, Slides, Audio. | | |
 | Add one rectangle annotation and edit its label. | | |

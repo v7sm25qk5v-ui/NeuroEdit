@@ -96,7 +96,7 @@ class MediaExplorerPanel(QWidget):
 
         title = QLabel("Media Explorer")
         title.setProperty("role", "title")
-        hint = QLabel("Double-click files to import, or clips to jump to them.")
+        hint = QLabel("Drag files into the app, double-click files to import, or clips to jump to them.")
         hint.setProperty("role", "muted")
         hint.setWordWrap(True)
 
