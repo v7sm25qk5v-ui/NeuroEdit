@@ -4,14 +4,16 @@ NeuroEdit is a standalone desktop video editor for preparing operative video for
 conference, research, and educational use. It runs entirely on your own machine —
 no video, audio, or patient content ever leaves the computer.
 
-Current alpha release: [v0.5.3-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.3-alpha)
+Current alpha release: [v0.5.4-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.4-alpha)
 
-### What's new in v0.5.3-alpha
+### What's new in v0.5.4-alpha
 
-- Smooth timeline playback for variable-frame-rate screen recordings, including
-  static sections with sparse encoded frames.
-- Drag supported video and image files from Finder or File Explorer directly
-  into the app to import them.
+- New aperture-and-scalpel visual identity across the in-app header, About
+  dialog, macOS app icon, and Windows app/installer icon.
+- Overlay slides now remain composited above a video while the video continues
+  playing in the miniplayer; full-frame slides still pause it.
+- Unloadable media can no longer leave timeline playback permanently blocked on
+  a deferred seek.
 
 ## Features
 
@@ -43,7 +45,7 @@ Current alpha release: [v0.5.3-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit
 
 ### macOS
 
-Download `NeuroEdit-v0.5.3-alpha-macOS-unsigned.dmg` from the release page.
+Download `NeuroEdit-v0.5.4-alpha-macOS-unsigned.dmg` from the release page.
 Open the DMG, drag `NeuroEdit.app` into Applications, then right-click the app
 and choose `Open` for the first launch.
 
@@ -53,7 +55,7 @@ If macOS blocks launch, open `System Settings` -> `Privacy & Security`, choose
 
 ### Windows
 
-Download `NeuroEdit-v0.5.3-alpha-Windows-Setup.exe` from the release page on a
+Download `NeuroEdit-v0.5.4-alpha-Windows-Setup.exe` from the release page on a
 Windows PC. If SmartScreen warns, choose `More info` -> `Run anyway`, then follow
 the installer.
 

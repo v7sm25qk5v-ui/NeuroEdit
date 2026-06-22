@@ -1348,3 +1348,34 @@ Implemented the first actionable correctness finding from §34.
 - Next code-ready optimization item: batch multi-file Finder drop so one gesture
   performs one preview load and one undo snapshot after its imports. Keep the
   synchronous probe behavior as a separate measurement-first follow-up.
+
+## 36. Overlay-slide video playback fix (2026-06-22)
+
+Fixed the miniplayer freezing video whenever a slide overlapped a clip.
+
+- `MainWindow._sync_player_to_timeline()` now pauses only for full-frame slides;
+  `Slide.overlay=True` continues through the normal video seek/play path.
+- `_tick_timeline_playback()` now treats a playing video beneath an overlay as
+  already synchronized instead of re-entering the sync path every tick.
+- `_position_changed()` retains its full-frame-slide pause guard but does not
+  pause video for overlays.
+- Added focused regressions for starting playback within an overlay and
+  continuing an already-playing video through one. The suite now has 134 tests.
+- Export behavior was already correct: overlay slides composite over the source
+  frame, while full-frame slides replace it.
+
+## 37. v0.5.4-alpha release (2026-06-22)
+
+Prepared the next patch release for the identity refresh and playback fixes.
+
+- Replaced the prior raster identity with the aperture-and-scalpel mark: live
+  theme-aware SVG header/About lockups, regenerated PNG/iconset assets, macOS
+  `.icns`, and multi-resolution Windows `.ico`.
+- Added `scripts/generate_icons.py` so packaged icon assets can be reproduced
+  from `resources/neuroedit-appicon.svg`; removed the obsolete
+  `logo_wordmark.png`.
+- Included terminal invalid-media recovery (§35) and continuous video playback
+  beneath overlay slides (§36).
+- Version and release documentation advanced from `v0.5.3-alpha` to
+  `v0.5.4-alpha`. Pushing the annotated tag triggers the existing GitHub Actions
+  workflow to build and publish macOS and Windows installers.

@@ -85,8 +85,11 @@ choice is saved in `QSettings("NeuroEdit", "Desktop")` under
 
 ## Known deviations to resolve with the Figma pass
 
-- Identity assets (header logo, About wordmark, installer icons) still use
-  pre-concept exports — tracked in [ASSET_CHECKLIST.md](ASSET_CHECKLIST.md).
+- Identity assets now ship the **aperture + scalpel** mark (a seven-blade lens
+  iris revealing a surgical scalpel): theme-matched header/About lockups render
+  `neuroedit-mark-{light,dark}.svg` directly, and the macOS/Windows app icons
+  come from the dark-tile app icon. Wordmark is Space Grotesk 600 at −0.02em
+  (falls back to the UI sans). Tracked in [ASSET_CHECKLIST.md](ASSET_CHECKLIST.md).
 
 ## Verification
 

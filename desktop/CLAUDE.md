@@ -92,7 +92,7 @@ python -c "import py_compile; py_compile.compile('src/neuroedit_desktop/<file>.p
 hf auth login
 ```
 
-The suite under `tests/` collects **132 tests** (`python -m pytest tests/ -q`).
+The suite under `tests/` collects **134 tests** (`python -m pytest tests/ -q`).
 Keep it and `ruff check src tests scripts` green before every release tag.
 
 ### venv-location note (current setup is intentional)
@@ -143,7 +143,9 @@ The monotonic time-tick path (`_tick_timeline_playback`) is authoritative for
 screen recordings can have sparse variable-frame-rate timestamps that would
 otherwise make the timeline pause and jump. When `clip.media_type == "image"`,
 the player source is cleared and the pixmap item is shown. Don't try to feed
-image paths into QMediaPlayer.
+image paths into QMediaPlayer. Full-frame slides pause video, but slides with
+`overlay=True` must leave the underlying video playing while the annotation
+layer paints the slide above it.
 
 ### State, persistence, and undo/redo
 
@@ -249,10 +251,9 @@ Other PHI safeguards:
 
 ## Optimization Automation Memory
 
-- **Last implementation:** 2026-06-22 — terminal `NoMedia`/`InvalidMedia`
-  statuses now clear deferred seek/play state, preventing an unloadable clip
-  from permanently blocking the timeline clock. Focused regressions cover both
-  statuses in `tests/test_main_window_headless.py`.
+- **Last implementation:** 2026-06-22 — overlay slides no longer pause or
+  repeatedly resync the underlying video preview. Focused undo-history playback
+  regressions cover starting and continuing video beneath an overlay slide.
 - **Last reviewed:** `86aca4f` (2026-06-22) — incremental run over
   `35447b8..HEAD` (4 commits: `_open_recent_project` cache invalidation, the
   §30b deferred-seek-after-setSource fix, §31 VFR playback smoothing, and §32
@@ -326,7 +327,7 @@ Other PHI safeguards:
     `VIDEO_EXTENSIONS | IMAGE_EXTENSIONS`; each accepted path routes through the
     same `_import_media_file` as Media Explorer (so the loop is N imports — see
     backlog).
-  - Suite is **132 tests**; gate is `ruff check src tests scripts` +
+  - Suite is **134 tests**; gate is `ruff check src tests scripts` +
     `python -m pytest tests/ -q`, both green at this marker.
   - torch/SAM stack is lazy by design (venv has no torch → SAM no-ops);
     cold-start import audit (P4.5) is still unquantified.

@@ -19,11 +19,14 @@ from PySide6.QtGui import (
     QDesktopServices,
     QDragEnterEvent,
     QDropEvent,
+    QFont,
     QIcon,
     QImage,
+    QPainter,
     QPixmap,
 )
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -131,6 +134,47 @@ __all__ = [
 ]
 
 _RESOURCES = Path(__file__).parent.parent / "resources"
+
+# Brand wordmark face (see design_handoff): Space Grotesk 600 at -0.02em tracking.
+# Qt substitutes the app's UI sans when Space Grotesk isn't installed; the
+# weight and tracking still apply, which is the documented fallback.
+_WORDMARK_FAMILY = "Space Grotesk"
+
+
+def _identity_mark_path(theme: str) -> Path:
+    """The transparent aperture+scalpel mark SVG matched to the resolved theme
+    ('light' or 'dark'). Used in the header and About lockups."""
+    name = "neuroedit-mark-dark.svg" if theme == "dark" else "neuroedit-mark-light.svg"
+    return _RESOURCES / name
+
+
+def _render_svg_pixmap(svg_path: Path, size: int) -> QPixmap | None:
+    """Rasterize an SVG to a square QPixmap at the device pixel ratio so the
+    mark stays crisp on HiDPI displays. Returns None if the SVG can't load."""
+    renderer = QSvgRenderer(str(svg_path))
+    if not renderer.isValid():
+        return None
+    app = QApplication.instance()
+    dpr = app.devicePixelRatio() if app is not None else 1.0
+    image = QImage(int(size * dpr), int(size * dpr), QImage.Format.Format_ARGB32)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    renderer.render(painter)
+    painter.end()
+    pixmap = QPixmap.fromImage(image)
+    pixmap.setDevicePixelRatio(dpr)
+    return pixmap
+
+
+def _wordmark_font(point_size: int) -> QFont:
+    font = QFont(_WORDMARK_FAMILY, point_size)
+    font.setWeight(QFont.Weight.DemiBold)  # 600
+    font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
+    # -0.02em tracking: QFont spacing is a percentage of the natural spacing.
+    font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 98.0)
+    return font
+
 
 VIDEO_TYPES = [
     ("educational", "Educational"),
@@ -1441,6 +1485,25 @@ class MainWindow(QMainWindow):
             self.timeline.canvas._static_cache = None
             self.timeline.canvas._static_cache_key = None
             self.timeline.canvas.update()
+        self._restyle_identity()
+
+    def _restyle_identity(self) -> None:
+        """Re-render the header mark and wordmark for the active theme. Called on
+        build and whenever appearance/themeMode changes (light ↔ dark)."""
+        logo = getattr(self, "_header_logo", None)
+        if logo is not None:
+            theme = ui_styles.resolve_theme_mode()
+            pixmap = _render_svg_pixmap(_identity_mark_path(theme), 32)
+            if pixmap is not None:
+                logo.setPixmap(pixmap)
+            else:  # SVG unavailable (e.g. QtSvg plugin missing): fall back to glyph
+                logo.setText("⬡")
+                logo.setStyleSheet(
+                    f"QLabel {{ color: {TEXT_PRIMARY}; font-size: 18px; font-weight: 900; }}"
+                )
+        wordmark = getattr(self, "_header_wordmark", None)
+        if wordmark is not None:
+            wordmark.setStyleSheet(f"color: {TEXT_PRIMARY}; background: transparent;")
 
     # ── Header bar (matches web app design) ──────────────────────────────
 
@@ -1465,35 +1528,18 @@ class MainWindow(QMainWindow):
         outer.addLayout(row2)
         layout = row1
 
-        # Logo icon
+        # Identity lockup: theme-matched aperture+scalpel mark + live wordmark.
         logo = QLabel()
         logo.setFixedSize(32, 32)
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        _icon_path = _RESOURCES / "icon_64.png"
-        if _icon_path.exists():
-            _pix = QPixmap(str(_icon_path)).scaled(
-                32, 32,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            logo.setPixmap(_pix)
-        else:
-            logo.setText("⬡")
-            logo.setStyleSheet(f"""
-                QLabel {{
-                    background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
-                        stop:0 {PRIMARY}, stop:1 {ACCENT_CYAN});
-                    border-radius: 8px;
-                    color: white;
-                    font-size: 16px;
-                    font-weight: 900;
-                }}
-            """)
+        self._header_logo = logo
         layout.addWidget(logo)
 
         name_label = QLabel("NeuroEdit")
-        name_label.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 13px; font-weight: 750;")
+        name_label.setFont(_wordmark_font(15))
+        self._header_wordmark = name_label
         layout.addWidget(name_label)
+        self._restyle_identity()
 
         layout.addWidget(self._vdivider())
 
@@ -2166,21 +2212,24 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(32, 32, 32, 24)
         layout.setSpacing(16)
 
-        # Logo wordmark
-        _wm_path = _RESOURCES / "logo_wordmark.png"
-        if _wm_path.exists():
-            wm_label = QLabel()
-            pix = QPixmap(str(_wm_path)).scaledToWidth(
-                280, Qt.TransformationMode.SmoothTransformation
-            )
-            wm_label.setPixmap(pix)
-            wm_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            layout.addWidget(wm_label)
-        else:
-            title = QLabel("NeuroEdit")
-            title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            title.setStyleSheet(f"font-size: 22px; font-weight: 700; color: {TEXT_PRIMARY};")
-            layout.addWidget(title)
+        # Identity lockup: theme-matched mark + live wordmark, centered.
+        theme = ui_styles.resolve_theme_mode()
+        lockup = QHBoxLayout()
+        lockup.setSpacing(11)  # ≈ 0.33 × wordmark size
+        lockup.addStretch()
+        mark_pix = _render_svg_pixmap(_identity_mark_path(theme), 52)
+        if mark_pix is not None:
+            mark = QLabel()
+            mark.setFixedSize(52, 52)
+            mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            mark.setPixmap(mark_pix)
+            lockup.addWidget(mark)
+        title = QLabel("NeuroEdit")
+        title.setFont(_wordmark_font(26))
+        title.setStyleSheet(f"color: {TEXT_PRIMARY}; background: transparent;")
+        lockup.addWidget(title)
+        lockup.addStretch()
+        layout.addLayout(lockup)
 
         version_label = QLabel(f"v{__version__}")
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -3292,7 +3341,8 @@ class MainWindow(QMainWindow):
         if not clip:
             return
         self.project.current_time = clip.start_time + position_ms / 1000 - clip.trim_start
-        if self._slide_at_time(self.project.current_time) is not None:
+        slide = self._slide_at_time(self.project.current_time)
+        if slide is not None and not slide.overlay:
             self.player.pause()
             self._last_timeline_tick = time.monotonic()
         if self.project.current_time > clip.start_time + clip.display_duration:
@@ -3316,11 +3366,12 @@ class MainWindow(QMainWindow):
             return
 
         active = self._clip_at_time(self.project.current_time)
+        active_slide = self._slide_at_time(self.project.current_time)
         on_image = active is not None and active.media_type == "image"
 
         player_was_playing_video = (
             self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
-            and self._slide_at_time(self.project.current_time) is None
+            and (active_slide is None or active_slide.overlay)
             and not on_image
         )
 
@@ -3335,9 +3386,10 @@ class MainWindow(QMainWindow):
         else:
             self.project.current_time = next_time
             next_active = self._clip_at_time(self.project.current_time)
+            next_slide = self._slide_at_time(self.project.current_time)
             if (
                 not player_was_playing_video
-                or self._slide_at_time(self.project.current_time) is not None
+                or (next_slide is not None and not next_slide.overlay)
                 or next_active is None
                 or active is None
                 or next_active.id != active.id
@@ -3360,7 +3412,7 @@ class MainWindow(QMainWindow):
                 self.player.setSource(QUrl())
             self.video_view.show_black()
             return
-        if slide is not None:
+        if slide is not None and not slide.overlay:
             self.player.pause()
             self.video_view.update_annotations()
             return

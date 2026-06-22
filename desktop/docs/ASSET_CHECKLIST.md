@@ -11,22 +11,27 @@ export) · 🔴 missing (code falls back to a placeholder).
 
 | Asset | Source Figma frame | Export size | File path | Used on | Status |
 |---|---|---|---|---|---|
-| Header logo icon | _TBD (logo frame)_ | 64×64 PNG (rendered 32×32) | `src/neuroedit_desktop/resources/icon_64.png` | in-app (macOS + Windows) | 🟡 falls back to a gradient "⬡" glyph if absent |
-| About dialog wordmark | _TBD (wordmark frame)_ | ≥560px wide PNG (rendered 280) | `src/neuroedit_desktop/resources/logo_wordmark.png` | in-app (macOS + Windows) | 🟡 falls back to plain text if absent |
-| macOS app icon | _TBD (app icon frame)_ | 1024×1024 → `.icns` | `desktop/NeuroEdit.spec` (`BUNDLE` icon) | macOS bundle/DMG | 🔴 PyInstaller default |
-| Windows app icon | _TBD (app icon frame)_ | 256×256 multi-res `.ico` | `desktop/NeuroEdit.spec` + `installer/NeuroEdit.iss` | Windows exe + installer | 🔴 PyInstaller/Inno default |
+| Header logo icon | Aperture mark (`design_handoff_logo`) | theme-matched SVG, rendered ~32px | `src/neuroedit_desktop/resources/neuroedit-mark-{light,dark}.svg` | in-app (macOS + Windows) | ✅ swaps line/accent with theme; falls back to "⬡" glyph if QtSvg absent |
+| About dialog wordmark | Aperture mark + live text | SVG mark (~52px) + Space Grotesk 600 wordmark | `resources/neuroedit-mark-{light,dark}.svg` + Qt label | in-app (macOS + Windows) | ✅ live lockup; no raster wordmark |
+| macOS app icon | Aperture app-icon tile (`design_handoff_logo`) | 1024×1024 → `.icns` | `resources/NeuroEdit.icns` (referenced by `NeuroEdit.spec` `BUNDLE`) | macOS bundle/DMG | ✅ shipped |
+| Windows app icon | Aperture app-icon tile | 16–256 multi-res `.ico` | `resources/NeuroEdit.ico` (`NeuroEdit.spec` + `installer/NeuroEdit.iss`) | Windows exe + installer | ✅ shipped |
 | Installer banner (Inno Setup) | _TBD_ | 164×314 BMP (`WizardImageFile`) | `desktop/installer/` | Windows installer | 🔴 Inno default |
 | DMG background | _TBD_ | 600×400 PNG | build script | macOS DMG | 🔴 plain DMG |
 | Release/README screenshots | capture script output | per-surface PNG | `desktop/qa/screenshots/` (gitignored; copy keepers to release notes) | GitHub releases | 🟡 regenerate after brand integration |
 | Tutorial clip | n/a (screen recording) | 1080p MP4 | `src/neuroedit_desktop/resources/tutorial_clip.mp4` | in-app tutorial | 🟡 optional, falls back gracefully |
 
-## Export procedure
+## Regenerating the identity assets
 
-1. Open the Make concept, export each frame at the size above (2× for raster
-   assets that render on high-DPI displays).
-2. Drop files into the listed path; the app picks up `icon_64.png` and
-   `logo_wordmark.png` automatically (no code change).
-3. Icons: regenerate `.icns`/`.ico`, reference them from `NeuroEdit.spec` and
-   `NeuroEdit.iss`, and rebuild both installers.
-4. Re-run `python scripts/capture_baseline_screenshots.py` and update this
-   table's Status column + the release notes screenshots.
+The aperture mark ships from the `design_handoff_logo` package. The source of
+truth is the SVGs in `resources/neuroedit-*.svg`; the OS icon rasters are
+regenerated from them.
+
+1. Edit the SVGs (or re-export from the design package). The only token that
+   tracks `styles.py` is the scalpel handle fill (`ACCENT_CLINICAL`).
+2. Regenerate rasters with `scripts/generate_icons.py` (PySide6 + Pillow), then
+   copy `build/NeuroEdit.icns`, `build/NeuroEdit.ico`, the `build/appicon/*` →
+   `resources/icon_{16..512}.png`, and the iconset into `resources/`.
+3. `NeuroEdit.spec` and `installer/NeuroEdit.iss` already point at
+   `resources/NeuroEdit.icns` / `.ico`; rebuild both installers.
+4. The header/About lockups render the SVGs directly via `QSvgRenderer`
+   (`main_window._restyle_identity`) — no code change when the SVGs change.

@@ -9,9 +9,13 @@ UI thread so the app stays responsive while editing operative video.
   smooth constant- and variable-frame-rate media
 - Media import: file dialogs, Media Explorer double-click, or drag-and-drop from
   Finder/File Explorer
+- Slides: full-frame slides pause video; transparent overlay slides remain
+  composited above continuously playing video
 - Project persistence: project-folder JSON plus external mask/audio/video assets
 - SAM processing: separate Python backend boundary so SAM3 tracking runs outside
   the UI thread
+- Identity: theme-aware SVG aperture-and-scalpel mark in-app, with generated
+  `.icns` and `.ico` assets for packaged builds
 
 The full module map and architecture notes (rendering pipeline, undo/redo,
 threading, PHI/redaction safeguards) are in [CLAUDE.md](CLAUDE.md).

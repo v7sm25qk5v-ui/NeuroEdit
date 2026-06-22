@@ -50,6 +50,11 @@ by the optimization automation; they are not duplicated into P4.5.
   `InvalidMedia` status, releasing the timeline clock instead of permanently
   freezing playback. Focused regressions cover both terminal statuses while the
   existing test keeps deferred seeks pending through recoverable loading states.
+- [x] **Overlay slides froze the underlying video preview.** Fixed 2026-06-22:
+  playback sync and timeline ticks now treat only full-frame slides as blocking.
+  Overlay slides render above a video while its `QMediaPlayer` continues, with
+  focused regressions covering playback started within and continuing through
+  an overlay.
 - [ ] **Multi-file Finder drop does N blocking imports + N preview reloads + N
   undo steps (perf/UX).** `dropEvent` (`ui/main_window.py:2627`) loops over every
   dropped path calling `_import_media_file` (`:2592`), which runs a synchronous
@@ -135,7 +140,7 @@ template); see Completed section.
 
 Highest-leverage engineering work while P0 release items stay owner/hardware
 blocked and P5 stays parked. All items are measurement-first and
-  behavior-preserving — the 132-test suite and `ruff` must stay green with no
+  behavior-preserving — the 134-test suite and `ruff` must stay green with no
 user-visible change. Full rationale and acceptance criteria in
 [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md) Phase 6.
 
