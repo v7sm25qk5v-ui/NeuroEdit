@@ -3412,6 +3412,13 @@ class MainWindow(QMainWindow):
     def _media_status_changed(self, status: QMediaPlayer.MediaStatus) -> None:
         if self._pending_seek_ms is None:
             return
+        if status in (
+            QMediaPlayer.MediaStatus.NoMedia,
+            QMediaPlayer.MediaStatus.InvalidMedia,
+        ):
+            self._pending_seek_ms = None
+            self._pending_play = False
+            return
         if status not in (
             QMediaPlayer.MediaStatus.LoadedMedia,
             QMediaPlayer.MediaStatus.BufferedMedia,

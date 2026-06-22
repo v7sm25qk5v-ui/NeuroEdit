@@ -92,7 +92,7 @@ python -c "import py_compile; py_compile.compile('src/neuroedit_desktop/<file>.p
 hf auth login
 ```
 
-The suite under `tests/` collects **130 tests** (`python -m pytest tests/ -q`).
+The suite under `tests/` collects **132 tests** (`python -m pytest tests/ -q`).
 Keep it and `ruff check src tests scripts` green before every release tag.
 
 ### venv-location note (current setup is intentional)
@@ -249,17 +249,21 @@ Other PHI safeguards:
 
 ## Optimization Automation Memory
 
-- **Last implementation:** 2026-06-21 — the recent-project open path now
-  invalidates the project-end-time cache immediately after the project swap,
-  with a focused ordering regression test in `tests/test_undo_history.py`.
-- **Last reviewed:** `35447b8` (2026-06-21) — incremental run over
-  `cbe6679..HEAD` (one commit: the `_apply_snapshot` project-end-time cache
-  invalidation, i.e. the fix the prior review recommended). Confirmed the fix is
-  correct and complete. One-hop audit of all `_project_end_time_cache`
-  read/write/invalidation sites surfaced a low-priority consistency gap in
-  `_open_recent_project` (no early invalidation; see TODO backlog).
+- **Last implementation:** 2026-06-22 — terminal `NoMedia`/`InvalidMedia`
+  statuses now clear deferred seek/play state, preventing an unloadable clip
+  from permanently blocking the timeline clock. Focused regressions cover both
+  statuses in `tests/test_main_window_headless.py`.
+- **Last reviewed:** `86aca4f` (2026-06-22) — incremental run over
+  `35447b8..HEAD` (4 commits: `_open_recent_project` cache invalidation, the
+  §30b deferred-seek-after-setSource fix, §31 VFR playback smoothing, and §32
+  Finder drag-and-drop import). The `_open_recent_project` consistency gap from
+  the prior run is now fixed (`51778da`, checked off). Two new findings filed in
+  the backlog: (1) a clip that never reaches `LoadedMedia` leaves
+  `_pending_seek_ms` stuck → permanent playback freeze (no `InvalidMedia`/
+  `errorOccurred` handler); (2) multi-file drag-drop runs N serial blocking
+  imports + N preview reloads + N undo snapshots.
 - **Mode:** incremental. Next optimization review should deep-dive files changed
-  after `35447b8` plus one hop. (Full-sweep baseline was `22085f9`, 2026-06-17.)
+  after `86aca4f` plus one hop. (Full-sweep baseline was `22085f9`, 2026-06-17.)
 - **Out-of-scope paths:** root React/Vite prototype (legacy, superseded by
   `desktop/`); `desktop/dist/` and any build output; `node_modules/`; `*.lock`;
   `.venv/` (symlinked into iCloud, see venv note); vendored deps; iCloud
@@ -307,7 +311,22 @@ Other PHI safeguards:
     the cache), so the trailing dirty-mark is intentional — don't flag "opening
     a project marks it dirty" as a bug. All project swap paths now also clear
     the cache immediately after the swap.
-  - Suite is **130 tests**; gate is `ruff check src tests scripts` +
+  - Deferred-seek state machine (§30b): a seek issued right after `setSource()`
+    is silently dropped because the media isn't loaded, so a trimmed clip would
+    play from 0 instead of `trim_start`. On a **fresh** source
+    `_sync_player_to_timeline` stashes `_pending_seek_ms`/`_pending_play` and
+    `pause()`s; `_media_status_changed` applies the seek (and plays if still in
+    playback) once status is `LoadedMedia`/`BufferedMedia`. While
+    `_pending_seek_ms` is outstanding both `_position_changed` and
+    `_tick_timeline_playback` bail. Terminal `NoMedia`/`InvalidMedia` statuses
+    clear the pending seek/play state so an unloadable source releases the
+    timeline clock.
+  - Finder drag-and-drop (§32): `MainWindow.setAcceptDrops(True)` +
+    `dragEnterEvent`/`dropEvent`; `_dropped_media_paths` filters local files by
+    `VIDEO_EXTENSIONS | IMAGE_EXTENSIONS`; each accepted path routes through the
+    same `_import_media_file` as Media Explorer (so the loop is N imports — see
+    backlog).
+  - Suite is **132 tests**; gate is `ruff check src tests scripts` +
     `python -m pytest tests/ -q`, both green at this marker.
   - torch/SAM stack is lazy by design (venv has no torch → SAM no-ops);
     cold-start import audit (P4.5) is still unquantified.

@@ -1313,3 +1313,38 @@ fixes completed in §§31–32.
 - CI release path: pushing `v0.5.3-alpha` triggers `.github/workflows/build.yml`
   to build the unsigned macOS DMG/ZIP and Windows installer, then publish the
   GitHub Release with those artifacts.
+
+## 34. Optimization automation run (2026-06-22)
+
+Daily optimization scan (no code changes; markdown only). Reviewed
+`35447b8..86aca4f` (v0.5.1→v0.5.3-alpha: `_open_recent_project` cache
+invalidation, §30b deferred-seek-after-`setSource`, §31 VFR playback smoothing,
+§32 Finder drag-and-drop).
+
+- The prior run's `_open_recent_project` consistency finding is now fixed
+  (`51778da`) and checked off in the TODO backlog.
+- Two new findings filed under TODO.md → Optimization Backlog:
+  1. A clip that never reaches `LoadedMedia` leaves `_pending_seek_ms` stuck →
+     permanent playback freeze; no `InvalidMedia`/`errorOccurred` handler clears
+     the pending seek (correctness/robustness).
+  2. Multi-file Finder drop runs N serial blocking probes + N preview reloads +
+     N undo snapshots via the per-file `_import_media_file` loop (perf/UX).
+- CLAUDE.md "Optimization Automation Memory" marker advanced to `86aca4f`
+  (2026-06-22); added architecture notes for the deferred-seek state machine and
+  the drag-and-drop import path.
+
+## 35. Terminal media-status playback recovery (2026-06-22)
+
+Implemented the first actionable correctness finding from §34.
+
+- `MainWindow._media_status_changed()` now clears `_pending_seek_ms` and
+  `_pending_play` when `QMediaPlayer` reports terminal `NoMedia` or
+  `InvalidMedia`. The next timeline-clock tick can therefore advance beyond an
+  unloadable clip instead of returning forever on the deferred seek.
+- Recoverable statuses remain pending, and `LoadedMedia`/`BufferedMedia` still
+  apply the deferred seek before optionally resuming playback.
+- Added parameterized headless regressions covering both terminal statuses;
+  the suite now contains 132 tests.
+- Next code-ready optimization item: batch multi-file Finder drop so one gesture
+  performs one preview load and one undo snapshot after its imports. Keep the
+  synchronous probe behavior as a separate measurement-first follow-up.

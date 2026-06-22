@@ -9,6 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtCore import QMimeData, QSettings, QUrl
+from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtWidgets import QApplication
 
 from neuroedit_desktop.models import ProjectState, VideoClip, new_id
@@ -229,6 +230,21 @@ def test_media_status_applies_pending_seek_only_when_loaded(window):
 
     window._media_status_changed(QMediaPlayer.MediaStatus.LoadedMedia)
     assert window._pending_seek_ms is None  # applied + cleared
+
+
+@pytest.mark.parametrize(
+    "status",
+    (QMediaPlayer.MediaStatus.NoMedia, QMediaPlayer.MediaStatus.InvalidMedia),
+)
+def test_terminal_media_status_clears_pending_seek(window, status):
+    """A source that cannot load must release the timeline playback clock."""
+    window._pending_seek_ms = 1887
+    window._pending_play = True
+
+    window._media_status_changed(status)
+
+    assert window._pending_seek_ms is None
+    assert window._pending_play is False
 
 
 def test_autosave_restore_round_trip(tmp_path):

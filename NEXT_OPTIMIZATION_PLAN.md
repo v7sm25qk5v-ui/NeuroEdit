@@ -194,7 +194,7 @@ workflow refinements. The remaining roadmap work is owner/hardware-blocked
 (packaged-build smoke, signing, Stryker sample data), so the highest-leverage
 engineering work left is structural: keep the codebase cheap to change and
 cheap to run. Every item below is measurement-first and behavior-preserving —
-the 130-test suite and `ruff` must stay green with no user-visible change.
+the 132-test suite and `ruff` must stay green with no user-visible change.
 
 1. **Modularize `ui/main_window.py` (currently ~4,050 lines, down from ~6,500).**
    - `main_window.py` holds `MainWindow` plus `VideoGraphicsView`,
@@ -235,6 +235,9 @@ the 130-test suite and `ruff` must stay green with no user-visible change.
      `QMediaPlayer.positionChanged` events to drive it. This keeps
      variable-frame-rate screen recordings smooth while avoiding per-tick
      reseeks when the same video clip remains active.
+   - Correctness fix 2026-06-22: terminal `NoMedia`/`InvalidMedia` statuses now
+     clear deferred seek/play state so a source that cannot load cannot leave
+     the timeline clock permanently blocked.
 
 2. **Reduce undo/redo snapshot cost.**
    - Undo/redo stores full `ProjectState.to_dict()` copies (cap 50) and can hold
@@ -279,7 +282,7 @@ the 130-test suite and `ruff` must stay green with no user-visible change.
      module changed. Only the canonical `*.py` files remain under `src/`; tests
      and `ruff` stayed green.
 
-## Recommended immediate next sprint (updated 2026-06-20)
+## Recommended immediate next sprint (updated 2026-06-22)
 
 Phases 1–5 shipped (smoothness fixture + diagnostics, the Figma brand system and
 tokens, accessibility audit, smoothness caching, and the workflow refinements).
@@ -301,7 +304,7 @@ each is measurement-first and behavior-preserving:
    measure and reduce redundant annotation repaint work. Keep the playhead refresh
    clock-based: decoded-frame changes are sparse in variable-frame-rate screen
    recordings and cannot safely gate timeline repainting.
-5. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (130 tests)
+5. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (132 tests)
    green before every release tag; feed any new regressions back into the roadmap.
 
 This keeps the project on a safe optimization loop: measure first, keep the codebase

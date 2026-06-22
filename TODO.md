@@ -44,6 +44,23 @@ by the optimization automation; they are not duplicated into P4.5.
   timeline. Remaining low-priority mitigation: reduce annotation repaint work
   when its visible state has not changed. Do not throttle playhead refreshes by
   decoded-frame changes; static VFR sections still need smooth playhead motion.
+- [x] **A clip that never reaches `LoadedMedia` left `_pending_seek_ms` stuck
+  (correctness/robustness).** Fixed 2026-06-22: `_media_status_changed()` now
+  clears `_pending_seek_ms` and `_pending_play` on terminal `NoMedia` or
+  `InvalidMedia` status, releasing the timeline clock instead of permanently
+  freezing playback. Focused regressions cover both terminal statuses while the
+  existing test keeps deferred seeks pending through recoverable loading states.
+- [ ] **Multi-file Finder drop does N blocking imports + N preview reloads + N
+  undo steps (perf/UX).** `dropEvent` (`ui/main_window.py:2627`) loops over every
+  dropped path calling `_import_media_file` (`:2592`), which runs a synchronous
+  `probe_video` (ffmpeg subprocess) via `_add_video_clip`, then `_load_active_clip`
+  (preview reload) and `_mark_dirty` (a full `ProjectState` undo snapshot) — per
+  file. Dragging in e.g. 10 clips at once therefore blocks the UI thread on 10
+  serial probes, reloads the preview 10 times, and produces 10 separate undo
+  entries for one gesture. Consider importing the batch then doing a single
+  active-clip select + preview load + one undo snapshot at the end (and/or probing
+  off the UI thread). Same cost path exists for Media Explorer double-click, but a
+  drag makes the multi-file case the common one.
 
 ## P0 — Unblock and ship the current alpha
 
@@ -118,7 +135,7 @@ template); see Completed section.
 
 Highest-leverage engineering work while P0 release items stay owner/hardware
 blocked and P5 stays parked. All items are measurement-first and
-  behavior-preserving — the 130-test suite and `ruff` must stay green with no
+  behavior-preserving — the 132-test suite and `ruff` must stay green with no
 user-visible change. Full rationale and acceptance criteria in
 [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md) Phase 6.
 
