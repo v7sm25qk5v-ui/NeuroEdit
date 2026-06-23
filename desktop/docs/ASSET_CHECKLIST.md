@@ -12,7 +12,7 @@ export) · 🔴 missing (code falls back to a placeholder).
 | Asset | Source Figma frame | Export size | File path | Used on | Status |
 |---|---|---|---|---|---|
 | Header logo icon | Aperture mark (`design_handoff_logo`) | theme-matched SVG, rendered ~32px | `src/neuroedit_desktop/resources/neuroedit-mark-{light,dark}.svg` | in-app (macOS + Windows) | ✅ swaps line/accent with theme; falls back to "⬡" glyph if QtSvg absent |
-| About dialog wordmark | Aperture mark + live text | SVG mark (~52px) + Space Grotesk 600 wordmark | `resources/neuroedit-mark-{light,dark}.svg` + Qt label | in-app (macOS + Windows) | ✅ live lockup; no raster wordmark |
+| About dialog wordmark | Aperture mark + live text | SVG mark (~52px) + bundled Space Grotesk Medium/Bold | `resources/neuroedit-mark-{light,dark}.svg`, `resources/fonts/SpaceGrotesk-*.ttf` + OFL license | in-app (macOS + Windows) | ✅ live lockup; font registered at runtime, no system install or missing-font lookup |
 | macOS app icon | Aperture app-icon tile (`design_handoff_logo`) | 1024×1024 → `.icns` | `resources/NeuroEdit.icns` (referenced by `NeuroEdit.spec` `BUNDLE`) | macOS bundle/DMG | ✅ shipped |
 | Windows app icon | Aperture app-icon tile | 16–256 multi-res `.ico` | `resources/NeuroEdit.ico` (`NeuroEdit.spec` + `installer/NeuroEdit.iss`) | Windows exe + installer | ✅ shipped |
 | Installer banner (Inno Setup) | _TBD_ | 164×314 BMP (`WizardImageFile`) | `desktop/installer/` | Windows installer | 🔴 Inno default |

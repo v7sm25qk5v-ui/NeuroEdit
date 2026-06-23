@@ -4,6 +4,7 @@ export report PHI flag block."""
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -16,6 +17,7 @@ from neuroedit_desktop.models import ProjectState, VideoClip, new_id
 from neuroedit_desktop.project_store import ProjectStore
 from neuroedit_desktop.sam_backend import SamBackend, SamBackendInfo
 from neuroedit_desktop.ui import styles as ui_styles
+from neuroedit_desktop.ui import main_window as main_window_module
 from neuroedit_desktop.ui.main_window import MainWindow
 
 
@@ -75,6 +77,12 @@ def test_construct_and_switch_all_panels(window, app):
         assert window.project.active_panel == panel
 
 
+def test_wordmark_registers_bundled_brand_font(app):
+    font = main_window_module._wordmark_font(15)
+
+    assert font.family() == "Space Grotesk"
+
+
 class _DropEvent:
     def __init__(self, mime_data: QMimeData) -> None:
         self._mime_data = mime_data
@@ -99,14 +107,39 @@ def test_drop_imports_supported_local_media(window, tmp_path, monkeypatch):
     mime_data = QMimeData()
     mime_data.setUrls([QUrl.fromLocalFile(str(path)) for path in (video, image, unsupported)])
     event = _DropEvent(mime_data)
-    imported: list[str] = []
-    monkeypatch.setattr(window, "_import_media_file", imported.append)
+    imported: list[list[Path]] = []
+    monkeypatch.setattr(window, "_import_media_files", imported.append)
 
     window.dropEvent(event)
 
     assert window.acceptDrops() is True
     assert event.accepted is True
-    assert imported == [str(video), str(image)]
+    assert imported == [[video, image]]
+
+
+def test_multi_file_import_loads_preview_and_marks_dirty_once(window, tmp_path, monkeypatch):
+    video = tmp_path / "recording.mov"
+    image = tmp_path / "still.png"
+    loaded: list[str] = []
+    history_before = len(window._undo_stack)
+    monkeypatch.setattr(
+        window,
+        "_add_video_clip",
+        lambda path: window.project.add_clip(path, duration=1.0, width=1920, height=1080),
+    )
+    monkeypatch.setattr(
+        window,
+        "_add_image_clip",
+        lambda path: window.project.add_image_clip(path, width=1920, height=1080),
+    )
+    monkeypatch.setattr(window, "_load_active_clip", lambda: loaded.append("preview"))
+
+    window._import_media_files([video, image])
+
+    assert [Path(clip.path) for clip in window.project.clips[-2:]] == [video, image]
+    assert window.project.active_clip_id == window.project.clips[-1].id
+    assert loaded == ["preview"]
+    assert len(window._undo_stack) == history_before + 1
 
 
 def test_appearance_action_persists_and_reapplies_theme(window, app):

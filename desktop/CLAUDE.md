@@ -92,7 +92,7 @@ python -c "import py_compile; py_compile.compile('src/neuroedit_desktop/<file>.p
 hf auth login
 ```
 
-The suite under `tests/` collects **134 tests** (`python -m pytest tests/ -q`).
+The suite under `tests/` collects **136 tests** (`python -m pytest tests/ -q`).
 Keep it and `ruff check src tests scripts` green before every release tag.
 
 ### venv-location note (current setup is intentional)
@@ -251,20 +251,19 @@ Other PHI safeguards:
 
 ## Optimization Automation Memory
 
-- **Last implementation:** 2026-06-22 — overlay slides no longer pause or
-  repeatedly resync the underlying video preview. Focused undo-history playback
-  regressions cover starting and continuing video beneath an overlay slide.
-- **Last reviewed:** `86aca4f` (2026-06-22) — incremental run over
-  `35447b8..HEAD` (4 commits: `_open_recent_project` cache invalidation, the
-  §30b deferred-seek-after-setSource fix, §31 VFR playback smoothing, and §32
-  Finder drag-and-drop import). The `_open_recent_project` consistency gap from
-  the prior run is now fixed (`51778da`, checked off). Two new findings filed in
-  the backlog: (1) a clip that never reaches `LoadedMedia` leaves
-  `_pending_seek_ms` stuck → permanent playback freeze (no `InvalidMedia`/
-  `errorOccurred` handler); (2) multi-file drag-drop runs N serial blocking
-  imports + N preview reloads + N undo snapshots.
+- **Last implementation:** 2026-06-23 — multi-file Finder drops now batch all
+  accepted imports before one preview load and one dirty/history operation
+  (§40). Synchronous video probing remains unchanged.
+- **Last reviewed:** `0050a42` (2026-06-23) — incremental run over
+  `86aca4f..HEAD` (2 commits + uncommitted §38 font work): §35 invalid/no-media
+  pending-seek recovery, §36 overlay-slide playback, §37 identity/icon refresh,
+  §38 bundled Space Grotesk TTFs. The two prior-run backlog findings (stuck
+  `_pending_seek_ms`; that was finding 1) are checked off. **No new findings** —
+  the diff is correctness fixes (already tracked) plus non-perf-critical identity
+  UI. Multi-file drop batching is now implemented in §40; playback repaint
+  throttling remains open.
 - **Mode:** incremental. Next optimization review should deep-dive files changed
-  after `86aca4f` plus one hop. (Full-sweep baseline was `22085f9`, 2026-06-17.)
+  after `0050a42` plus one hop. (Full-sweep baseline was `22085f9`, 2026-06-17.)
 - **Out-of-scope paths:** root React/Vite prototype (legacy, superseded by
   `desktop/`); `desktop/dist/` and any build output; `node_modules/`; `*.lock`;
   `.venv/` (symlinked into iCloud, see venv note); vendored deps; iCloud
@@ -281,6 +280,18 @@ Other PHI safeguards:
   - `ui/dialogs.py` (`873b74d`) is a verbatim mechanical move of dialog code
     that was already reviewed in the `22085f9` full sweep — no new findings.
     Skip re-reviewing it unless its logic (not just its location) changes.
+  - Identity rendering (`_render_svg_pixmap` / `_restyle_identity`, §37) re-rasterizes
+    the mark SVG on theme toggle and on every About-dialog open. Both are rare,
+    user-driven events (not a paint/playback path), so caching the pixmap by
+    (theme, size, dpr) is a marginal win — skip, same rationale as the per-paint
+    Qt allocations below.
+  - §36 overlay-slide change adds no per-tick cost: `_tick_timeline_playback`
+    computes `active_slide`/`next_slide` once and reuses them; net `_slide_at_time`
+    calls per tick are unchanged (still ~2). Don't re-flag it as new scan cost.
+  - §35 invalid-media recovery handles terminal `NoMedia`/`InvalidMedia` status in
+    `_media_status_changed`. Qt6 sets that status on load failure (alongside
+    `errorOccurred`), so the status handler covers the unloadable-clip case; a
+    separate `errorOccurred` slot would be redundant — not a gap.
   - Autosave snapshot reuse (`6700b67`) was audited for the stale-snapshot risk:
     all five `self.dirty = True` sites live in `main_window.py` and each either
     refreshes `_autosave_snapshot` (the history push) or nulls it; no other
@@ -297,8 +308,9 @@ Other PHI safeguards:
     still valid, so the third independent serialize is gone on the common
     push-then-autosave path. Still open in P4.5: pre-serialize short-circuit,
     compact history storage, cumulative-size cap, fixture timing/memory.
-  - Modularization is mid-flight: `main_window.py` ~4,050 lines (down from
-    ~6,500); canvas → `ui/canvas.py`, SAM workers → `ui/sam_workers.py`,
+  - Modularization is mid-flight: `main_window.py` ~4,240 lines (down from
+    ~6,500; ticked up ~190 from the §37/§38 identity+font code); canvas →
+    `ui/canvas.py`, SAM workers → `ui/sam_workers.py`,
     dialogs → `ui/dialogs.py`, audio → `ui/audio_panel.py`, project library →
     `ui/project_library.py`, all re-exported from their origin module so import
     paths stay stable. Remaining: split the still-large `MainWindow` class.
@@ -325,9 +337,18 @@ Other PHI safeguards:
   - Finder drag-and-drop (§32): `MainWindow.setAcceptDrops(True)` +
     `dragEnterEvent`/`dropEvent`; `_dropped_media_paths` filters local files by
     `VIDEO_EXTENSIONS | IMAGE_EXTENSIONS`; each accepted path routes through the
-    same `_import_media_file` as Media Explorer (so the loop is N imports — see
-    backlog).
-  - Suite is **134 tests**; gate is `ruff check src tests scripts` +
+    same `_import_media_files` helper as Media Explorer. A drop batches all paths
+    into one preview load and one dirty/history operation; single-file Media
+    Explorer imports use the same helper with a one-item list.
+  - Suite is **136 tests**; gate is `ruff check src tests scripts` +
     `python -m pytest tests/ -q`, both green at this marker.
   - torch/SAM stack is lazy by design (venv has no torch → SAM no-ops);
     cold-start import audit (P4.5) is still unquantified.
+  - Identity assets (§37/§38): header + About lockups use theme-matched SVG marks
+    (`neuroedit-mark-{light,dark}.svg`) rasterized at DPR via `_render_svg_pixmap`;
+    `_restyle_identity` re-renders them on theme change. The wordmark font is the
+    bundled Space Grotesk TTFs under `resources/fonts/`, loaded once (guarded by
+    `_wordmark_fonts_loaded`) via `QFontDatabase.addApplicationFontFromData`;
+    `_wordmark_font()` falls back to the app font if the family fails to register.
+    Regenerate packaged icons with `scripts/generate_icons.py` from
+    `resources/neuroedit-appicon.svg`.

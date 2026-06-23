@@ -89,7 +89,9 @@ choice is saved in `QSettings("NeuroEdit", "Desktop")` under
   iris revealing a surgical scalpel): theme-matched header/About lockups render
   `neuroedit-mark-{light,dark}.svg` directly, and the macOS/Windows app icons
   come from the dark-tile app icon. Wordmark is Space Grotesk 600 at −0.02em
-  (falls back to the UI sans). Tracked in [ASSET_CHECKLIST.md](ASSET_CHECKLIST.md).
+  from the bundled static font files; Qt registers them at runtime, so no system
+  font installation is required. Tracked in
+  [ASSET_CHECKLIST.md](ASSET_CHECKLIST.md).
 
 ## Verification
 

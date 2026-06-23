@@ -11,7 +11,7 @@ import sys
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QMimeData, QObject, Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtCore import QByteArray, QMimeData, QObject, Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -20,6 +20,7 @@ from PySide6.QtGui import (
     QDragEnterEvent,
     QDropEvent,
     QFont,
+    QFontDatabase,
     QIcon,
     QImage,
     QPainter,
@@ -136,9 +137,13 @@ __all__ = [
 _RESOURCES = Path(__file__).parent.parent / "resources"
 
 # Brand wordmark face (see design_handoff): Space Grotesk 600 at -0.02em tracking.
-# Qt substitutes the app's UI sans when Space Grotesk isn't installed; the
-# weight and tracking still apply, which is the documented fallback.
 _WORDMARK_FAMILY = "Space Grotesk"
+_WORDMARK_FONT_PATHS = (
+    _RESOURCES / "fonts" / "SpaceGrotesk-Medium.ttf",
+    _RESOURCES / "fonts" / "SpaceGrotesk-Bold.ttf",
+)
+_wordmark_font_family: str | None = None
+_wordmark_fonts_loaded = False
 
 
 def _identity_mark_path(theme: str) -> Path:
@@ -167,8 +172,30 @@ def _render_svg_pixmap(svg_path: Path, size: int) -> QPixmap | None:
     return pixmap
 
 
+def _load_wordmark_font_family() -> str | None:
+    global _wordmark_font_family, _wordmark_fonts_loaded
+    if _wordmark_fonts_loaded:
+        return _wordmark_font_family
+    _wordmark_fonts_loaded = True
+    for path in _WORDMARK_FONT_PATHS:
+        try:
+            font_data = QByteArray(path.read_bytes())
+        except OSError:
+            continue
+        font_id = QFontDatabase.addApplicationFontFromData(font_data)
+        if font_id < 0:
+            continue
+        families = QFontDatabase.applicationFontFamilies(font_id)
+        if _WORDMARK_FAMILY in families:
+            _wordmark_font_family = _WORDMARK_FAMILY
+    return _wordmark_font_family
+
+
 def _wordmark_font(point_size: int) -> QFont:
-    font = QFont(_WORDMARK_FAMILY, point_size)
+    app = QApplication.instance()
+    fallback = app.font().family() if app is not None else "Sans Serif"
+    family = _load_wordmark_font_family() or fallback
+    font = QFont(family, point_size)
     font.setWeight(QFont.Weight.DemiBold)  # 600
     font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
     # -0.02em tracking: QFont spacing is a percentage of the natural spacing.
@@ -2639,15 +2666,23 @@ class MainWindow(QMainWindow):
         )
 
     def _import_media_file(self, path: str) -> None:
-        media_path = Path(path)
-        suffix = media_path.suffix.lower()
-        if suffix in VIDEO_EXTENSIONS:
-            clip = self._add_video_clip(media_path)
-        elif suffix in IMAGE_EXTENSIONS:
-            clip = self._add_image_clip(media_path)
-        else:
-            QMessageBox.information(self, "Import Media", f"Unsupported media file: {media_path.name}")
-            return
+        self._import_media_files([Path(path)])
+
+    def _import_media_files(self, paths: list[Path]) -> None:
+        clip = None
+        for media_path in paths:
+            imported_clip = None
+            suffix = media_path.suffix.lower()
+            if suffix in VIDEO_EXTENSIONS:
+                imported_clip = self._add_video_clip(media_path)
+            elif suffix in IMAGE_EXTENSIONS:
+                imported_clip = self._add_image_clip(media_path)
+            else:
+                QMessageBox.information(
+                    self, "Import Media", f"Unsupported media file: {media_path.name}"
+                )
+            if imported_clip is not None:
+                clip = imported_clip
         if clip is None:
             return
         self.project.active_clip_id = clip.id
@@ -2678,8 +2713,7 @@ class MainWindow(QMainWindow):
         if not paths:
             event.ignore()
             return
-        for path in paths:
-            self._import_media_file(str(path))
+        self._import_media_files(paths)
         event.acceptProposedAction()
 
     def _select_media_clip(self, clip_id: str) -> None:

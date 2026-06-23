@@ -55,17 +55,11 @@ by the optimization automation; they are not duplicated into P4.5.
   Overlay slides render above a video while its `QMediaPlayer` continues, with
   focused regressions covering playback started within and continuing through
   an overlay.
-- [ ] **Multi-file Finder drop does N blocking imports + N preview reloads + N
-  undo steps (perf/UX).** `dropEvent` (`ui/main_window.py:2627`) loops over every
-  dropped path calling `_import_media_file` (`:2592`), which runs a synchronous
-  `probe_video` (ffmpeg subprocess) via `_add_video_clip`, then `_load_active_clip`
-  (preview reload) and `_mark_dirty` (a full `ProjectState` undo snapshot) — per
-  file. Dragging in e.g. 10 clips at once therefore blocks the UI thread on 10
-  serial probes, reloads the preview 10 times, and produces 10 separate undo
-  entries for one gesture. Consider importing the batch then doing a single
-  active-clip select + preview load + one undo snapshot at the end (and/or probing
-  off the UI thread). Same cost path exists for Media Explorer double-click, but a
-  drag makes the multi-file case the common one.
+- [x] **Multi-file Finder drop did N blocking imports + N preview reloads + N
+  undo steps (perf/UX).** Fixed 2026-06-23: `dropEvent` now imports the accepted
+  paths as one batch, selects the last successful import, then performs one
+  preview load and one dirty/history operation for the gesture. Synchronous
+  video probing remains unchanged and is a separate measurement-first follow-up.
 
 ## P0 — Unblock and ship the current alpha
 
@@ -140,7 +134,7 @@ template); see Completed section.
 
 Highest-leverage engineering work while P0 release items stay owner/hardware
 blocked and P5 stays parked. All items are measurement-first and
-  behavior-preserving — the 134-test suite and `ruff` must stay green with no
+  behavior-preserving — the 136-test suite and `ruff` must stay green with no
 user-visible change. Full rationale and acceptance criteria in
 [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md) Phase 6.
 
@@ -153,7 +147,7 @@ deferral is unaudited. No new test regressions. Recommended order is unchanged:
 modularize first (makes the rest safer to review), then undo cost, then the
 import audit.
 
-- [ ] Modularize `ui/main_window.py` (~4,050 lines) by responsibility — the
+- [ ] Modularize `ui/main_window.py` (~4,240 lines) by responsibility — the
   graphics view + annotation item and the SAM worker QObjects are already
   extracted (see Progress below), and the app dialogs now live in `ui/dialogs.py`;
   the remaining slice is the still-large `MainWindow` class. Mechanical moves
@@ -165,7 +159,7 @@ import audit.
   both are re-exported from `main_window`. **Progress 2026-06-17:** SAM setup,
   storage location, PHI review, export checklist, export, and export history
   dialogs moved to `ui/dialogs.py` and are re-exported from `main_window`.
-  Current line counts: `main_window.py` ~4,050, `dialogs.py` ~798, `canvas.py`
+  Current line counts: `main_window.py` ~4,240, `dialogs.py` ~799, `canvas.py`
   ~1,238, `sam_workers.py` ~146.
 - [x] Modularize `ui/editor_panels.py` (~2,960 lines) — it is also over the
   ~2,500-line `ui/` target. Extract `AudioPanel` (~970 lines, the largest

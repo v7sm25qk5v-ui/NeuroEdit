@@ -1379,3 +1379,58 @@ Prepared the next patch release for the identity refresh and playback fixes.
 - Version and release documentation advanced from `v0.5.3-alpha` to
   `v0.5.4-alpha`. Pushing the annotated tag triggers the existing GitHub Actions
   workflow to build and publish macOS and Windows installers.
+
+## 38. Bundled Space Grotesk wordmark font (2026-06-22)
+
+- Bundled Space Grotesk Medium/Bold static TTFs under `resources/fonts/` with
+  the upstream SIL Open Font License 1.1. The files come from the Space Grotesk
+  upstream repository.
+- `_load_wordmark_font_family()` registers the font data with
+  `QFontDatabase.addApplicationFontFromData()` before constructing the live
+  wordmark. No system font installation or missing-family alias lookup is
+  required; the active Qt font remains a failure-only fallback.
+- Added focused headless coverage proving the live wordmark resolves to the
+  bundled Space Grotesk family. The suite now has 135 tests.
+
+## 39. Optimization automation sweep (2026-06-23, docs-only)
+
+Scheduled daily-optimization run — incremental over `86aca4f..0050a42` (2 commits
+plus the uncommitted §38 font work): §35 invalid/no-media pending-seek recovery,
+§36 overlay-slide playback, §37 identity/icon refresh, §38 bundled Space Grotesk
+TTFs. No code changed; planning/memory markdown only.
+
+- **No new backlog findings.** The diff is correctness fixes already tracked
+  (§35 and §36 implement the two findings from the §34 sweep — both `[x]` in the
+  TODO Optimization Backlog) plus non-perf-critical identity UI (theme-matched
+  SVG marks rasterized at DPR; bundled wordmark font loaded once via
+  `QFontDatabase.addApplicationFontFromData`). The two real open items —
+  playback repaint throttling and multi-file Finder-drop batching — are untouched
+  by this diff and stay open.
+- **Reviewed for fresh targets and dismissed three:** the SVG re-render on theme
+  toggle / About open is marginal (rare, user-driven, not a paint path); §36 adds
+  no per-tick `_slide_at_time` cost (`active_slide`/`next_slide` computed once and
+  reused); §35's terminal-status handler covers the unloadable-clip case so a
+  separate `errorOccurred` slot would be redundant. Recorded all three in
+  `desktop/CLAUDE.md` so future runs don't re-flag them.
+- **Markdown consistency:** corrected the `main_window.py` line figure from
+  `~4,050` to **~4,240** (the §37/§38 code added ~190 lines) in `TODO.md` P4.5,
+  `NEXT_OPTIMIZATION_PLAN.md` §1 + Phase 6, and `desktop/CLAUDE.md`. Present-state
+  test-count references already read 135 everywhere.
+- **Memory:** advanced the `desktop/CLAUDE.md` "Last reviewed" marker to `0050a42`
+  (2026-06-23) and added an identity-assets architecture bullet.
+- Did **not** run the suite (docs-only; no `.py` files touched).
+
+## 40. Batched multi-file Finder drop (2026-06-23)
+
+- Added `_import_media_files()` as the shared import path. Media Explorer keeps
+  its existing single-file behavior by passing a one-item list.
+- `dropEvent()` now passes the full accepted path list into that helper. The
+  files retain their drop order, the last successful import becomes active, and
+  the gesture performs one preview load plus one dirty/history operation.
+- Synchronous `probe_video` calls remain serial and unchanged; moving probes off
+  the UI thread requires separate measurement and lifecycle design.
+- Added focused coverage for batch filtering, import order, active selection,
+  and the single preview/dirty calls. The suite now has 136 tests.
+- Remaining code-ready optimization target: measure and reduce redundant
+  annotation repaint work without gating the clock-driven playhead on decoded
+  frame changes.
