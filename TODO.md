@@ -67,6 +67,48 @@ by the optimization automation; they are not duplicated into P4.5.
   off the UI thread). Same cost path exists for Media Explorer double-click, but a
   drag makes the multi-file case the common one.
 
+## Dependency Security Audit (2026-06-23)
+
+_Automated dependency review of `desktop/pyproject.toml` (the only manifest;
+the root React/Vite prototype no longer ships a `package.json`). All specs are
+`>=` floors with no upper bounds and **no lockfile**, so a fresh
+`pip install -e .` resolves to the latest release — and every current latest is
+CVE-free. The risk below is that the floors are permissive enough to let an
+existing/cached environment satisfy them with a **known-vulnerable** version._
+
+**Action — raise minimum version floors so no vulnerable release can resolve.**
+Verify the SAM stack still imports (`python -m pytest tests/ -q`, 134 tests)
+after bumping, since torch/transformers/hf-hub jumps cross majors.
+
+- [ ] **`pillow>=10` → `pillow>=12.2.0` (HIGH — security).** Floor 10.0.0 carries
+  7 advisories: CVE-2023-50447 (arbitrary code via `ImageMath.eval`, fixed
+  10.2.0), CVE-2023-4863/5129 (libwebp heap overflow, 10.0.1),
+  CVE-2024-28219 (`_imagingcms` buffer overflow, 10.3.0), and CVE-2026-42308 /
+  CVE-2026-42310 (fixed 12.2.0). Latest 12.2.0 is clean.
+- [ ] **`torch>=2.7` → `torch>=2.12` (HIGH — security, `[sam]` extra).** Floor
+  2.7.0 carries ~13 advisories incl. CVE-2025-3730, CVE-2025-2953,
+  CVE-2025-55551/55552/55553/55554/55557/55558/55560, CVE-2025-2999/3000/3001
+  (DoS + deserialization issues; fixes land across 2.7.1→2.10.0). Latest
+  2.12.1 is clean. Note: torch is not installed in the active iCloud venv (SAM
+  no-ops), so exposure is conditional on `pip install -e ".[sam]"`.
+- [ ] **`pytest>=8.0` → `pytest>=9.0.3` (MODERATE — security, dev-only).**
+  CVE-2025-71176 affects <9.0.3; fixed 9.0.3. Latest 9.1.1 clean. Dev/test
+  dependency only — not shipped to users.
+
+**Non-security version drift (informational — fresh installs already get latest;
+bump floors opportunistically, watch the cross-major notes):**
+
+- `huggingface-hub>=0.30` → 1.20.1 — **major 0.x→1.x**, breaking API changes;
+  pin against the `transformers` SAM3 requirement before bumping.
+- `transformers>=5.6` → 5.12.1 (minor); `safetensors>=0.5` → 0.8.0;
+  `torchvision>=0.22` → 0.27.1 — keep lockstep with the chosen torch.
+- `numpy>=2.0` → 2.5.0 (minor); `opencv-python>=4.10` → 4.13.0.92 (minor);
+  `PySide6>=6.8` → 6.11.1 (minor); `imageio-ffmpeg>=0.5` → 0.6.0 (minor).
+- `ruff>=0.8` → 0.15.18; `pyinstaller>=6.11` → 6.21.0; `hatchling>=1.25` → 1.30.1.
+
+All listed latest versions report **clean** in the PyPI/OSV advisory feed as of
+2026-06-23.
+
 ## P0 — Unblock and ship the current alpha
 
 - [x] Fix the dev environment — Python 3.13 reinstalled 2026-06-10; venv
