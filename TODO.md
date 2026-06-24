@@ -61,6 +61,26 @@ by the optimization automation; they are not duplicated into P4.5.
   preview load and one dirty/history operation for the gesture. Synchronous
   video probing remains unchanged and is a separate measurement-first follow-up.
 
+### Dependency & security maintenance (audited 2026-06-24)
+
+All `pyproject.toml` deps use unpinned `>=` floors with no lockfile, so a fresh
+`pip install` already resolves to the latest patched releases. The torch
+(`>=2.7`) and transformers (`>=5.6`) floors already sit above their critical-CVE
+fixes, so no live exposure. One floor is too loose and should be raised:
+
+- [ ] **Raise the Pillow floor to `>=12.2.0` (security).** The current
+  `pillow>=10` floor (under `[sam]`) permits resolving to 10.x–12.1.0, which
+  carry CVE-2026-25990 (High, PSD out-of-bounds write; fixed 12.1.1),
+  CVE-2026-42308 (font integer overflow; fixed 12.2.0) and CVE-2026-40192
+  (FITS decompression-bomb DoS; fixed 12.2.0). Bumping the floor prevents a
+  cache or transitive constraint from pinning a known-vulnerable build. Latest
+  is 12.2.0. Low effort, no API break expected.
+- [ ] **(Maintenance, non-urgent) Bump pinned GitHub Actions majors.**
+  `actions/checkout@v4`→v7, `actions/setup-python@v5`→v6,
+  `actions/upload-artifact@v4`→v7, `actions/download-artifact@v4`→v8,
+  `softprops/action-gh-release@v2`→v3 in `.github/workflows/`. No known CVE;
+  routine supply-chain hygiene.
+
 ## P0 — Unblock and ship the current alpha
 
 - [x] Fix the dev environment — Python 3.13 reinstalled 2026-06-10; venv
