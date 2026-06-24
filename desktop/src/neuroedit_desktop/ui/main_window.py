@@ -2644,7 +2644,8 @@ class MainWindow(QMainWindow):
         self._mark_dirty()
 
     def _add_video_clip(self, video_path: Path):
-        duration, width, height = probe_video(video_path)
+        with diagnostics.timed("media_probe"):
+            duration, width, height = probe_video(video_path)
         if duration <= 0:
             duration = 5.0
             self.statusBar().showMessage(
@@ -2670,11 +2671,30 @@ class MainWindow(QMainWindow):
 
     def _import_media_files(self, paths: list[Path]) -> None:
         clip = None
+        video_count = sum(path.suffix.lower() in VIDEO_EXTENSIONS for path in paths)
+        progress = None
+        probed_videos = 0
+        if video_count > 1:
+            progress = QProgressDialog("Reading video metadata...", "", 0, video_count, self)
+            progress.setCancelButton(None)
+            progress.setMinimumDuration(0)
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setValue(0)
+            QApplication.processEvents()
         for media_path in paths:
             imported_clip = None
             suffix = media_path.suffix.lower()
             if suffix in VIDEO_EXTENSIONS:
+                if progress is not None:
+                    progress.setLabelText(
+                        f"Reading video metadata ({probed_videos + 1} of {video_count})..."
+                    )
+                    QApplication.processEvents()
                 imported_clip = self._add_video_clip(media_path)
+                probed_videos += 1
+                if progress is not None:
+                    progress.setValue(probed_videos)
+                    QApplication.processEvents()
             elif suffix in IMAGE_EXTENSIONS:
                 imported_clip = self._add_image_clip(media_path)
             else:
@@ -2683,6 +2703,8 @@ class MainWindow(QMainWindow):
                 )
             if imported_clip is not None:
                 clip = imported_clip
+        if progress is not None:
+            progress.close()
         if clip is None:
             return
         self.project.active_clip_id = clip.id

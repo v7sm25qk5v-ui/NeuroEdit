@@ -142,6 +142,52 @@ def test_multi_file_import_loads_preview_and_marks_dirty_once(window, tmp_path, 
     assert len(window._undo_stack) == history_before + 1
 
 
+def test_multi_video_import_reports_probe_progress(window, tmp_path, monkeypatch):
+    videos = [tmp_path / f"recording-{index}.mov" for index in range(3)]
+    progress_values: list[int] = []
+    progress_labels: list[str] = []
+
+    class _ProgressDialog:
+        def __init__(self, *_args: object) -> None:
+            pass
+
+        def setCancelButton(self, _button: object) -> None:
+            pass
+
+        def setMinimumDuration(self, _duration: int) -> None:
+            pass
+
+        def setWindowModality(self, _modality: object) -> None:
+            pass
+
+        def setValue(self, value: int) -> None:
+            progress_values.append(value)
+
+        def setLabelText(self, label: str) -> None:
+            progress_labels.append(label)
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(main_window_module, "QProgressDialog", _ProgressDialog)
+    monkeypatch.setattr(main_window_module.QApplication, "processEvents", lambda: None)
+    monkeypatch.setattr(
+        window,
+        "_add_video_clip",
+        lambda path: window.project.add_clip(path, duration=1.0, width=1920, height=1080),
+    )
+    monkeypatch.setattr(window, "_load_active_clip", lambda: None)
+
+    window._import_media_files(videos)
+
+    assert progress_values == [0, 1, 2, 3]
+    assert progress_labels == [
+        "Reading video metadata (1 of 3)...",
+        "Reading video metadata (2 of 3)...",
+        "Reading video metadata (3 of 3)...",
+    ]
+
+
 def test_appearance_action_persists_and_reapplies_theme(window, app):
     settings = QSettings("NeuroEdit", "Desktop")
 

@@ -60,6 +60,24 @@ by the optimization automation; they are not duplicated into P4.5.
   paths as one batch, selects the last successful import, then performs one
   preview load and one dirty/history operation for the gesture. Synchronous
   video probing remains unchanged and is a separate measurement-first follow-up.
+  **Verified 2026-06-24:** the batch helpers (`_add_video_clip`/`_add_image_clip`,
+  `ui/main_window.py:2646`/`:2656`) only mutate the model; the single trailing
+  `_mark_dirty()` (`:2690`) is the lone history/dirty op for the gesture. No
+  regression — the batching claim holds.
+- [x] **Batch media import lacked feedback while probing videos synchronously
+  (perf/UX).** `_import_media_files` (`ui/main_window.py:2671`) loops over
+  the dropped paths calling `_add_video_clip` (`:2646`), which runs
+  `probe_video` (`video_probe.py:6`) — a blocking `cv2.VideoCapture` open +
+  metadata read — inline on the main thread with no progress feedback. Dropping
+  many videos freezes the UI for the sum of all probe times. This is the
+  measurement-first follow-up flagged when §40 batched the history/preview ops.
+  **Mitigated 2026-06-24:** smoothness-fixture measurements were 3.3 ms median
+  for 1080p and 9.9 ms for 4K, with an 85.8 ms cold outlier, so worker-thread
+  lifecycle complexity was not justified. Multi-video imports now show
+  determinate per-video metadata progress and yield to Qt between probes, while
+  diagnostics records PHI-safe `media_probe` timings for real-world codecs and
+  storage. Clip order and the single-history-step semantics from §40 remain
+  covered by focused tests.
 
 ## P0 — Unblock and ship the current alpha
 
@@ -134,7 +152,7 @@ template); see Completed section.
 
 Highest-leverage engineering work while P0 release items stay owner/hardware
 blocked and P5 stays parked. All items are measurement-first and
-  behavior-preserving — the 136-test suite and `ruff` must stay green with no
+behavior-preserving — the 137-test suite and `ruff` must stay green with no
 user-visible change. Full rationale and acceptance criteria in
 [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md) Phase 6.
 

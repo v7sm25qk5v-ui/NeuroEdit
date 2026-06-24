@@ -92,7 +92,7 @@ python -c "import py_compile; py_compile.compile('src/neuroedit_desktop/<file>.p
 hf auth login
 ```
 
-The suite under `tests/` collects **136 tests** (`python -m pytest tests/ -q`).
+The suite under `tests/` collects **137 tests** (`python -m pytest tests/ -q`).
 Keep it and `ruff check src tests scripts` green before every release tag.
 
 ### venv-location note (current setup is intentional)
@@ -251,19 +251,24 @@ Other PHI safeguards:
 
 ## Optimization Automation Memory
 
-- **Last implementation:** 2026-06-23 — multi-file Finder drops now batch all
-  accepted imports before one preview load and one dirty/history operation
-  (§40). Synchronous video probing remains unchanged.
-- **Last reviewed:** `0050a42` (2026-06-23) — incremental run over
-  `86aca4f..HEAD` (2 commits + uncommitted §38 font work): §35 invalid/no-media
-  pending-seek recovery, §36 overlay-slide playback, §37 identity/icon refresh,
-  §38 bundled Space Grotesk TTFs. The two prior-run backlog findings (stuck
-  `_pending_seek_ms`; that was finding 1) are checked off. **No new findings** —
-  the diff is correctness fixes (already tracked) plus non-perf-critical identity
-  UI. Multi-file drop batching is now implemented in §40; playback repaint
-  throttling remains open.
+- **Last implementation:** 2026-06-24 — multi-video imports show determinate
+  metadata-probe progress and record PHI-safe `media_probe` timings. Fixture
+  probes measured 3.3 ms median at 1080p and 9.9 ms at 4K, with an 85.8 ms cold
+  outlier, so a worker-thread lifecycle was not added (§42).
+- **Last reviewed:** `188e3c2` (2026-06-24) — incremental run over
+  `0050a42..HEAD` (1 commit: §38 bundled fonts + §40 batch media drops, now
+  committed; the prior run had already analyzed this as uncommitted work). **One
+  new finding:** batch media import (`_import_media_files`, `ui/main_window.py:2671`)
+  probes every dropped video synchronously on the UI thread via
+  `probe_video` → `cv2.VideoCapture` (`video_probe.py:6`), with no progress
+  feedback — the measurement-first follow-up §40 foreshadowed, now recorded as
+  its own backlog item. Also verified §40's single-history-step claim: the batch
+  helpers only mutate the model and the lone trailing `_mark_dirty()` is the only
+  history/dirty op for the gesture. §38 font loading is a once-guarded
+  `addApplicationFontFromData` with app-font fallback — not a paint/playback path,
+  no new cost. The probe-feedback finding was resolved by the §42 implementation.
 - **Mode:** incremental. Next optimization review should deep-dive files changed
-  after `0050a42` plus one hop. (Full-sweep baseline was `22085f9`, 2026-06-17.)
+  after `188e3c2` plus one hop. (Full-sweep baseline was `22085f9`, 2026-06-17.)
 - **Out-of-scope paths:** root React/Vite prototype (legacy, superseded by
   `desktop/`); `desktop/dist/` and any build output; `node_modules/`; `*.lock`;
   `.venv/` (symlinked into iCloud, see venv note); vendored deps; iCloud
@@ -340,7 +345,7 @@ Other PHI safeguards:
     same `_import_media_files` helper as Media Explorer. A drop batches all paths
     into one preview load and one dirty/history operation; single-file Media
     Explorer imports use the same helper with a one-item list.
-  - Suite is **136 tests**; gate is `ruff check src tests scripts` +
+  - Suite is **137 tests**; gate is `ruff check src tests scripts` +
     `python -m pytest tests/ -q`, both green at this marker.
   - torch/SAM stack is lazy by design (venv has no torch → SAM no-ops);
     cold-start import audit (P4.5) is still unquantified.

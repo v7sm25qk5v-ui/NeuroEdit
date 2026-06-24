@@ -1434,3 +1434,44 @@ TTFs. No code changed; planning/memory markdown only.
 - Remaining code-ready optimization target: measure and reduce redundant
   annotation repaint work without gating the clock-driven playhead on decoded
   frame changes.
+
+## 41. Optimization automation run (2026-06-24, docs-only)
+
+Scheduled daily-optimization run — incremental over `0050a42..188e3c2` (1 commit:
+§38 bundled fonts + §40 batch media drops, now committed; the §39 run had already
+analyzed this content as uncommitted work). No code changed; markdown only.
+
+- **One new backlog finding:** batch media import (`_import_media_files`,
+  `ui/main_window.py:2671`) probes every dropped video synchronously on the UI
+  thread via `probe_video` → `cv2.VideoCapture` (`video_probe.py:6`) with no
+  progress feedback, so a large multi-file drop freezes the UI for the sum of all
+  probe times. This is the measurement-first follow-up §40 foreshadowed, now
+  recorded as its own unchecked item in the TODO Optimization Backlog.
+- **Verified §40's single-history claim:** `_add_video_clip`/`_add_image_clip`
+  only mutate the model; the lone trailing `_mark_dirty()` (`:2690`) is the only
+  history/dirty op for the gesture. Added a confirmation note under the checked-off
+  §40 backlog item.
+- **Memory:** advanced the `desktop/CLAUDE.md` "Last reviewed" marker to `188e3c2`
+  (2026-06-24); next deep-dive starts after `188e3c2` plus one hop.
+- Markdown language consistency: the two touched docs (`ASSET_CHECKLIST.md`,
+  `DESIGN_LANGUAGE.md`) describe the bundled-font change consistently — no fixes.
+- Did **not** run the suite (docs-only; no `.py` files touched).
+
+## 42. Multi-video import probe feedback (2026-06-24)
+
+- Measured `probe_video()` against the generated smoothness fixture: 1080p was
+  3.3 ms median and 4K was 9.9 ms median across five probes, with an 85.8 ms
+  cold outlier. Those bounded calls did not justify adding asynchronous worker
+  lifecycle and cancellation state.
+- Multi-video imports now show a window-modal, determinate metadata progress
+  dialog and process Qt events between probes. Single-video imports retain their
+  existing direct path. Probe duration is also recorded as the PHI-safe
+  `media_probe` diagnostics event without logging filenames or paths.
+- Preserved the §40 contract: import order, last successful active clip, one
+  preview load, and one dirty/history operation per batch.
+- Added focused progress coverage. Verification: `ruff check src tests scripts`,
+  21 headless main-window tests, `137 passed` for the full suite, and
+  `git diff --check`.
+- Next code-ready optimization target remains measurement-first annotation
+  repaint reduction; keep the monotonic playhead clock independent of decoded
+  frame events.

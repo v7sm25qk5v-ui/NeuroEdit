@@ -194,7 +194,7 @@ workflow refinements. The remaining roadmap work is owner/hardware-blocked
 (packaged-build smoke, signing, Stryker sample data), so the highest-leverage
 engineering work left is structural: keep the codebase cheap to change and
 cheap to run. Every item below is measurement-first and behavior-preserving —
-the 136-test suite and `ruff` must stay green with no user-visible change.
+the 137-test suite and `ruff` must stay green with no unintended user-visible change.
 
 1. **Modularize `ui/main_window.py` (currently ~4,240 lines, down from ~6,500).**
    - `main_window.py` holds `MainWindow` plus `VideoGraphicsView`,
@@ -277,7 +277,13 @@ the 136-test suite and `ruff` must stay green with no user-visible change.
    - Acceptance: measured cold-start to first window stays flat or improves; no
      feature regresses; torch remains lazy.
 
-4. **Housekeeping: drop the iCloud conflict copies. — ✅ DONE 2026-06-14.**
+4. **Bound batch media-probe feedback. — ✅ DONE 2026-06-24.**
+   - Multi-video metadata probing measured 3.3 ms median for 1080p and 9.9 ms
+     for 4K on the smoothness fixture, with an 85.8 ms cold outlier. Imports now
+     expose determinate per-video progress and log PHI-safe probe timings instead
+     of adding a worker lifecycle for these bounded calls.
+
+5. **Housekeeping: drop the iCloud conflict copies. — ✅ DONE 2026-06-14.**
    - `src/neuroedit_desktop/__init__ 2.py`, `__main__ 2.py`, `video_probe 2.py`,
      and `ui/__init__ 2.py` were iCloud sync artifacts (already `.gitignore`d but
      physically present) that confused tooling (`wc`, search) and contributors.
@@ -285,7 +291,7 @@ the 136-test suite and `ruff` must stay green with no user-visible change.
      module changed. Only the canonical `*.py` files remain under `src/`; tests
      and `ruff` stayed green.
 
-## Recommended immediate next sprint (updated 2026-06-23)
+## Recommended immediate next sprint (updated 2026-06-24)
 
 Phases 1–5 shipped (smoothness fixture + diagnostics, the Figma brand system and
 tokens, accessibility audit, smoothness caching, and the workflow refinements).
@@ -307,7 +313,7 @@ each is measurement-first and behavior-preserving:
    measure and reduce redundant annotation repaint work. Keep the playhead refresh
    clock-based: decoded-frame changes are sparse in variable-frame-rate screen
    recordings and cannot safely gate timeline repainting.
-5. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (136 tests)
+5. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (137 tests)
    green before every release tag; feed any new regressions back into the roadmap.
 
 This keeps the project on a safe optimization loop: measure first, keep the codebase
