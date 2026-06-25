@@ -337,3 +337,33 @@ command-line tools.
   8-color mask palette (no red) burned into the saved PNGs. 8 new tests in
   `tests/test_sam_workflow.py`. UX choices grounded in research on
   Premiere/Resolve/FCP/Roto Brush/3D Slicer conventions and complaints.
+
+## Dependency Security Audit
+_(2026-06-25 — automation-surfaced. Project pins minimum bounds (`>=`) with no
+lockfile, so a fresh install resolves to latest; the risk below is the floor
+permitting a known-vulnerable install.)_
+
+- [ ] **SECURITY (high): bump Pillow floor `>=10` → `>=12.2.0` in
+  `desktop/pyproject.toml` (`sam` extra).** The current `pillow>=10` constraint
+  permits resolving to versions with known CVEs, including a critical
+  arbitrary-code-execution flaw (CVE-2023-50447, `ImageMath.eval`, fixed 10.2.0)
+  and recent buffer-overflow / decompression-bomb DoS issues
+  (CVE-2026-25990 PSD, CVE-2026-42308 font integer overflow, CVE-2026-40192 FITS
+  decompression-bomb) all fixed in **12.2.0** (current latest). Pillow only
+  installs with the optional `sam`/AI extra, but any environment that pins an
+  older Pillow within the allowed range is exposed. Raise the floor and
+  re-resolve. No code changes expected (latest Pillow is API-compatible for our
+  basic Image I/O usage), but smoke-test the SAM mask save/load path after bump.
+
+  Other dependencies reviewed and found NOT to need immediate action:
+  - `transformers>=5.6` — floor is already above the 5.3.0 patch for the
+    critical config-injection RCE CVE-2026-4372 (affected 4.56.0–5.2.x). Safe.
+  - `torch>=2.7` — floor already above the 2.6.0 patch for the `torch.load`
+    RCE CVE-2025-32434 (affected ≤2.5.1). Safe.
+  - Remaining bumps are non-security version drift (newest as of 2026-06-25):
+    numpy 2.0→2.5.0, opencv-python 4.10→4.13, PySide6 6.8→6.11.1,
+    huggingface-hub 0.30→1.20.1 (MAJOR — review 1.x migration before bumping),
+    safetensors 0.5→0.8.0, torchvision 0.22→0.27.1, imageio-ffmpeg 0.5→0.6.0,
+    pytest 8.0→9.1.1 (MAJOR, dev), ruff 0.8→0.15.19 (dev),
+    pyinstaller 6.11→6.21.0 (packaging). None carry known advisories for our
+    pinned floors.
