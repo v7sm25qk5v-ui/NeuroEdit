@@ -2619,13 +2619,7 @@ class MainWindow(QMainWindow):
         )
         if not paths:
             return
-        clip = None
-        for path in paths:
-            clip = self._add_video_clip(Path(path))
-        if clip is not None:
-            self.project.active_clip_id = clip.id
-        self._load_active_clip()
-        self._mark_dirty()
+        self._import_media_files([Path(path) for path in paths])
 
     def _import_image(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(
@@ -2635,13 +2629,7 @@ class MainWindow(QMainWindow):
         )
         if not paths:
             return
-        clip = None
-        for path in paths:
-            clip = self._add_image_clip(Path(path))
-        if clip is not None:
-            self.project.active_clip_id = clip.id
-        self._load_active_clip()
-        self._mark_dirty()
+        self._import_media_files([Path(path) for path in paths])
 
     def _add_video_clip(self, video_path: Path):
         with diagnostics.timed("media_probe"):

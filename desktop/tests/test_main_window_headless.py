@@ -142,6 +142,36 @@ def test_multi_file_import_loads_preview_and_marks_dirty_once(window, tmp_path, 
     assert len(window._undo_stack) == history_before + 1
 
 
+def test_import_video_delegates_to_batch_import(window, tmp_path, monkeypatch):
+    paths = [tmp_path / "first.mov", tmp_path / "second.mp4"]
+    imported: list[list[Path]] = []
+    monkeypatch.setattr(
+        main_window_module.QFileDialog,
+        "getOpenFileNames",
+        lambda *_args, **_kwargs: ([str(path) for path in paths], ""),
+    )
+    monkeypatch.setattr(window, "_import_media_files", imported.append)
+
+    window._import_video()
+
+    assert imported == [paths]
+
+
+def test_import_image_delegates_to_batch_import(window, tmp_path, monkeypatch):
+    paths = [tmp_path / "first.png", tmp_path / "second.jpg"]
+    imported: list[list[Path]] = []
+    monkeypatch.setattr(
+        main_window_module.QFileDialog,
+        "getOpenFileNames",
+        lambda *_args, **_kwargs: ([str(path) for path in paths], ""),
+    )
+    monkeypatch.setattr(window, "_import_media_files", imported.append)
+
+    window._import_image()
+
+    assert imported == [paths]
+
+
 def test_multi_video_import_reports_probe_progress(window, tmp_path, monkeypatch):
     videos = [tmp_path / f"recording-{index}.mov" for index in range(3)]
     progress_values: list[int] = []

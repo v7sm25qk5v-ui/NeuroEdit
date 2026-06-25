@@ -194,7 +194,7 @@ workflow refinements. The remaining roadmap work is owner/hardware-blocked
 (packaged-build smoke, signing, Stryker sample data), so the highest-leverage
 engineering work left is structural: keep the codebase cheap to change and
 cheap to run. Every item below is measurement-first and behavior-preserving —
-the 137-test suite and `ruff` must stay green with no unintended user-visible change.
+the 139-test suite and `ruff` must stay green with no unintended user-visible change.
 
 1. **Modularize `ui/main_window.py` (currently ~4,240 lines, down from ~6,500).**
    - `main_window.py` holds `MainWindow` plus `VideoGraphicsView`,
@@ -313,7 +313,7 @@ each is measurement-first and behavior-preserving:
    measure and reduce redundant annotation repaint work. Keep the playhead refresh
    clock-based: decoded-frame changes are sparse in variable-frame-rate screen
    recordings and cannot safely gate timeline repainting.
-5. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (137 tests)
+5. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (139 tests)
    green before every release tag; feed any new regressions back into the roadmap.
 
 This keeps the project on a safe optimization loop: measure first, keep the codebase

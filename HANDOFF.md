@@ -1475,3 +1475,34 @@ analyzed this content as uncommitted work). No code changed; markdown only.
 - Next code-ready optimization target remains measurement-first annotation
   repaint reduction; keep the monotonic playhead clock independent of decoded
   frame events.
+
+## Automation: optimization scan (2026-06-25)
+
+- Daily optimization automation ran incrementally over `188e3c2..HEAD`
+  (1 commit: `491c910` §42 multi-video probe progress). No code modified —
+  markdown only.
+- **New backlog item** (TODO.md → Optimization Backlog): §42's probe
+  `QProgressDialog` only reaches drag-and-drop. One-hop caller tracing showed
+  `_import_video` (`ui/main_window.py:2614`) — wired to File → Import Video
+  (`:1405`) and the Media Explorer "Import Videos" button (`:1872`) — and
+  `_import_image` (`:2630`) still duplicate the `_import_media_files` loop inline,
+  so multi-video selection from the menu/button freezes the UI with no feedback.
+  Suggested fix: delegate both to `_import_media_files`.
+- Verified §42 itself is correct and matches its checked-off backlog entry.
+- CLAUDE.md "Last reviewed" advanced to `491c910` (2026-06-25); added the
+  import-path centralization-gap architecture note.
+
+## 43. Centralized menu/button media imports (2026-06-25)
+
+- `_import_video` and `_import_image` now delegate selected file-dialog paths to
+  `_import_media_files` instead of duplicating the add/load/dirty loop inline.
+  File -> Import Video and the Media Explorer multi-import buttons now share the
+  same multi-video metadata progress dialog, active-clip selection, preview load,
+  and single dirty/history operation that drag-and-drop already used.
+- Added focused headless regressions for both dialog entry points, alongside the
+  existing batch import and probe-progress coverage.
+- Verification: `ruff check src tests scripts`; `python -m pytest tests/ -q`
+  (139 passed); `git diff --check`.
+- Next code-ready optimization target remains measurement-first annotation
+  repaint reduction; keep the monotonic playhead clock independent of decoded
+  frame events.

@@ -78,6 +78,24 @@ by the optimization automation; they are not duplicated into P4.5.
   diagnostics records PHI-safe `media_probe` timings for real-world codecs and
   storage. Clip order and the single-history-step semantics from §40 remain
   covered by focused tests.
+- [x] **§42's probe-progress dialog only reached drag-and-drop; the two
+  explicit "Import Video" entry points still froze the UI (perf/UX +
+  redundancy).** `_import_video` (`ui/main_window.py:2614`) is wired to both
+  File → Import Video (`:1405`) and the Media Explorer "Import Videos" button
+  (`:1872`), and it duplicates the `_import_media_files` loop inline — looping
+  `_add_video_clip` → `probe_video` synchronously with no `QProgressDialog`.
+  Only the drop handler (`:2738`) and single-file import (`:2670`) route through
+  `_import_media_files` (`:2672`), so selecting many videos from the menu or the
+  Media Explorer button still blocks the main thread for the sum of all probe
+  times with zero feedback — the exact freeze §42 fixed for drops. `_import_image`
+  (`:2630`) duplicates the same loop. Fix: have `_import_video`/`_import_image`
+  delegate to `_import_media_files([Path(p) for p in paths])` after their
+  file-dialog selection, deleting the duplicated loop/active-clip/dirty tail.
+  **Fixed 2026-06-25:** `_import_video` and `_import_image` now delegate selected
+  paths to `_import_media_files`, so File → Import Video and the Media Explorer
+  multi-import buttons share the same progress dialog, active-clip selection,
+  preview load, and single dirty/history operation as drag-and-drop. Focused
+  regressions cover both dialog entry points.
 
 ## P0 — Unblock and ship the current alpha
 
@@ -152,7 +170,7 @@ template); see Completed section.
 
 Highest-leverage engineering work while P0 release items stay owner/hardware
 blocked and P5 stays parked. All items are measurement-first and
-behavior-preserving — the 137-test suite and `ruff` must stay green with no
+behavior-preserving — the 139-test suite and `ruff` must stay green with no
 user-visible change. Full rationale and acceptance criteria in
 [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md) Phase 6.
 
