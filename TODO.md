@@ -97,6 +97,44 @@ by the optimization automation; they are not duplicated into P4.5.
   preview load, and single dirty/history operation as drag-and-drop. Focused
   regressions cover both dialog entry points.
 
+## Dependency Security Updates (audit 2026-06-26)
+
+Source: `desktop/pyproject.toml` (only manifest in the repo). All constraints
+are `>=` floors with no lock file, so a fresh install resolves to the latest
+release — but the declared floors below still **permit installing known-
+vulnerable versions**, and NeuroEdit's attack surface is exactly untrusted
+media/model files (crafted JPEG/PSD, model checkpoints). Bump the floors.
+
+**P0 — security floors that allow known RCE / memory-corruption (fix now):**
+- [ ] **torch `>=2.7` → `>=2.10` (ideally `2.12`).** CVE-2026-24747: RCE in the
+  `weights_only` unpickler — a crafted `.pth` triggers memory corruption on
+  `torch.load(..., weights_only=True)`. Fixed in **2.10.0**; floor `2.7` allows
+  vulnerable 2.7–2.9. (`sam` extra.) Latest 2.12.1.
+- [ ] **pillow `>=10` → `>=12.2.0`.** Multiple 2026 CVEs, all fixed by 12.2.0:
+  CVE-2026-25990 (CVSS 8.9 out-of-bounds write loading crafted PSD),
+  CVE-2026-40192 (FITS decompression-bomb DoS), CVE-2026-42308 (font integer
+  overflow), CVE-2026-42309 (heap overflow in drawing APIs). Floor `10` allows
+  all vulnerable versions. (`sam` extra.) Latest 12.2.0.
+- [ ] **opencv-python `>=4.10` → `>=4.12` (ideally `4.13`).** 4.10.0/4.11.0 have
+  an uninitialized-stack-pointer → arbitrary heap buffer write when reading a
+  crafted JPEG; fixed in **4.12.0**. This is a core dependency and JPEG decode
+  is a primary code path. Latest 4.13.0.92.
+
+**Already safe (floor is at/above the fix — no action needed, noted for record):**
+- transformers `>=5.6`: CVE-2026-4372 (config-injection RCE) fixed in 5.3.0 — floor clears it. Latest 5.12.1.
+- pyinstaller `>=6.11`: CVE-2025-59042 (local priv-esc) fixed in 6.0.0/6.10.0 — floor clears it. Latest 6.21.0.
+
+**Non-security version drift (optional housekeeping, no advisories found):**
+- huggingface-hub `>=0.30` → 1.21.0 (**major**, 0.x→1.x — review breaking API
+  changes in the v1 release notes before bumping).
+- pytest `>=8.0` → 9.1.1 (**major**; dev only).
+- numpy `>=2.0` → 2.5.0 (minor) · PySide6 `>=6.8` → 6.11.1 (minor) ·
+  safetensors `>=0.5` → 0.8.0 (minor) · torchvision `>=0.22` → 0.27.1 (minor) ·
+  imageio-ffmpeg `>=0.5` → 0.6.0 (minor) · ruff `>=0.8` → 0.15.20 ·
+  hatchling `>=1.25` → 1.30.1 (minor).
+- GitHub Actions pins (`build.yml`/`quality.yml`) are current: checkout@v4,
+  setup-python@v5, upload/download-artifact@v4, action-gh-release@v2.
+
 ## P0 — Unblock and ship the current alpha
 
 - [x] Fix the dev environment — Python 3.13 reinstalled 2026-06-10; venv
