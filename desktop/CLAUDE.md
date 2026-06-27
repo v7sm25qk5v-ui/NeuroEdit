@@ -92,7 +92,7 @@ python -c "import py_compile; py_compile.compile('src/neuroedit_desktop/<file>.p
 hf auth login
 ```
 
-The suite under `tests/` collects **139 tests** (`python -m pytest tests/ -q`).
+The suite under `tests/` collects **141 tests** (`python -m pytest tests/ -q`).
 Keep it and `ruff check src tests scripts` green before every release tag.
 
 ### venv-location note (current setup is intentional)
@@ -251,20 +251,16 @@ Other PHI safeguards:
 
 ## Optimization Automation Memory
 
-- **Last implementation:** 2026-06-25 — `_import_video` and `_import_image` now
-  delegate selected file-dialog paths to `_import_media_files`, so File -> Import
-  Video and the Media Explorer multi-import buttons share the same multi-video
-  metadata progress dialog, active-clip selection, preview load, and single
-  dirty/history operation as drag-and-drop (§43). The prior §42 progress work
-  still records PHI-safe `media_probe` timings; smoothness-fixture probes measured
-  3.3 ms median at 1080p and 9.9 ms at 4K, with an 85.8 ms cold outlier, so a
-  worker-thread lifecycle was not added.
-- **Last reviewed:** current automation pass (2026-06-25) implemented the
-  `491c910` follow-up finding instead of adding a new scan finding. §42's
-  `QProgressDialog` now reaches drag-and-drop, File -> Import Video, and Media
-  Explorer multi-video imports through the shared `_import_media_files` helper.
+- **Last implementation:** 2026-06-27 — timeline playback keeps its 30 Hz
+  monotonic playhead refresh, but the canvas compares time-dependent overlay
+  state before requesting a repaint. Annotation/tracked-mask boundaries, slides,
+  caption cues, and fades still repaint; static intervals do not (§44). A
+  deterministic 10 s synthetic sample dropped from 300 canvas repaint requests
+  to 1.
+- **Last reviewed:** current automation pass (2026-06-27) completed the open
+  playback-loop repaint slice with focused boundary/fade coverage.
 - **Mode:** incremental. Next optimization review should deep-dive files changed
-  after the §43 commit plus one hop. (Full-sweep baseline was `22085f9`,
+  after the §44 commit plus one hop. (Full-sweep baseline was `22085f9`,
   2026-06-17.)
 - **Out-of-scope paths:** root React/Vite prototype (legacy, superseded by
   `desktop/`); `desktop/dist/` and any build output; `node_modules/`; `*.lock`;
@@ -344,7 +340,7 @@ Other PHI safeguards:
     Image, and single-file Media Explorer imports. A batch import loads one
     preview, selects the last successful clip, and creates one dirty/history
     operation; multi-video batches also share the §42 metadata progress dialog.
-  - Suite is **139 tests**; gate is `ruff check src tests scripts` +
+  - Suite is **141 tests**; gate is `ruff check src tests scripts` +
     `python -m pytest tests/ -q`, both green at this marker.
   - torch/SAM stack is lazy by design (venv has no torch → SAM no-ops);
     cold-start import audit (P4.5) is still unquantified.

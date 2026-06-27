@@ -30,7 +30,7 @@ by the optimization automation; they are not duplicated into P4.5.
   cached duration immediately after `ProjectStore.open()` swaps the project,
   matching the dialog-open and new-project paths. A focused ordering regression
   test proves invalidation happens before loaded-project validation.
-- [ ] **Playback loop still does two repaints per 33 ms tick.**
+- [x] **Playback loop still does two repaints per 33 ms tick.**
   `_tick_timeline_playback` (`ui/main_window.py:3241`) used to recompute
   `project_end_time()` — four full list comprehensions over
   clips+audio+slides+markers (`ui/timeline_utils.py:13`) — and unconditionally
@@ -44,6 +44,12 @@ by the optimization automation; they are not duplicated into P4.5.
   timeline. Remaining low-priority mitigation: reduce annotation repaint work
   when its visible state has not changed. Do not throttle playhead refreshes by
   decoded-frame changes; static VFR sections still need smooth playhead motion.
+  **Fixed 2026-06-27:** the timeline/playhead still refreshes on every monotonic
+  clock tick, but the canvas now requests a repaint only when its time-dependent
+  state changes (annotation visibility/tracked-mask frame, slide, caption cue,
+  or fade opacity). A deterministic 10 s synthetic sample required 1 canvas
+  repaint request across 300 ticks instead of 300; focused tests cover static overlay
+  intervals, visibility boundaries, and continuous fades.
 - [x] **A clip that never reaches `LoadedMedia` left `_pending_seek_ms` stuck
   (correctness/robustness).** Fixed 2026-06-22: `_media_status_changed()` now
   clears `_pending_seek_ms` and `_pending_play` on terminal `NoMedia` or
@@ -170,7 +176,7 @@ template); see Completed section.
 
 Highest-leverage engineering work while P0 release items stay owner/hardware
 blocked and P5 stays parked. All items are measurement-first and
-behavior-preserving — the 139-test suite and `ruff` must stay green with no
+behavior-preserving — the 141-test suite and `ruff` must stay green with no
 user-visible change. Full rationale and acceptance criteria in
 [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md) Phase 6.
 

@@ -3409,8 +3409,9 @@ class MainWindow(QMainWindow):
         if self._pending_seek_ms is not None:
             return
 
-        active = self._clip_at_time(self.project.current_time)
-        active_slide = self._slide_at_time(self.project.current_time)
+        previous_time = self.project.current_time
+        active = self._clip_at_time(previous_time)
+        active_slide = self._slide_at_time(previous_time)
         on_image = active is not None and active.media_type == "image"
 
         player_was_playing_video = (
@@ -3440,7 +3441,7 @@ class MainWindow(QMainWindow):
             ):
                 self._sync_player_to_timeline(play=True)
         self.timeline.refresh()
-        self.video_view.update_annotations()
+        self.video_view.update_annotations_for_time(previous_time, self.project.current_time)
         self.time_label.setText(format_time(self.project.current_time))
 
     def _sync_player_to_timeline(self, *, play: bool) -> None:

@@ -504,6 +504,47 @@ class AnnotationGraphicsItem(QGraphicsObject):
                 return slide
         return None
 
+    def time_state(self, time_s: float) -> tuple:
+        """Return the overlay state that can change as the playhead advances."""
+        slide = next(
+            (
+                item
+                for item in reversed(self.project.slides)
+                if item.start_time <= time_s < item.start_time + item.duration
+            ),
+            None,
+        )
+        annotations = tuple(
+            (ann.id, ann.mask_path_at(time_s))
+            for ann in self.project.annotations
+            if ann.is_visible_at(time_s)
+        )
+
+        caption = None
+        if self.project.captions_enabled and self.project.transcript_segments:
+            fingerprint = tuple(
+                (s.id, s.start_time, s.end_time, s.speaker, s.text)
+                for s in self.project.transcript_segments
+            )
+            if fingerprint != self._caption_fingerprint:
+                self._caption_cues = build_caption_cues(self.project.transcript_segments)
+                self._caption_fingerprint = fingerprint
+            caption = cue_at_time(self._caption_cues, time_s)
+
+        fade = 0.0
+        for clip in self.project.clips:
+            start = clip.start_time
+            end = clip.start_time + clip.display_duration
+            if not (start <= time_s <= end):
+                continue
+            if clip.fade_in > 0 and time_s < start + clip.fade_in:
+                fade = max(fade, 1.0 - (time_s - start) / clip.fade_in)
+            if clip.fade_out > 0 and time_s > end - clip.fade_out:
+                fade = max(fade, 1.0 - (end - time_s) / clip.fade_out)
+            break
+
+        return slide.id if slide else None, annotations, caption, fade
+
     def _paint_slide(self, painter: QPainter, slide, w: float, h: float) -> None:
         rect = QRectF(0, 0, w, h)
         if not getattr(slide, "overlay", False):
@@ -792,6 +833,12 @@ class VideoGraphicsView(QGraphicsView):
 
     def update_annotations(self) -> None:
         self.annotation_item.update()
+
+    def update_annotations_for_time(self, previous_time: float, current_time: float) -> None:
+        if self.annotation_item.time_state(previous_time) != self.annotation_item.time_state(
+            current_time
+        ):
+            self.annotation_item.update()
 
     def _scene_to_norm(self, event_pos) -> tuple[float, float] | None:
         scene_pos = self.mapToScene(event_pos)

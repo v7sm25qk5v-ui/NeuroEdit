@@ -14,6 +14,7 @@ from PySide6.QtMultimedia import QMediaPlayer  # noqa: E402
 
 from neuroedit_desktop.models import Annotation, ProjectState, Slide, VideoClip  # noqa: E402
 from neuroedit_desktop.ui import main_window as main_window_module  # noqa: E402
+from neuroedit_desktop.ui.canvas import AnnotationGraphicsItem  # noqa: E402
 from neuroedit_desktop.ui.main_window import MainWindow  # noqa: E402
 
 
@@ -32,8 +33,14 @@ class _StubView:
 
     video_item = _VisibleItem()
 
+    def __init__(self) -> None:
+        self.annotation_updates: list[tuple[float, float] | None] = []
+
     def update_annotations(self) -> None:
-        pass
+        self.annotation_updates.append(None)
+
+    def update_annotations_for_time(self, previous_time: float, current_time: float) -> None:
+        self.annotation_updates.append((previous_time, current_time))
 
 
 class _StubTimeline:
@@ -147,6 +154,40 @@ def _window(project: ProjectState | None = None) -> MainWindow:
     window._update_title = lambda: None
     window._update_history_actions = lambda: None
     return window
+
+
+def _annotation_item(project: ProjectState) -> AnnotationGraphicsItem:
+    item = AnnotationGraphicsItem.__new__(AnnotationGraphicsItem)
+    item.project = project
+    item._caption_cues = []
+    item._caption_fingerprint = None
+    return item
+
+
+def test_canvas_time_state_is_stable_between_overlay_boundaries() -> None:
+    project = ProjectState()
+    project.annotations.append(_annotation())
+    item = _annotation_item(project)
+
+    assert item.time_state(0.25) == item.time_state(0.5)
+    assert item.time_state(0.5) != item.time_state(1.1)
+
+
+def test_canvas_time_state_changes_during_clip_fade() -> None:
+    project = ProjectState()
+    project.clips.append(
+        VideoClip(
+            id="clip-1",
+            path="clip.mp4",
+            name="Clip",
+            duration=10.0,
+            trim_end=10.0,
+            fade_in=1.0,
+        )
+    )
+    item = _annotation_item(project)
+
+    assert item.time_state(0.25) != item.time_state(0.5)
 
 
 def test_tool_panel_and_selection_changes_do_not_create_undo_entries() -> None:

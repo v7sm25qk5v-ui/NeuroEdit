@@ -1506,3 +1506,21 @@ analyzed this content as uncommitted work). No code changed; markdown only.
 - Next code-ready optimization target remains measurement-first annotation
   repaint reduction; keep the monotonic playhead clock independent of decoded
   frame events.
+
+## 44. Playback canvas repaint reduction (2026-06-27)
+
+- `_tick_timeline_playback()` continues refreshing the timeline/playhead on
+  every monotonic 33 ms tick; decoded video-frame events do not gate it.
+- `VideoGraphicsView` now requests an annotation-layer repaint only when the
+  rendered time state changes: annotation visibility or tracked-mask frame,
+  active slide, caption cue, or fade opacity. Static overlay intervals no
+  longer repaint at 30 Hz.
+- Deterministic measurement over a 10 s synthetic clip with one static
+  annotation: 1 canvas repaint request across 300 ticks, avoiding 299 redundant
+  requests.
+- Focused tests cover stable annotation intervals, annotation boundaries, and
+  continuously changing fades. Verification: `ruff check src tests scripts`;
+  `python -m pytest tests/test_undo_history.py -q` (15 passed);
+  `python -m pytest tests/ -q` (141 passed); `git diff --check`.
+- Next code-ready Phase 6 options are the documented `MainWindow` mechanical
+  split, undo snapshot measurement/reduction, or cold-start import audit.

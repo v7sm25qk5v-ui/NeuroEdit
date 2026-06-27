@@ -194,7 +194,7 @@ workflow refinements. The remaining roadmap work is owner/hardware-blocked
 (packaged-build smoke, signing, Stryker sample data), so the highest-leverage
 engineering work left is structural: keep the codebase cheap to change and
 cheap to run. Every item below is measurement-first and behavior-preserving —
-the 139-test suite and `ruff` must stay green with no unintended user-visible change.
+the 141-test suite and `ruff` must stay green with no unintended user-visible change.
 
 1. **Modularize `ui/main_window.py` (currently ~4,240 lines, down from ~6,500).**
    - `main_window.py` holds `MainWindow` plus `VideoGraphicsView`,
@@ -241,6 +241,11 @@ the 139-test suite and `ruff` must stay green with no unintended user-visible ch
    - Correctness fix 2026-06-22: overlay slides no longer pause or repeatedly
      resync the underlying video player. Full-frame slides retain their existing
      blocking behavior.
+   - Completed 2026-06-27: the monotonic clock still refreshes the playhead each
+     tick, while canvas repaint requests are limited to changes in annotation or
+     tracked-mask visibility, slides, caption cues, and fade opacity. A
+     deterministic 10 s synthetic sample dropped from 300 canvas repaint
+     requests to 1.
 
 2. **Reduce undo/redo snapshot cost.**
    - Undo/redo stores full `ProjectState.to_dict()` copies (cap 50) and can hold
@@ -291,7 +296,7 @@ the 139-test suite and `ruff` must stay green with no unintended user-visible ch
      module changed. Only the canonical `*.py` files remain under `src/`; tests
      and `ruff` stayed green.
 
-## Recommended immediate next sprint (updated 2026-06-24)
+## Recommended immediate next sprint (updated 2026-06-27)
 
 Phases 1–5 shipped (smoothness fixture + diagnostics, the Figma brand system and
 tokens, accessibility audit, smoothness caching, and the workflow refinements).
@@ -309,11 +314,7 @@ each is measurement-first and behavior-preserving:
    2026-06-18. Measure on the smoothness fixture with the diagnostics log.
 3. **Audit cold-start import cost** — confirm subprocess/ffmpeg, captions, and export
    imports are deferred and torch stays lazy; quantify with the startup timing.
-4. **Finish the playback-loop repaint slice** — now that project end time is cached,
-   measure and reduce redundant annotation repaint work. Keep the playhead refresh
-   clock-based: decoded-frame changes are sparse in variable-frame-rate screen
-   recordings and cannot safely gate timeline repainting.
-5. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (139 tests)
+4. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (141 tests)
    green before every release tag; feed any new regressions back into the roadmap.
 
 This keeps the project on a safe optimization loop: measure first, keep the codebase
