@@ -1524,3 +1524,14 @@ analyzed this content as uncommitted work). No code changed; markdown only.
   `python -m pytest tests/ -q` (141 passed); `git diff --check`.
 - Next code-ready Phase 6 options are the documented `MainWindow` mechanical
   split, undo snapshot measurement/reduction, or cold-start import audit.
+
+## 45. Playback repaint change published (2026-06-28)
+
+- Re-ran the documented gate against `9033fb3`: `ruff check src tests scripts`,
+  15 focused undo/playback tests, the full 141-test suite, and
+  `git diff --check` all passed.
+- Pushed `9033fb3` to `origin/main`. No release tag was created because this is
+  an internal behavior-preserving optimization with no version or release
+  instruction.
+- The next code-ready Phase 6 choices remain the `MainWindow` mechanical split,
+  measurement-led undo snapshot work, or the cold-start import audit.
