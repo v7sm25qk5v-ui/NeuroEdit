@@ -4,6 +4,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QSettings, Qt, Signal
 from PySide6.QtGui import QColor
@@ -26,11 +27,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from neuroedit_desktop.exporter import ExportSettings
 from neuroedit_desktop.models import ProjectState
 from neuroedit_desktop.ui.project_library import relative_time
 from neuroedit_desktop.ui.styles import TEXT_MUTED
 from neuroedit_desktop.ui.timeline_utils import fmt_time as format_time
+
+if TYPE_CHECKING:
+    from neuroedit_desktop.exporter import ExportSettings
 
 
 def legacy_project_root() -> Path:
@@ -694,6 +697,8 @@ class ExportDialog(QDialog):
         self._preset_changed()
 
     def export_settings(self, output_path: Path) -> ExportSettings:
+        from neuroedit_desktop.exporter import ExportSettings
+
         return ExportSettings(
             output_path=output_path,
             width=int(self.width_spin.value()),

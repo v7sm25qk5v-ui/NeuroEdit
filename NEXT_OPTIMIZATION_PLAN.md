@@ -273,14 +273,18 @@ the 141-test suite and `ruff` must stay green with no unintended user-visible ch
      storage, cumulative-size cap, and smoothness-fixture timing/memory
      measurement.
 
-3. **Audit cold-start import cost.**
+3. **Audit cold-start import cost. — ✅ DONE 2026-06-29.**
    - `__main__.py` → `MainWindow` pulls in the full module graph eagerly. Confirm
      heavy or rarely-needed imports (subprocess/ffmpeg helpers, captions, export)
      are deferred where they are only used on demand, keeping the `[sam]`/torch
      stack optional as documented in `CLAUDE.md`.
    - Use the diagnostics project-load/startup timing to quantify any change.
-   - Acceptance: measured cold-start to first window stays flat or improves; no
-     feature regresses; torch remains lazy.
+   - Result: the export pipeline is now loaded only for export, still capture,
+     or export-settings creation. `torch` remains lazy; live-caption helpers
+     remain eager because the normal canvas preview uses them. Five-process
+     warm import measurements held a 0.17 s median before and after, while the
+     exporter (about 45 ms cumulative in the import trace) left the startup
+     module graph. Focused export/caption coverage and the full suite stayed green.
 
 4. **Bound batch media-probe feedback. — ✅ DONE 2026-06-24.**
    - Multi-video metadata probing measured 3.3 ms median for 1080p and 9.9 ms
@@ -312,9 +316,7 @@ each is measurement-first and behavior-preserving:
    add the pre-serialize change-check, compact history storage, and a cumulative-size
    cap. The common push-then-autosave path already shares one serialization as of
    2026-06-18. Measure on the smoothness fixture with the diagnostics log.
-3. **Audit cold-start import cost** — confirm subprocess/ffmpeg, captions, and export
-   imports are deferred and torch stays lazy; quantify with the startup timing.
-4. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (141 tests)
+3. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (141 tests)
    green before every release tag; feed any new regressions back into the roadmap.
 
 This keeps the project on a safe optimization loop: measure first, keep the codebase

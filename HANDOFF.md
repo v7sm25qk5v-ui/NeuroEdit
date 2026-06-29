@@ -1535,3 +1535,20 @@ analyzed this content as uncommitted work). No code changed; markdown only.
   instruction.
 - The next code-ready Phase 6 choices remain the `MainWindow` mechanical split,
   measurement-led undo snapshot work, or the cold-start import audit.
+
+## 46. Cold-start import audit completed (2026-06-29)
+
+- Audited the `main_window` startup graph. `torch` was already lazy; the export
+  pipeline was pulled in eagerly by export settings even though export and still
+  capture are user-triggered paths.
+- Deferred exporter imports to export, still capture, worker execution, and
+  export-settings creation. Live-caption helpers remain eager because the canvas
+  uses them during normal preview.
+- Five-process warm import measurements held a 0.17 s median before and after,
+  while the exporter (about 45 ms cumulative in the import trace) is no longer in
+  the startup module graph.
+- Verification: `ruff check src tests scripts`; 42 focused caption/export/window
+  tests; full 141-test suite; `git diff --check`.
+- Next code-ready Phase 6 options are the `MainWindow` mechanical split or
+  measurement-led undo snapshot reduction. No release is indicated for this
+  internal behavior-preserving optimization.

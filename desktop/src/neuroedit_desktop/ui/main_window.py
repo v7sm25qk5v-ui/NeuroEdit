@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QByteArray, QMimeData, QObject, Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import (
@@ -64,12 +65,6 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QSettings
 
 from neuroedit_desktop import __version__, diagnostics
-from neuroedit_desktop.captions import (
-    build_caption_cues,
-    cues_to_srt,
-    cues_to_vtt,
-)
-from neuroedit_desktop.exporter import ExportCancelled, ExportSettings, ProjectExporter
 from neuroedit_desktop.models import Annotation, PanelType, ProjectState, SamPoint, Slide, VideoClip, new_id
 from neuroedit_desktop.project_store import ProjectStore
 from neuroedit_desktop.sam_backend import SamBackend
@@ -113,6 +108,9 @@ from neuroedit_desktop.ui.styles import (
 )
 from neuroedit_desktop.ui.tutorial import TutorialOverlay, build_default_steps
 from neuroedit_desktop.video_probe import probe_video
+
+if TYPE_CHECKING:
+    from neuroedit_desktop.exporter import ExportSettings
 
 __all__ = [
     "AnnotationGraphicsItem",
@@ -1222,6 +1220,8 @@ class ExportWorker(QObject):
         self._cancelled = True
 
     def run(self) -> None:
+        from neuroedit_desktop.exporter import ExportCancelled, ProjectExporter
+
         try:
             exporter = ProjectExporter(
                 self.project,
@@ -2785,6 +2785,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Inserted still slide at {format_time(time_s)}", 3000)
 
     def _render_current_still(self, time_s: float) -> Path | None:
+        from neuroedit_desktop.exporter import ExportSettings, ProjectExporter
+
         width, height = self._current_frame_size()
         still_dir = self.store.project_path.parent / "stills"
         still_dir.mkdir(parents=True, exist_ok=True)
@@ -2946,6 +2948,8 @@ class MainWindow(QMainWindow):
         ExportHistoryDialog(self._reveal_path, self).exec()
 
     def _export_captions(self) -> None:
+        from neuroedit_desktop.captions import build_caption_cues, cues_to_srt, cues_to_vtt
+
         if not self.project.transcript_segments:
             QMessageBox.information(
                 self,

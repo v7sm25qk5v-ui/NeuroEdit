@@ -228,9 +228,11 @@ import audit.
   it; focused tests cover reuse and invalidation. Pre-serialize short-circuit,
   compact storage, cumulative-size cap, and smoothness-fixture memory measurement
   remain open.
-- [ ] Audit cold-start import cost — confirm heavy/on-demand imports
-  (subprocess/ffmpeg, captions, export) are deferred where possible and torch
-  stays lazy; quantify with the diagnostics startup timing.
+- [x] Audit cold-start import cost — completed 2026-06-29. The export pipeline
+  is now imported only when export, still capture, or export-settings creation
+  is requested; `torch` remains lazy. Live-caption helpers remain eager because
+  the normal canvas preview uses them. Warm `main_window` import stayed flat at
+  a 0.17 s median while removing the exporter from the startup module graph.
 - [x] Housekeeping: remove the iCloud conflict copies under `src/`
   (`__init__ 2.py`, `__main__ 2.py`, `video_probe 2.py`, `ui/__init__ 2.py`) —
   already `.gitignore`d but physically present and confusing to tooling.

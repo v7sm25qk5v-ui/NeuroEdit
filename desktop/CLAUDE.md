@@ -177,6 +177,9 @@ layer paints the slide above it.
   kwargs for cross-version model compatibility.
 - `video_probe.py` — fast `probe_video(path) → (duration, w, h)` via ffmpeg.
 - `exporter.py` — timeline → ffmpeg composition (export pipeline).
+- Exporter loading is deferred until export, still capture, or export-settings
+  creation; keep that on-demand boundary intact. Live captions stay eager because
+  `ui/canvas.py` uses them during normal preview, and torch remains lazy.
 - `ui/main_window.py` — `MainWindow` plus `LabelsPanel`, `SamPanel`, and
   `TimelineWidget`. Still the biggest file; high-level app wiring lives here.
 - `ui/canvas.py` — `VideoGraphicsView` and `AnnotationGraphicsItem`.
