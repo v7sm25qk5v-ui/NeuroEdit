@@ -1568,3 +1568,14 @@ analyzed this content as uncommitted work). No code changed; markdown only.
 - Next code-ready Phase 6 choices are the mechanical `MainWindow` split or the
   remaining measured undo serialization/storage work. No release is indicated
   for this internal behavior-preserving optimization.
+
+## 48. Publication blocked by GitHub authentication (2026-07-01)
+
+- Committed the undo-history cap as `13e3411` (`perf: bound undo history memory`).
+- Local `main` is two commits ahead of `origin/main`, including the previously
+  completed `94181d6` cold-start import optimization.
+- `git push origin main` could not authenticate to the HTTPS remote; `gh` is not
+  installed and the existing SSH identity is also unauthorized. Re-authenticate
+  GitHub in this environment, then run `git push origin main`.
+- No release tag was created because neither behavior-preserving optimization
+  changes release state or carries a release instruction.
