@@ -139,8 +139,11 @@ def _window(project: ProjectState | None = None) -> MainWindow:
     window._redo_stack = []
     window._undo_hashes = [window._snapshot_hash(snapshot)]
     window._redo_hashes = []
+    window._undo_sizes = [len(window._snapshot_payload(snapshot))]
+    window._redo_sizes = []
     window._autosave_snapshot = None
     window._history_limit = 50
+    window._history_bytes_limit = 64 * 1024 * 1024
     window._restoring = False
     window._project_end_time_cache = None
     window._pending_seek_ms = None
@@ -222,12 +225,14 @@ def test_net_zero_document_mutation_clears_redo_stack() -> None:
     window = _window(project)
     window._redo_stack = [{"annotations": [{"label": "future"}]}]
     window._redo_hashes = ["future"]
+    window._redo_sizes = [100]
 
     window._push_history()
 
     assert len(window._undo_stack) == 1
     assert window._redo_stack == []
     assert window._redo_hashes == []
+    assert window._redo_sizes == []
 
 
 def test_history_dedup_uses_snapshot_hash() -> None:
@@ -239,6 +244,39 @@ def test_history_dedup_uses_snapshot_hash() -> None:
 
     assert len(window._undo_stack) == 1
     assert len(window._undo_hashes) == 1
+
+
+def test_history_evicts_oldest_snapshots_over_byte_limit() -> None:
+    project = ProjectState()
+    project.annotations.append(_annotation(label="Initial"))
+    window = _window(project)
+    window._history_bytes_limit = window._undo_sizes[0] * 2 + 50
+
+    window._update_annotation_label("ann-1", "A" * 100)
+    window._update_annotation_label("ann-1", "B" * 100)
+
+    assert len(window._undo_stack) == 1
+    assert window._undo_stack[-1]["annotations"][0]["label"] == "B" * 100
+    assert len(window._undo_hashes) == len(window._undo_stack)
+    assert len(window._undo_sizes) == len(window._undo_stack)
+
+
+def test_undo_redo_moves_snapshot_size_bookkeeping() -> None:
+    project = ProjectState()
+    project.annotations.append(_annotation(label="Initial"))
+    window = _window(project)
+    window._update_annotation_label("ann-1", "Updated")
+    updated_size = window._undo_sizes[-1]
+
+    window.undo()
+
+    assert window._redo_sizes == [updated_size]
+    assert len(window._undo_sizes) == len(window._undo_stack)
+
+    window.redo()
+
+    assert window._redo_sizes == []
+    assert window._undo_sizes[-1] == updated_size
 
 
 def test_autosave_reuses_snapshot_from_history_push() -> None:

@@ -1251,8 +1251,11 @@ class MainWindow(QMainWindow):
         self._redo_stack: list[dict] = []
         self._undo_hashes: list[str] = []
         self._redo_hashes: list[str] = []
+        self._undo_sizes: list[int] = []
+        self._redo_sizes: list[int] = []
         self._autosave_snapshot: dict | None = None
         self._history_limit = 50
+        self._history_bytes_limit = 64 * 1024 * 1024
         self._restoring = False  # True while applying a history snapshot
         self._media_warnings_shown: set[str] = set()
         self._media_problem_cache: dict[tuple[str, str, int, int], str | None] = {}
@@ -1281,8 +1284,10 @@ class MainWindow(QMainWindow):
         self.refresh()
         # Seed history with initial project state.
         initial_snapshot = self._snapshot()
+        initial_payload = self._snapshot_payload(initial_snapshot)
         self._undo_stack.append(initial_snapshot)
-        self._undo_hashes.append(self._snapshot_hash(initial_snapshot))
+        self._undo_hashes.append(self._payload_hash(initial_payload))
+        self._undo_sizes.append(len(initial_payload))
         self._update_history_actions()
         QTimer.singleShot(0, self._load_sam_backend)
         # Defer the first-run prompt until the window has actually painted.
@@ -2138,25 +2143,37 @@ class MainWindow(QMainWindow):
             snapshot.pop(key, None)
         return snapshot
 
-    def _snapshot_hash(self, snapshot: dict) -> str:
-        payload = json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    def _snapshot_payload(self, snapshot: dict) -> bytes:
+        return json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+    def _payload_hash(self, payload: bytes) -> str:
         return hashlib.blake2b(payload, digest_size=16).hexdigest()
+
+    def _snapshot_hash(self, snapshot: dict) -> str:
+        return self._payload_hash(self._snapshot_payload(snapshot))
 
     def _push_history(self) -> None:
         project_data = self.project.to_dict()
         snapshot = self._snapshot(project_data)
-        snapshot_hash = self._snapshot_hash(snapshot)
+        snapshot_payload = self._snapshot_payload(snapshot)
+        snapshot_hash = self._payload_hash(snapshot_payload)
         self._autosave_snapshot = project_data
         self._redo_stack.clear()
         self._redo_hashes.clear()
+        self._redo_sizes.clear()
         if self._undo_hashes and self._undo_hashes[-1] == snapshot_hash:
             self._update_history_actions()
             return
         self._undo_stack.append(snapshot)
         self._undo_hashes.append(snapshot_hash)
-        if len(self._undo_stack) > self._history_limit:
+        self._undo_sizes.append(len(snapshot_payload))
+        while len(self._undo_stack) > 1 and (
+            len(self._undo_stack) > self._history_limit
+            or sum(self._undo_sizes) > self._history_bytes_limit
+        ):
             self._undo_stack.pop(0)
             self._undo_hashes.pop(0)
+            self._undo_sizes.pop(0)
         self._update_history_actions()
 
     def _update_history_actions(self) -> None:
@@ -2168,8 +2185,10 @@ class MainWindow(QMainWindow):
             return
         current = self._undo_stack.pop()
         current_hash = self._undo_hashes.pop()
+        current_size = self._undo_sizes.pop()
         self._redo_stack.append(current)
         self._redo_hashes.append(current_hash)
+        self._redo_sizes.append(current_size)
         previous = self._undo_stack[-1]
         self._apply_snapshot(previous)
         self._update_history_actions()
@@ -2183,8 +2202,14 @@ class MainWindow(QMainWindow):
             if self._redo_hashes
             else self._snapshot_hash(snapshot)
         )
+        snapshot_size = (
+            self._redo_sizes.pop()
+            if self._redo_sizes
+            else len(self._snapshot_payload(snapshot))
+        )
         self._undo_stack.append(snapshot)
         self._undo_hashes.append(snapshot_hash)
+        self._undo_sizes.append(snapshot_size)
         self._apply_snapshot(snapshot)
         self._update_history_actions()
 

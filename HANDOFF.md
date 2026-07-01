@@ -1552,3 +1552,19 @@ analyzed this content as uncommitted work). No code changed; markdown only.
 - Next code-ready Phase 6 options are the `MainWindow` mechanical split or
   measurement-led undo snapshot reduction. No release is indicated for this
   internal behavior-preserving optimization.
+
+## 47. Undo-history cumulative-size cap (2026-07-01)
+
+- Added compact-payload byte accounting to the existing dictionary-based undo
+  snapshots. History now evicts oldest states above 64 MiB as well as above 50
+  entries, while always retaining the current state.
+- Undo/redo transfers the corresponding size metadata with each snapshot, and a
+  new document edit clears redo size metadata alongside the redo stack/hashes.
+- Kept restore, autosave-reuse, transient-key, and mask-cleanup semantics
+  unchanged; compact string storage and pre-serialize short-circuiting remain
+  separate measurement-led follow-ups.
+- Verification: `ruff check src tests scripts`; 17 focused undo/playback tests;
+  full 143-test suite; `git diff --check`.
+- Next code-ready Phase 6 choices are the mechanical `MainWindow` split or the
+  remaining measured undo serialization/storage work. No release is indicated
+  for this internal behavior-preserving optimization.

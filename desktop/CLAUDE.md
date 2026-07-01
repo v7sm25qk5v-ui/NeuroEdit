@@ -92,7 +92,7 @@ python -c "import py_compile; py_compile.compile('src/neuroedit_desktop/<file>.p
 hf auth login
 ```
 
-The suite under `tests/` collects **141 tests** (`python -m pytest tests/ -q`).
+The suite under `tests/` collects **143 tests** (`python -m pytest tests/ -q`).
 Keep it and `ruff check src tests scripts` green before every release tag.
 
 ### venv-location note (current setup is intentional)
@@ -254,14 +254,12 @@ Other PHI safeguards:
 
 ## Optimization Automation Memory
 
-- **Last implementation:** 2026-06-27 — timeline playback keeps its 30 Hz
-  monotonic playhead refresh, but the canvas compares time-dependent overlay
-  state before requesting a repaint. Annotation/tracked-mask boundaries, slides,
-  caption cues, and fades still repaint; static intervals do not (§44). A
-  deterministic 10 s synthetic sample dropped from 300 canvas repaint requests
-  to 1.
-- **Last reviewed:** current automation pass (2026-06-27) completed the open
-  playback-loop repaint slice with focused boundary/fade coverage.
+- **Last implementation:** 2026-07-01 — undo snapshots retain dictionary restore
+  semantics but now carry compact JSON byte accounting. The oldest undo states
+  are evicted above 64 MiB, in addition to the 50-entry cap; the current state is
+  always retained.
+- **Last reviewed:** current automation pass (2026-07-01) completed the bounded
+  undo-history memory slice with focused cap and undo/redo bookkeeping coverage.
 - **Mode:** incremental. Next optimization review should deep-dive files changed
   after the §44 commit plus one hop. (Full-sweep baseline was `22085f9`,
   2026-06-17.)
@@ -301,14 +299,15 @@ Other PHI safeguards:
     neither is mutated in place, so the aliasing is safe. No correctness issue,
     no new finding — don't re-audit unless a new `dirty` write path is added.
 - **Architecture notes (high-signal):**
-  - Undo/redo = full `ProjectState.to_dict()` JSON snapshots (cap 50), deduped
+  - Undo/redo = full `ProjectState.to_dict()` JSON snapshots (cap 50 entries and
+    64 MiB of compact serialized bytes), deduped
     by BLAKE2 hash; `_snapshot()` still serializes on every dirty tick *before*
     the hash decides to discard a no-op. As of `6700b67`, `_push_history()`
     builds `to_dict()` once and caches the full dict in `_autosave_snapshot`;
     autosave (2 s when dirty) reuses it via `ProjectStore.save_data(dict)` when
     still valid, so the third independent serialize is gone on the common
     push-then-autosave path. Still open in P4.5: pre-serialize short-circuit,
-    compact history storage, cumulative-size cap, fixture timing/memory.
+    compact history storage, and fixture timing/resident-memory measurement.
   - Modularization is mid-flight: `main_window.py` ~4,240 lines (down from
     ~6,500; ticked up ~190 from the §37/§38 identity+font code); canvas →
     `ui/canvas.py`, SAM workers → `ui/sam_workers.py`,

@@ -17,7 +17,8 @@ Undo/redo is **full-state JSON snapshots of `ProjectState`**, not per-field
 patches (see `desktop/CLAUDE.md` → "State, persistence, and undo/redo").
 
 - `_snapshot()` serializes the project for the history stack.
-- `_push_history()` appends a snapshot (cap `_history_limit = 50`) and clears redo.
+- `_push_history()` appends a snapshot (caps: 50 entries and 64 MiB of compact
+  serialized bytes) and clears redo.
 - `undo()`/`redo()` move snapshots between `_undo_stack` and `_redo_stack` and
   call `_apply_snapshot()`, which rebuilds via `ProjectState.from_dict`.
 - `_restoring` guards against undo-during-undo re-pushing history.
@@ -118,6 +119,15 @@ stub panels/views, so no real Qt event loop):
 ## Status & notes
 
 - All 6 tests pass; verification command above is green.
+
+## 2026-07-01 — cumulative history-size cap
+
+- Snapshot hashing now exposes the already-produced compact JSON payload so its
+  byte length can be recorded without a third serialization.
+- Undo and redo move byte-size metadata with each snapshot. New edits evict the
+  oldest undo states above 64 MiB while retaining at least the current state.
+- Focused tests cover byte-cap eviction and undo/redo bookkeeping. The full suite
+  now passes 143 tests.
 - Pre-existing `ruff` warnings in `main_window.py` (unused imports at lines ~45,
   68–70, 1599, 2045) are **unrelated** to this work and were left untouched.
 - No new `ProjectState` fields were added, so old saves / old undo snapshots are

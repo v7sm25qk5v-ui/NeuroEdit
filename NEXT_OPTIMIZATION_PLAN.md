@@ -272,6 +272,11 @@ the 141-test suite and `ruff` must stay green with no unintended user-visible ch
      autosave. Remaining work: pre-serialize short-circuit, compact history
      storage, cumulative-size cap, and smoothness-fixture timing/memory
      measurement.
+   - Progress 2026-07-01: undo history now records the compact JSON byte size
+     produced for each snapshot hash and evicts oldest states when the stack
+     exceeds 64 MiB, in addition to the existing 50-entry cap. The current state
+     is always retained. Remaining work: pre-serialize short-circuit, compact
+     history storage, and smoothness-fixture timing/resident-memory measurement.
 
 3. **Audit cold-start import cost. — ✅ DONE 2026-06-29.**
    - `__main__.py` → `MainWindow` pulls in the full module graph eagerly. Confirm
@@ -313,9 +318,10 @@ each is measurement-first and behavior-preserving:
    canvas, SAM worker, and dialog extractions). Split the still-large
    `MainWindow` class mechanically before touching behavior.
 2. **Reduce undo/redo snapshot cost** — collapse the per-tick double serialize and
-   add the pre-serialize change-check, compact history storage, and a cumulative-size
-   cap. The common push-then-autosave path already shares one serialization as of
-   2026-06-18. Measure on the smoothness fixture with the diagnostics log.
+   add the pre-serialize change-check and compact history storage. The common
+   push-then-autosave path already shares one serialization as of 2026-06-18,
+   and the cumulative-size cap landed 2026-07-01. Measure on the smoothness
+   fixture with the diagnostics log.
 3. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (141 tests)
    green before every release tag; feed any new regressions back into the roadmap.
 

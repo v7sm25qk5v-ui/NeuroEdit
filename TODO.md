@@ -227,7 +227,10 @@ import audit.
   result for the next autosave when no later UI-only/direct dirty change invalidates
   it; focused tests cover reuse and invalidation. Pre-serialize short-circuit,
   compact storage, cumulative-size cap, and smoothness-fixture memory measurement
-  remain open.
+  remain open. **Progress 2026-07-01:** history now tracks each snapshot's compact
+  JSON byte size and evicts the oldest undo states above a 64 MiB cumulative cap,
+  while always retaining the current state. Compact storage, a pre-serialize
+  short-circuit, and fixture timing/resident-memory measurement remain open.
 - [x] Audit cold-start import cost — completed 2026-06-29. The export pipeline
   is now imported only when export, still capture, or export-settings creation
   is requested; `torch` remains lazy. Live-caption helpers remain eager because
