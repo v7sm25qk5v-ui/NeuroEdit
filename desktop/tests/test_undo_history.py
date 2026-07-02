@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -135,11 +136,12 @@ def _window(project: ProjectState | None = None) -> MainWindow:
     window.project = project or ProjectState()
     window.dirty = False
     snapshot = window._snapshot()
-    window._undo_stack = [snapshot]
+    snapshot_payload = window._snapshot_payload(snapshot)
+    window._undo_stack = [snapshot_payload]
     window._redo_stack = []
     window._undo_hashes = [window._snapshot_hash(snapshot)]
     window._redo_hashes = []
-    window._undo_sizes = [len(window._snapshot_payload(snapshot))]
+    window._undo_sizes = [len(snapshot_payload)]
     window._redo_sizes = []
     window._autosave_snapshot = None
     window._history_limit = 50
@@ -215,7 +217,7 @@ def test_editing_annotation_creates_undo_entry() -> None:
     window._update_annotation_label("ann-1", "Updated")
 
     assert len(window._undo_stack) == 2
-    assert window._undo_stack[-1]["annotations"][0]["label"] == "Updated"
+    assert json.loads(window._undo_stack[-1])["annotations"][0]["label"] == "Updated"
     assert window.dirty is True
 
 
@@ -223,7 +225,7 @@ def test_net_zero_document_mutation_clears_redo_stack() -> None:
     project = ProjectState()
     project.annotations.append(_annotation())
     window = _window(project)
-    window._redo_stack = [{"annotations": [{"label": "future"}]}]
+    window._redo_stack = [b'{"annotations":[{"label":"future"}]}']
     window._redo_hashes = ["future"]
     window._redo_sizes = [100]
 
@@ -256,7 +258,7 @@ def test_history_evicts_oldest_snapshots_over_byte_limit() -> None:
     window._update_annotation_label("ann-1", "B" * 100)
 
     assert len(window._undo_stack) == 1
-    assert window._undo_stack[-1]["annotations"][0]["label"] == "B" * 100
+    assert json.loads(window._undo_stack[-1])["annotations"][0]["label"] == "B" * 100
     assert len(window._undo_hashes) == len(window._undo_stack)
     assert len(window._undo_sizes) == len(window._undo_stack)
 
@@ -352,7 +354,7 @@ def test_apply_snapshot_invalidates_project_end_time_cache() -> None:
         )
     )
     window = _window(project)
-    restored = window._snapshot()
+    restored = window._snapshot_payload(window._snapshot())
     project.clips[0].trim_end = 5.0
 
     assert window._project_end_time() == 5.0

@@ -157,11 +157,11 @@ layer paints the slide above it.
 - `project_store.ProjectStore` writes `project.json` plus sibling directories
   `masks/`, `audio/`, `stills/`. Default autosave path is
   `~/Documents/NeuroEdit/Autosave/`. Autosave runs every 2 s when `dirty`.
-- Undo/redo is **JSON snapshots of the entire `ProjectState`**, not per-field
-  patches. Every `_mark_dirty` / `_mark_project_dirty` pushes a snapshot (cap
-  50). `_apply_snapshot` rebuilds via `ProjectState.from_dict` and reloads the
-  active clip. The `_restoring` guard prevents undo-during-undo from
-  duplicating history.
+- Undo/redo is **compact JSON snapshots of the entire `ProjectState`**, not
+  per-field patches. Every `_mark_dirty` / `_mark_project_dirty` pushes a byte
+  payload (caps: 50 entries and 64 MiB). `_apply_snapshot` decodes it, rebuilds
+  via `ProjectState.from_dict`, and reloads the active clip. The `_restoring`
+  guard prevents undo-during-undo from duplicating history.
 - `QSettings("NeuroEdit", "Desktop")` is used for app-level prefs (tutorial
   seen flag etc.) — separate from the project file.
 
@@ -254,12 +254,11 @@ Other PHI safeguards:
 
 ## Optimization Automation Memory
 
-- **Last implementation:** 2026-07-01 — undo snapshots retain dictionary restore
-  semantics but now carry compact JSON byte accounting. The oldest undo states
-  are evicted above 64 MiB, in addition to the 50-entry cap; the current state is
-  always retained.
-- **Last reviewed:** current automation pass (2026-07-01) completed the bounded
-  undo-history memory slice with focused cap and undo/redo bookkeeping coverage.
+- **Last implementation:** 2026-07-02 — undo/redo stacks retain compact JSON
+  payloads instead of nested dictionaries; autosave reuse remains dictionary-based.
+  The smoothness fixture showed 36.6% lower traced retained memory across 50 edits.
+- **Last reviewed:** current automation pass (2026-07-02) completed compact
+  undo-history storage with focused undo/redo and mask-cleanup coverage.
 - **Mode:** incremental. Next optimization review should deep-dive files changed
   after the §44 commit plus one hop. (Full-sweep baseline was `22085f9`,
   2026-06-17.)

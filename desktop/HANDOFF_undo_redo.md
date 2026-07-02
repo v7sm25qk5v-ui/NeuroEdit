@@ -133,3 +133,14 @@ stub panels/views, so no real Qt event loop):
 - No new `ProjectState` fields were added, so old saves / old undo snapshots are
   unaffected. `from_dict` tolerates the popped keys being absent because they all
   have dataclass defaults.
+
+## 2026-07-02 — compact history storage
+
+- Undo and redo stacks now retain the compact JSON bytes already produced for
+  hashing instead of duplicate nested dictionaries. Autosave reuse remains a
+  dictionary and the on-disk project format is unchanged.
+- `_apply_snapshot()` decodes the payload before `ProjectState.from_dict()`;
+  close-time orphan-mask cleanup also decodes history before collecting paths.
+- Across 50 generated smoothness-fixture edits, traced retained memory fell from
+  0.631 MiB to 0.400 MiB (36.6%). Median push time stayed effectively flat at
+  0.640 ms before and 0.629 ms after.

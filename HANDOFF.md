@@ -1579,3 +1579,28 @@ analyzed this content as uncommitted work). No code changed; markdown only.
   GitHub in this environment, then run `git push origin main`.
 - No release tag was created because neither behavior-preserving optimization
   changes release state or carries a release instruction.
+
+## 49. Compact undo-history storage (2026-07-02)
+
+- Reused the compact JSON payload already produced during each history push as
+  the stored undo/redo entry, removing the duplicate nested-dictionary history
+  representation. Autosave reuse and the on-disk project format are unchanged.
+- Undo/redo decodes entries only when restoring. Close-time orphan-mask cleanup
+  decodes retained history before collecting referenced mask paths, preserving
+  session-long mask undo safety.
+- On 50 edits to the generated smoothness fixture, traced retained memory fell
+  from 0.631 MiB to 0.400 MiB (36.6%); median history-push time stayed flat at
+  0.640 ms before and 0.629 ms after.
+- Verification: `ruff check src tests scripts`; 27 focused undo/SAM tests;
+  full suite (`143 passed`); `git diff --check`.
+- Remaining code-ready Phase 6 choices are the mechanical `MainWindow` split or
+  careful evaluation of a pre-serialize change check. No release is indicated.
+
+## 50. Publication still blocked (2026-07-02)
+
+- The compact-history work is committed locally; `main` is now four commits
+  ahead of `origin/main`, including the three previously unpublished commits.
+- `git push origin main` still cannot authenticate to the HTTPS remote. Install
+  or configure GitHub credentials in this environment, then push `main`.
+- No release tag was created because the current work is an internal optimization
+  and neither the roadmap nor repository version state indicates a release.

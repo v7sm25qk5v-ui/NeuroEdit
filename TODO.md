@@ -176,7 +176,7 @@ template); see Completed section.
 
 Highest-leverage engineering work while P0 release items stay owner/hardware
 blocked and P5 stays parked. All items are measurement-first and
-behavior-preserving — the 141-test suite and `ruff` must stay green with no
+behavior-preserving — the 143-test suite and `ruff` must stay green with no
 user-visible change. Full rationale and acceptance criteria in
 [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md) Phase 6.
 
@@ -229,8 +229,11 @@ import audit.
   compact storage, cumulative-size cap, and smoothness-fixture memory measurement
   remain open. **Progress 2026-07-01:** history now tracks each snapshot's compact
   JSON byte size and evicts the oldest undo states above a 64 MiB cumulative cap,
-  while always retaining the current state. Compact storage, a pre-serialize
-  short-circuit, and fixture timing/resident-memory measurement remain open.
+  while always retaining the current state. **Progress 2026-07-02:** the stacks
+  now retain those compact JSON bytes instead of duplicate nested dictionaries.
+  On 50 smoothness-fixture edits, traced retained memory fell from 0.631 MiB to
+  0.400 MiB (36.6%) while median push time stayed flat (0.640 ms to 0.629 ms).
+  A pre-serialize short-circuit remains open.
 - [x] Audit cold-start import cost — completed 2026-06-29. The export pipeline
   is now imported only when export, still capture, or export-settings creation
   is requested; `torch` remains lazy. Live-caption helpers remain eager because

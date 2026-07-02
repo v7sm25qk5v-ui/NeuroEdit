@@ -1247,8 +1247,8 @@ class MainWindow(QMainWindow):
         self.dirty = False
 
         # Undo/redo: snapshots of document state before each mutation.
-        self._undo_stack: list[dict] = []
-        self._redo_stack: list[dict] = []
+        self._undo_stack: list[bytes] = []
+        self._redo_stack: list[bytes] = []
         self._undo_hashes: list[str] = []
         self._redo_hashes: list[str] = []
         self._undo_sizes: list[int] = []
@@ -1285,7 +1285,7 @@ class MainWindow(QMainWindow):
         # Seed history with initial project state.
         initial_snapshot = self._snapshot()
         initial_payload = self._snapshot_payload(initial_snapshot)
-        self._undo_stack.append(initial_snapshot)
+        self._undo_stack.append(initial_payload)
         self._undo_hashes.append(self._payload_hash(initial_payload))
         self._undo_sizes.append(len(initial_payload))
         self._update_history_actions()
@@ -2164,7 +2164,7 @@ class MainWindow(QMainWindow):
         if self._undo_hashes and self._undo_hashes[-1] == snapshot_hash:
             self._update_history_actions()
             return
-        self._undo_stack.append(snapshot)
+        self._undo_stack.append(snapshot_payload)
         self._undo_hashes.append(snapshot_hash)
         self._undo_sizes.append(len(snapshot_payload))
         while len(self._undo_stack) > 1 and (
@@ -2200,12 +2200,12 @@ class MainWindow(QMainWindow):
         snapshot_hash = (
             self._redo_hashes.pop()
             if self._redo_hashes
-            else self._snapshot_hash(snapshot)
+            else self._payload_hash(snapshot)
         )
         snapshot_size = (
             self._redo_sizes.pop()
             if self._redo_sizes
-            else len(self._snapshot_payload(snapshot))
+            else len(snapshot)
         )
         self._undo_stack.append(snapshot)
         self._undo_hashes.append(snapshot_hash)
@@ -2213,7 +2213,7 @@ class MainWindow(QMainWindow):
         self._apply_snapshot(snapshot)
         self._update_history_actions()
 
-    def _apply_snapshot(self, snapshot: dict) -> None:
+    def _apply_snapshot(self, snapshot: bytes) -> None:
         self._restoring = True
         try:
             transient = {
@@ -2221,7 +2221,7 @@ class MainWindow(QMainWindow):
             }
             old_clip = self.project.active_clip
             old_path = old_clip.path if old_clip else None
-            self.project = ProjectState.from_dict(snapshot)
+            self.project = ProjectState.from_dict(json.loads(snapshot))
             self._autosave_snapshot = None
             self._project_end_time_cache = None
             for key, value in transient.items():
@@ -4220,7 +4220,10 @@ class MainWindow(QMainWindow):
         snapshot. Runs only at close so deleting a mask annotation stays undoable
         for the whole session."""
         masks_dir = self.store.project_path.parent / "masks"
-        snapshots = [self.project.to_dict(), *self._undo_stack, *self._redo_stack]
+        history_snapshots = [
+            json.loads(snapshot) for snapshot in (*self._undo_stack, *self._redo_stack)
+        ]
+        snapshots = [self.project.to_dict(), *history_snapshots]
         delete_orphan_masks(masks_dir, referenced_mask_paths(snapshots))
 
     def _shutdown_threads(self) -> bool:

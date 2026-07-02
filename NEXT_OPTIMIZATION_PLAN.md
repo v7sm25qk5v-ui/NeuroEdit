@@ -194,7 +194,7 @@ workflow refinements. The remaining roadmap work is owner/hardware-blocked
 (packaged-build smoke, signing, Stryker sample data), so the highest-leverage
 engineering work left is structural: keep the codebase cheap to change and
 cheap to run. Every item below is measurement-first and behavior-preserving —
-the 141-test suite and `ruff` must stay green with no unintended user-visible change.
+the 143-test suite and `ruff` must stay green with no unintended user-visible change.
 
 1. **Modularize `ui/main_window.py` (currently ~4,240 lines, down from ~6,500).**
    - `main_window.py` holds `MainWindow` plus `VideoGraphicsView`,
@@ -275,8 +275,14 @@ the 141-test suite and `ruff` must stay green with no unintended user-visible ch
    - Progress 2026-07-01: undo history now records the compact JSON byte size
      produced for each snapshot hash and evicts oldest states when the stack
      exceeds 64 MiB, in addition to the existing 50-entry cap. The current state
-     is always retained. Remaining work: pre-serialize short-circuit, compact
-     history storage, and smoothness-fixture timing/resident-memory measurement.
+     is always retained.
+   - Progress 2026-07-02: undo/redo stacks now retain the compact JSON payload
+     instead of a second nested-dictionary representation. Across 50 edits on
+     the generated smoothness fixture, traced retained memory fell from 0.631 MiB
+     to 0.400 MiB (36.6%); median push time remained flat at 0.640 ms before and
+     0.629 ms after. Autosave reuse remains dictionary-based and unchanged.
+     Remaining work: evaluate a pre-serialize short-circuit without weakening
+     document-change detection.
 
 3. **Audit cold-start import cost. — ✅ DONE 2026-06-29.**
    - `__main__.py` → `MainWindow` pulls in the full module graph eagerly. Confirm
@@ -305,7 +311,7 @@ the 141-test suite and `ruff` must stay green with no unintended user-visible ch
      module changed. Only the canonical `*.py` files remain under `src/`; tests
      and `ruff` stayed green.
 
-## Recommended immediate next sprint (updated 2026-06-27)
+## Recommended immediate next sprint (updated 2026-07-02)
 
 Phases 1–5 shipped (smoothness fixture + diagnostics, the Figma brand system and
 tokens, accessibility audit, smoothness caching, and the workflow refinements).
@@ -317,12 +323,10 @@ each is measurement-first and behavior-preserving:
 1. **Continue modularizing `ui/main_window.py`** (now ~4,240 lines after the
    canvas, SAM worker, and dialog extractions). Split the still-large
    `MainWindow` class mechanically before touching behavior.
-2. **Reduce undo/redo snapshot cost** — collapse the per-tick double serialize and
-   add the pre-serialize change-check and compact history storage. The common
-   push-then-autosave path already shares one serialization as of 2026-06-18,
-   and the cumulative-size cap landed 2026-07-01. Measure on the smoothness
-   fixture with the diagnostics log.
-3. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (141 tests)
+2. **Evaluate an undo pre-serialize change check** — compact history storage and
+   the cumulative-size cap are complete. Only add a short-circuit if it can prove
+   document equality without duplicating mutation bookkeeping or weakening undo.
+3. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (143 tests)
    green before every release tag; feed any new regressions back into the roadmap.
 
 This keeps the project on a safe optimization loop: measure first, keep the codebase
