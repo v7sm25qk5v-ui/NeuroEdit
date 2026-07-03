@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QByteArray, QMimeData, QObject, Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtCore import QByteArray, QMimeData, Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -100,6 +100,7 @@ from neuroedit_desktop.ui.editor_panels import (
     project_preflight_warnings,
     project_end_time,
 )
+from neuroedit_desktop.ui.export_worker import ExportWorker
 from neuroedit_desktop.ui.styles import (
     ACCENT_AMBER, ACCENT_CYAN, ACCENT_RED, ACCENT_SLIDES,
     BG_CARD, BG_HOVER,
@@ -122,6 +123,7 @@ __all__ = [
     "ExportChecklistDialog",
     "ExportDialog",
     "ExportHistoryDialog",
+    "ExportWorker",
     "PhiReviewDialog",
     "SamSetupDialog",
     "StorageLocationDialog",
@@ -1203,38 +1205,6 @@ class LabelsPanel(QWidget):
                 self.seek_requested.emit(ann.frame_time)
                 return
 
-
-
-
-class ExportWorker(QObject):
-    progress = Signal(int, str)
-    finished = Signal(object, object, object)  # output_path_or_none, error_or_none, warnings
-
-    def __init__(self, project: ProjectState, settings: ExportSettings) -> None:
-        super().__init__()
-        self.project = project
-        self.settings = settings
-        self._cancelled = False
-
-    def cancel(self) -> None:
-        self._cancelled = True
-
-    def run(self) -> None:
-        from neuroedit_desktop.exporter import ExportCancelled, ProjectExporter
-
-        try:
-            exporter = ProjectExporter(
-                self.project,
-                self.settings,
-                progress=self.progress.emit,
-                cancelled=lambda: self._cancelled,
-            )
-            warnings = exporter.export()
-            self.finished.emit(str(self.settings.output_path), None, warnings)
-        except ExportCancelled:
-            self.finished.emit(None, "Export canceled.", [])
-        except Exception as exc:  # noqa: BLE001
-            self.finished.emit(None, str(exc), [])
 
 
 

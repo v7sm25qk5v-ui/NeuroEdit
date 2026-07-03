@@ -182,6 +182,9 @@ layer paints the slide above it.
   `ui/canvas.py` uses them during normal preview, and torch remains lazy.
 - `ui/main_window.py` — `MainWindow` plus `LabelsPanel`, `SamPanel`, and
   `TimelineWidget`. Still the biggest file; high-level app wiring lives here.
+- `ui/export_worker.py` — background export execution. The exporter import stays
+  inside `ExportWorker.run()` so importing the main window does not load ffmpeg
+  composition code. `main_window.py` re-exports the class for compatibility.
 - `ui/canvas.py` — `VideoGraphicsView` and `AnnotationGraphicsItem`.
 - `ui/sam_workers.py` — SAM worker QObjects.
 - `ui/dialogs.py` — SAM setup, storage location, PHI review, export checklist,
@@ -254,11 +257,10 @@ Other PHI safeguards:
 
 ## Optimization Automation Memory
 
-- **Last implementation:** 2026-07-02 — undo/redo stacks retain compact JSON
-  payloads instead of nested dictionaries; autosave reuse remains dictionary-based.
-  The smoothness fixture showed 36.6% lower traced retained memory across 50 edits.
-- **Last reviewed:** current automation pass (2026-07-02) completed compact
-  undo-history storage with focused undo/redo and mask-cleanup coverage.
+- **Last implementation:** 2026-07-03 — `ExportWorker` was mechanically moved to
+  `ui/export_worker.py` with its lazy exporter import and stable re-export intact.
+- **Last reviewed:** current automation pass (2026-07-03) chose the safe
+  modularization slice; a speculative undo pre-serialize shortcut was deferred.
 - **Mode:** incremental. Next optimization review should deep-dive files changed
   after the §44 commit plus one hop. (Full-sweep baseline was `22085f9`,
   2026-06-17.)
@@ -305,14 +307,16 @@ Other PHI safeguards:
     builds `to_dict()` once and caches the full dict in `_autosave_snapshot`;
     autosave (2 s when dirty) reuses it via `ProjectStore.save_data(dict)` when
     still valid, so the third independent serialize is gone on the common
-    push-then-autosave path. Still open in P4.5: pre-serialize short-circuit,
-    compact history storage, and fixture timing/resident-memory measurement.
-  - Modularization is mid-flight: `main_window.py` ~4,240 lines (down from
+    push-then-autosave path. Compact byte storage, the 64 MiB cap, and fixture
+    measurement are complete; only a correctness-preserving pre-serialize
+    short-circuit remains open in P4.5.
+  - Modularization is mid-flight: `main_window.py` ~4,260 lines (down from
     ~6,500; ticked up ~190 from the §37/§38 identity+font code); canvas →
     `ui/canvas.py`, SAM workers → `ui/sam_workers.py`,
-    dialogs → `ui/dialogs.py`, audio → `ui/audio_panel.py`, project library →
-    `ui/project_library.py`, all re-exported from their origin module so import
-    paths stay stable. Remaining: split the still-large `MainWindow` class.
+    dialogs → `ui/dialogs.py`, export worker → `ui/export_worker.py`, audio →
+    `ui/audio_panel.py`, project library → `ui/project_library.py`, all
+    re-exported from their origin module so import paths stay stable. Remaining:
+    split the still-large `MainWindow` class.
   - Playback-loop optimization is partially complete: `MainWindow._project_end_time()`
     caches `project_end_time()` for seek/playback/export and invalidates on
     document edits/project load/undo/redo restores. Playback uses the monotonic

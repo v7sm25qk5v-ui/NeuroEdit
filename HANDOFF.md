@@ -1604,3 +1604,19 @@ analyzed this content as uncommitted work). No code changed; markdown only.
   or configure GitHub credentials in this environment, then push `main`.
 - No release tag was created because the current work is an internal optimization
   and neither the roadmap nor repository version state indicates a release.
+
+## 51. Export worker extraction (2026-07-03)
+
+- Moved `ExportWorker` from `ui/main_window.py` to `ui/export_worker.py` as a
+  mechanical Phase 6 modularization slice. `main_window.py` re-exports the class,
+  and `ProjectExporter` remains imported only inside `run()`, preserving startup
+  behavior and existing import compatibility.
+- Deferred the undo pre-serialize short-circuit: the current model has no cheap
+  document revision signal, so adding mutation bookkeeping would risk undo
+  correctness for an unmeasured micro-optimization.
+- Found an unused legacy `TimelineWidget` in `main_window.py`; left it untouched
+  pending an explicit compatibility check in a separate cleanup.
+- Verification: `ruff check src tests scripts`; full suite; lazy-import/re-export
+  probe; `git diff --check`.
+- Publication remains blocked because the HTTPS remote has no configured GitHub
+  credentials. No release tag is indicated for this internal code move.

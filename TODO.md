@@ -201,8 +201,11 @@ import audit.
   both are re-exported from `main_window`. **Progress 2026-06-17:** SAM setup,
   storage location, PHI review, export checklist, export, and export history
   dialogs moved to `ui/dialogs.py` and are re-exported from `main_window`.
-  Current line counts: `main_window.py` ~4,240, `dialogs.py` ~799, `canvas.py`
-  ~1,238, `sam_workers.py` ~146.
+  **Progress 2026-07-03:** `ExportWorker` moved to `ui/export_worker.py` and is
+  re-exported from `main_window`; its on-demand exporter import is unchanged.
+  The broader mechanical `MainWindow` split remains open. Current line counts:
+  `main_window.py` ~4,260, `dialogs.py` ~799, `canvas.py` ~1,238,
+  `sam_workers.py` ~146.
 - [x] Modularize `ui/editor_panels.py` (~2,960 lines) — it is also over the
   ~2,500-line `ui/` target. Extract `AudioPanel` (~970 lines, the largest
   class) into its own `ui/audio_panel.py`, re-exported from `editor_panels`;

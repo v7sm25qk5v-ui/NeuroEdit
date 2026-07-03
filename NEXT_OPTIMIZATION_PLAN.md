@@ -223,6 +223,9 @@ the 143-test suite and `ruff` must stay green with no unintended user-visible ch
      location, PHI review, export checklist, export, and export history dialogs
      from `ui/dialogs.py`. Remaining modularization target: the still-large
      `MainWindow` class.
+   - Progress 2026-07-03: `ExportWorker` moved to `ui/export_worker.py` and is
+     re-exported from `main_window.py`. This preserves the lazy export-pipeline
+     boundary; the still-large `MainWindow` class remains the primary target.
    - Progress 2026-06-19: `MainWindow` gained a cached project-end-time helper
      used by seek/playback/export and invalidated on document edits/project
      loads. This addressed the playback loop's per-tick `project_end_time()`
@@ -311,7 +314,7 @@ the 143-test suite and `ruff` must stay green with no unintended user-visible ch
      module changed. Only the canonical `*.py` files remain under `src/`; tests
      and `ruff` stayed green.
 
-## Recommended immediate next sprint (updated 2026-07-02)
+## Recommended immediate next sprint (updated 2026-07-03)
 
 Phases 1–5 shipped (smoothness fixture + diagnostics, the Figma brand system and
 tokens, accessibility audit, smoothness caching, and the workflow refinements).
@@ -320,14 +323,17 @@ blockers are owner/hardware-bound (Windows installer smoke at 100/125/150 % DPI,
 signing/notarization, Stryker sample data). Take the code-health items in order —
 each is measurement-first and behavior-preserving:
 
-1. **Continue modularizing `ui/main_window.py`** (now ~4,240 lines after the
-   canvas, SAM worker, and dialog extractions). Split the still-large
+1. **Continue modularizing `ui/main_window.py`** (now ~4,260 lines after the
+   canvas, SAM worker, dialog, and export-worker extractions). Split the still-large
    `MainWindow` class mechanically before touching behavior.
 2. **Evaluate an undo pre-serialize change check** — compact history storage and
    the cumulative-size cap are complete. Only add a short-circuit if it can prove
    document equality without duplicating mutation bookkeeping or weakening undo.
 3. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (143 tests)
    green before every release tag; feed any new regressions back into the roadmap.
+
+The unused legacy `TimelineWidget` remains in `main_window.py`; verify that no
+external import depends on it before removing it in a separate cleanup.
 
 This keeps the project on a safe optimization loop: measure first, keep the codebase
 cheap to change and cheap to run, and only then restart larger feature bets
