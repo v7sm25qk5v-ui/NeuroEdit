@@ -226,6 +226,9 @@ the 143-test suite and `ruff` must stay green with no unintended user-visible ch
    - Progress 2026-07-03: `ExportWorker` moved to `ui/export_worker.py` and is
      re-exported from `main_window.py`. This preserves the lazy export-pipeline
      boundary; the still-large `MainWindow` class remains the primary target.
+   - Progress 2026-07-04: `SamPanel` moved to `ui/sam_panel.py` and is
+     re-exported from `main_window.py`. The move is mechanical; the focused SAM
+     workflow suite and import-compatibility probe preserve existing behavior.
    - Progress 2026-06-19: `MainWindow` gained a cached project-end-time helper
      used by seek/playback/export and invalidated on document edits/project
      loads. This addressed the playback loop's per-tick `project_end_time()`
@@ -323,9 +326,9 @@ blockers are owner/hardware-bound (Windows installer smoke at 100/125/150 % DPI,
 signing/notarization, Stryker sample data). Take the code-health items in order —
 each is measurement-first and behavior-preserving:
 
-1. **Continue modularizing `ui/main_window.py`** (now ~4,260 lines after the
-   canvas, SAM worker, dialog, and export-worker extractions). Split the still-large
-   `MainWindow` class mechanically before touching behavior.
+1. **Continue modularizing `ui/main_window.py`** (now ~3,870 lines after the
+   canvas, SAM worker/panel, dialog, and export-worker extractions). Split the
+   still-large `MainWindow` class mechanically before touching behavior.
 2. **Evaluate an undo pre-serialize change check** — compact history storage and
    the cumulative-size cap are complete. Only add a short-circuit if it can prove
    document equality without duplicating mutation bookkeeping or weakening undo.

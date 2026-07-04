@@ -1631,3 +1631,16 @@ analyzed this content as uncommitted work). No code changed; markdown only.
 - No release tag was created because these commits are internal, behavior-
   preserving optimization and refactoring work; the current release remains
   `v0.5.4-alpha`.
+
+## 53. SAM panel extraction (2026-07-04)
+
+- Moved `SamPanel` from `ui/main_window.py` to `ui/sam_panel.py` as the next
+  mechanical Phase 6 modularization slice. `main_window.py` re-exports the
+  class, preserving existing imports and behavior.
+- `main_window.py` is now about 3,870 lines (down from about 4,260). The broader
+  `MainWindow` split remains open; the undo pre-serialize shortcut remains
+  deferred because there is no safe cheap document-revision signal.
+- Verification: `ruff check src tests scripts`; focused SAM workflow tests;
+  `SamPanel` re-export identity probe; full suite; `git diff --check`.
+- No release tag is indicated for this internal refactor. The current release
+  remains `v0.5.4-alpha`.

@@ -187,6 +187,8 @@ layer paints the slide above it.
   composition code. `main_window.py` re-exports the class for compatibility.
 - `ui/canvas.py` — `VideoGraphicsView` and `AnnotationGraphicsItem`.
 - `ui/sam_workers.py` — SAM worker QObjects.
+- `ui/sam_panel.py` — SAM controls, tracked-mask list, and propagation settings.
+  `main_window.py` re-exports `SamPanel` for compatibility.
 - `ui/dialogs.py` — SAM setup, storage location, PHI review, export checklist,
   export settings, and export history dialogs. `main_window.py` re-exports
   these names for import stability.
