@@ -1620,3 +1620,14 @@ analyzed this content as uncommitted work). No code changed; markdown only.
   probe; `git diff --check`.
 - Publication remains blocked because the HTTPS remote has no configured GitHub
   credentials. No release tag is indicated for this internal code move.
+
+## 52. Optimization backlog published (2026-07-03)
+
+- Configured Git to use the authenticated GitHub CLI credential helper and
+  pushed the five queued commits (`94181d6` through `6796314`) to `origin/main`.
+- Verified local `main` and `origin/main` both resolved to `6796314` after the
+  push. The cold-start, bounded/compact undo-history, and export-worker changes
+  are now published.
+- No release tag was created because these commits are internal, behavior-
+  preserving optimization and refactoring work; the current release remains
+  `v0.5.4-alpha`.
