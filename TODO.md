@@ -176,7 +176,7 @@ template); see Completed section.
 
 Highest-leverage engineering work while P0 release items stay owner/hardware
 blocked and P5 stays parked. All items are measurement-first and
-behavior-preserving — the 143-test suite and `ruff` must stay green with no
+behavior-preserving — the 144-test suite and `ruff` must stay green with no
 user-visible change. Full rationale and acceptance criteria in
 [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md) Phase 6.
 
@@ -206,9 +206,12 @@ import audit.
   **Progress 2026-07-04:** `SamPanel` moved to `ui/sam_panel.py` and is
   re-exported from `main_window`, preserving the existing public import and SAM
   workflow behavior.
+  **Progress 2026-07-05:** `LabelsPanel` and its preset persistence moved to
+  `ui/labels_panel.py`; `main_window` re-exports the panel and shares the preset
+  definitions without changing label editing behavior.
   The broader mechanical `MainWindow` split remains open. Current line counts:
-  `main_window.py` ~3,870, `sam_panel.py` ~420, `dialogs.py` ~799,
-  `canvas.py` ~1,238, `sam_workers.py` ~146.
+  `main_window.py` ~3,390, `labels_panel.py` ~525, `sam_panel.py` ~412,
+  `dialogs.py` ~804, `canvas.py` ~1,285, `sam_workers.py` ~146.
 - [x] Modularize `ui/editor_panels.py` (~2,960 lines) — it is also over the
   ~2,500-line `ui/` target. Extract `AudioPanel` (~970 lines, the largest
   class) into its own `ui/audio_panel.py`, re-exported from `editor_panels`;

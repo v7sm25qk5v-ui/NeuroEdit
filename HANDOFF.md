@@ -1644,3 +1644,18 @@ analyzed this content as uncommitted work). No code changed; markdown only.
   `SamPanel` re-export identity probe; full suite; `git diff --check`.
 - No release tag is indicated for this internal refactor. The current release
   remains `v0.5.4-alpha`.
+
+## 54. Labels panel extraction (2026-07-05)
+
+- Moved `LabelsPanel`, label-preset definitions, and custom-preset persistence
+  from `ui/main_window.py` to `ui/labels_panel.py` as the next mechanical Phase
+  6 modularization slice. `main_window.py` re-exports `LabelsPanel` and imports
+  the shared preset data used by the toolbar, preserving behavior and imports.
+- Added a re-export identity regression. `main_window.py` is now about 3,390
+  lines and `labels_panel.py` is about 525; the broader `MainWindow` split
+  remains open.
+- Verification: `ruff check src tests scripts`; 24 focused headless main-window
+  tests; `LabelsPanel` re-export identity probe; full suite (144 passed in
+  23.88 s); `git diff --check`.
+- No release tag is indicated for this internal refactor. The current release
+  remains `v0.5.4-alpha`.

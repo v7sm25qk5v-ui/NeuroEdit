@@ -92,7 +92,7 @@ python -c "import py_compile; py_compile.compile('src/neuroedit_desktop/<file>.p
 hf auth login
 ```
 
-The suite under `tests/` collects **143 tests** (`python -m pytest tests/ -q`).
+The suite under `tests/` collects **144 tests** (`python -m pytest tests/ -q`).
 Keep it and `ruff check src tests scripts` green before every release tag.
 
 ### venv-location note (current setup is intentional)
@@ -180,8 +180,9 @@ layer paints the slide above it.
 - Exporter loading is deferred until export, still capture, or export-settings
   creation; keep that on-demand boundary intact. Live captions stay eager because
   `ui/canvas.py` uses them during normal preview, and torch remains lazy.
-- `ui/main_window.py` — `MainWindow` plus `LabelsPanel`, `SamPanel`, and
-  `TimelineWidget`. Still the biggest file; high-level app wiring lives here.
+- `ui/main_window.py` — `MainWindow` plus the unused legacy `TimelineWidget`.
+  Still the biggest file; high-level app wiring lives here. It re-exports
+  extracted UI classes where compatibility requires it.
 - `ui/export_worker.py` — background export execution. The exporter import stays
   inside `ExportWorker.run()` so importing the main window does not load ffmpeg
   composition code. `main_window.py` re-exports the class for compatibility.
@@ -189,6 +190,8 @@ layer paints the slide above it.
 - `ui/sam_workers.py` — SAM worker QObjects.
 - `ui/sam_panel.py` — SAM controls, tracked-mask list, and propagation settings.
   `main_window.py` re-exports `SamPanel` for compatibility.
+- `ui/labels_panel.py` — annotation list, selected-annotation inspector, and
+  built-in/custom label presets. `main_window.py` re-exports `LabelsPanel`.
 - `ui/dialogs.py` — SAM setup, storage location, PHI review, export checklist,
   export settings, and export history dialogs. `main_window.py` re-exports
   these names for import stability.
@@ -259,9 +262,9 @@ Other PHI safeguards:
 
 ## Optimization Automation Memory
 
-- **Last implementation:** 2026-07-03 — `ExportWorker` was mechanically moved to
-  `ui/export_worker.py` with its lazy exporter import and stable re-export intact.
-- **Last reviewed:** current automation pass (2026-07-03) chose the safe
+- **Last implementation:** 2026-07-05 — `LabelsPanel` was mechanically moved to
+  `ui/labels_panel.py` with preset persistence and stable re-export intact.
+- **Last reviewed:** current automation pass (2026-07-05) chose the safe
   modularization slice; a speculative undo pre-serialize shortcut was deferred.
 - **Mode:** incremental. Next optimization review should deep-dive files changed
   after the §44 commit plus one hop. (Full-sweep baseline was `22085f9`,

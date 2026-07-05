@@ -18,6 +18,7 @@ from neuroedit_desktop.project_store import ProjectStore
 from neuroedit_desktop.sam_backend import SamBackend, SamBackendInfo
 from neuroedit_desktop.ui import styles as ui_styles
 from neuroedit_desktop.ui import main_window as main_window_module
+from neuroedit_desktop.ui.labels_panel import LabelsPanel
 from neuroedit_desktop.ui.main_window import MainWindow
 
 
@@ -75,6 +76,10 @@ def test_construct_and_switch_all_panels(window, app):
         window._set_panel(panel)
         app.processEvents()
         assert window.project.active_panel == panel
+
+
+def test_labels_panel_is_reexported_from_main_window():
+    assert main_window_module.LabelsPanel is LabelsPanel
 
 
 def test_wordmark_registers_bundled_brand_font(app):
