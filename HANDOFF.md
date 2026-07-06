@@ -1659,3 +1659,16 @@ analyzed this content as uncommitted work). No code changed; markdown only.
   23.88 s); `git diff --check`.
 - No release tag is indicated for this internal refactor. The current release
   remains `v0.5.4-alpha`.
+
+## 55. Legacy timeline cleanup (2026-07-06)
+
+- Removed the unused `TimelineWidget` from `ui/main_window.py` after a
+  repository-wide reference check found no imports or runtime uses;
+  `RichTimelineWidget` remains the live timeline implementation.
+- Removed the now-unused Qt `Signal` import. `main_window.py` is now about 3,350
+  lines; the broader mechanical `MainWindow` split remains the next code-health
+  task.
+- Verification: `ruff check src tests scripts`; full suite (144 passed in
+  98.74 s); `git diff --check`.
+- No release tag is indicated for this internal dead-code cleanup. The current
+  release remains `v0.5.4-alpha`.

@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QByteArray, QMimeData, Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtCore import QByteArray, QMimeData, Qt, QThread, QTimer, QUrl
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -296,45 +296,6 @@ def delete_orphan_masks(masks_dir: Path, referenced: set[str]) -> int:
         except OSError:
             pass
     return removed
-
-
-class TimelineWidget(QWidget):
-    seek_requested = Signal(float)
-
-    def __init__(self, project: ProjectState, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setObjectName("timeline")
-        self.project = project
-        self.time_label = QLabel("0:00.0")
-        self.time_label.setProperty("role", "muted")
-        self.slider = QSlider(Qt.Orientation.Horizontal)
-        self.slider.setRange(0, 1)
-        self.slider.sliderMoved.connect(self._slider_moved)
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)
-        timeline_label = QLabel("Timeline")
-        timeline_label.setProperty("role", "title")
-        layout.addWidget(timeline_label)
-        layout.addWidget(self.time_label)
-        layout.addWidget(self.slider, 1)
-
-    def set_project(self, project: ProjectState) -> None:
-        self.project = project
-        self.refresh()
-
-    def refresh(self) -> None:
-        max_ms = max(1, int(self.project.duration * 1000))
-        self.slider.blockSignals(True)
-        self.slider.setRange(0, max_ms)
-        self.slider.setValue(min(max_ms, int(self.project.current_time * 1000)))
-        self.slider.blockSignals(False)
-        self.time_label.setText(
-            f"{format_time(self.project.current_time)} / {format_time(self.project.duration)}"
-        )
-
-    def _slider_moved(self, value: int) -> None:
-        self.seek_requested.emit(value / 1000)
 
 
 class MainWindow(QMainWindow):

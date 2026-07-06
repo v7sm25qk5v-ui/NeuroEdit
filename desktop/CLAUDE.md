@@ -180,8 +180,9 @@ layer paints the slide above it.
 - Exporter loading is deferred until export, still capture, or export-settings
   creation; keep that on-demand boundary intact. Live captions stay eager because
   `ui/canvas.py` uses them during normal preview, and torch remains lazy.
-- `ui/main_window.py` — `MainWindow` plus the unused legacy `TimelineWidget`.
-  Still the biggest file; high-level app wiring lives here. It re-exports
+- `ui/main_window.py` — `MainWindow`; the unused legacy `TimelineWidget` was
+  removed after a repository-wide reference check on 2026-07-06. Still the
+  biggest file; high-level app wiring lives here. It re-exports
   extracted UI classes where compatibility requires it.
 - `ui/export_worker.py` — background export execution. The exporter import stays
   inside `ExportWorker.run()` so importing the main window does not load ffmpeg
@@ -262,10 +263,11 @@ Other PHI safeguards:
 
 ## Optimization Automation Memory
 
-- **Last implementation:** 2026-07-05 — `LabelsPanel` was mechanically moved to
-  `ui/labels_panel.py` with preset persistence and stable re-export intact.
-- **Last reviewed:** current automation pass (2026-07-05) chose the safe
-  modularization slice; a speculative undo pre-serialize shortcut was deferred.
+- **Last implementation:** 2026-07-06 — the unused legacy `TimelineWidget` was
+  removed after confirming that no repository import or runtime path used it.
+- **Last reviewed:** current automation pass (2026-07-06) chose the safe dead-code
+  cleanup; the broader `MainWindow` split and speculative undo pre-serialize
+  shortcut remain deferred.
 - **Mode:** incremental. Next optimization review should deep-dive files changed
   after the §44 commit plus one hop. (Full-sweep baseline was `22085f9`,
   2026-06-17.)
@@ -315,7 +317,7 @@ Other PHI safeguards:
     push-then-autosave path. Compact byte storage, the 64 MiB cap, and fixture
     measurement are complete; only a correctness-preserving pre-serialize
     short-circuit remains open in P4.5.
-  - Modularization is mid-flight: `main_window.py` ~4,260 lines (down from
+  - Modularization is mid-flight: `main_window.py` ~3,350 lines (down from
     ~6,500; ticked up ~190 from the §37/§38 identity+font code); canvas →
     `ui/canvas.py`, SAM workers → `ui/sam_workers.py`,
     dialogs → `ui/dialogs.py`, export worker → `ui/export_worker.py`, audio →
@@ -350,7 +352,7 @@ Other PHI safeguards:
     Image, and single-file Media Explorer imports. A batch import loads one
     preview, selects the last successful clip, and creates one dirty/history
     operation; multi-video batches also share the §42 metadata progress dialog.
-  - Suite is **141 tests**; gate is `ruff check src tests scripts` +
+  - Suite is **144 tests**; gate is `ruff check src tests scripts` +
     `python -m pytest tests/ -q`, both green at this marker.
   - torch/SAM stack is lazy by design (venv has no torch → SAM no-ops);
     cold-start import audit (P4.5) is still unquantified.

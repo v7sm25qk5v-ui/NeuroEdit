@@ -233,6 +233,9 @@ the 144-test suite and `ruff` must stay green with no unintended user-visible ch
      `ui/labels_panel.py`; `main_window.py` re-exports the class and imports the
      shared preset definitions. The headless panel suite and an identity probe
      preserve existing behavior and import compatibility.
+   - Progress 2026-07-06: removed the unused legacy `TimelineWidget` after a
+     repository-wide reference check; `RichTimelineWidget` remains the live
+     timeline implementation.
    - Progress 2026-06-19: `MainWindow` gained a cached project-end-time helper
      used by seek/playback/export and invalidated on document edits/project
      loads. This addressed the playback loop's per-tick `project_end_time()`
@@ -321,7 +324,7 @@ the 144-test suite and `ruff` must stay green with no unintended user-visible ch
      module changed. Only the canonical `*.py` files remain under `src/`; tests
      and `ruff` stayed green.
 
-## Recommended immediate next sprint (updated 2026-07-05)
+## Recommended immediate next sprint (updated 2026-07-06)
 
 Phases 1–5 shipped (smoothness fixture + diagnostics, the Figma brand system and
 tokens, accessibility audit, smoothness caching, and the workflow refinements).
@@ -330,7 +333,7 @@ blockers are owner/hardware-bound (Windows installer smoke at 100/125/150 % DPI,
 signing/notarization, Stryker sample data). Take the code-health items in order —
 each is measurement-first and behavior-preserving:
 
-1. **Continue modularizing `ui/main_window.py`** (now ~3,390 lines after the
+1. **Continue modularizing `ui/main_window.py`** (now ~3,350 lines after the
    canvas, SAM worker/panel, labels-panel, dialog, and export-worker
    extractions). Split the still-large `MainWindow` class mechanically before
    touching behavior.
@@ -339,9 +342,6 @@ each is measurement-first and behavior-preserving:
    document equality without duplicating mutation bookkeeping or weakening undo.
 3. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (144 tests)
    green before every release tag; feed any new regressions back into the roadmap.
-
-The unused legacy `TimelineWidget` remains in `main_window.py`; verify that no
-external import depends on it before removing it in a separate cleanup.
 
 This keeps the project on a safe optimization loop: measure first, keep the codebase
 cheap to change and cheap to run, and only then restart larger feature bets
