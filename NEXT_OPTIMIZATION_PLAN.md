@@ -194,7 +194,7 @@ workflow refinements. The remaining roadmap work is owner/hardware-blocked
 (packaged-build smoke, signing, Stryker sample data), so the highest-leverage
 engineering work left is structural: keep the codebase cheap to change and
 cheap to run. Every item below is measurement-first and behavior-preserving —
-the 144-test suite and `ruff` must stay green with no unintended user-visible change.
+the 145-test suite and `ruff` must stay green with no unintended user-visible change.
 
 1. **Modularize `ui/main_window.py` (currently ~4,240 lines, down from ~6,500).**
    - `main_window.py` holds `MainWindow` plus `VideoGraphicsView`,
@@ -239,6 +239,10 @@ the 144-test suite and `ruff` must stay green with no unintended user-visible ch
    - Progress 2026-07-07: moved the header/About brand identity helpers to
      `ui/branding.py`; `main_window.py` imports and re-exports the helper names
      that existing tests and downstream imports use.
+   - Progress 2026-07-08: moved pure `MainWindow` utility constants/helpers to
+     `ui/main_window_utils.py`; `main_window.py` re-exports those names so the
+     existing mask cleanup, mask palette, media-extension, formatting/color, and
+     SAM propagation-window imports remain stable.
    - Progress 2026-06-19: `MainWindow` gained a cached project-end-time helper
      used by seek/playback/export and invalidated on document edits/project
      loads. This addressed the playback loop's per-tick `project_end_time()`
@@ -327,7 +331,7 @@ the 144-test suite and `ruff` must stay green with no unintended user-visible ch
      module changed. Only the canonical `*.py` files remain under `src/`; tests
      and `ruff` stayed green.
 
-## Recommended immediate next sprint (updated 2026-07-07)
+## Recommended immediate next sprint (updated 2026-07-08)
 
 Phases 1–5 shipped (smoothness fixture + diagnostics, the Figma brand system and
 tokens, accessibility audit, smoothness caching, and the workflow refinements).
@@ -336,14 +340,14 @@ blockers are owner/hardware-bound (Windows installer smoke at 100/125/150 % DPI,
 signing/notarization, Stryker sample data). Take the code-health items in order —
 each is measurement-first and behavior-preserving:
 
-1. **Continue modularizing `ui/main_window.py`** (now ~3,282 lines after the
-   canvas, SAM worker/panel, labels-panel, dialog, export-worker, and branding
-   helper extractions). Split the still-large `MainWindow` class mechanically
+1. **Continue modularizing `ui/main_window.py`** (now ~3,232 lines after the
+   canvas, SAM worker/panel, labels-panel, dialog, export-worker, branding
+   helper, and utility-helper extractions). Split the still-large `MainWindow` class mechanically
    before touching behavior.
 2. **Evaluate an undo pre-serialize change check** — compact history storage and
    the cumulative-size cap are complete. Only add a short-circuit if it can prove
    document equality without duplicating mutation bookkeeping or weakening undo.
-3. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (144 tests)
+3. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (145 tests)
    green before every release tag; feed any new regressions back into the roadmap.
 
 This keeps the project on a safe optimization loop: measure first, keep the codebase

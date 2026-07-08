@@ -13,9 +13,12 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from neuroedit_desktop.models import Annotation, ProjectState  # noqa: E402
 from neuroedit_desktop.sam_backend import SamBackend  # noqa: E402
+from neuroedit_desktop.ui import main_window_utils  # noqa: E402
 from neuroedit_desktop.ui.main_window import (  # noqa: E402
+    MASK_PALETTE,
     SamPanel,
     delete_orphan_masks,
+    hex_to_rgb,
     propagation_window_s,
     referenced_mask_paths,
 )
@@ -91,6 +94,14 @@ def test_old_dicts_without_new_keys_still_load() -> None:
 
 
 # ── Orphan mask cleanup ───────────────────────────────────────────────────
+
+
+def test_main_window_utility_re_exports_are_stable() -> None:
+    assert MASK_PALETTE is main_window_utils.MASK_PALETTE
+    assert hex_to_rgb is main_window_utils.hex_to_rgb
+    assert propagation_window_s is main_window_utils.propagation_window_s
+    assert referenced_mask_paths is main_window_utils.referenced_mask_paths
+    assert delete_orphan_masks is main_window_utils.delete_orphan_masks
 
 
 def test_orphan_mask_cleanup(tmp_path) -> None:

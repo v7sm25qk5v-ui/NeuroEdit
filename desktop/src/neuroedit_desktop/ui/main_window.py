@@ -90,6 +90,16 @@ from neuroedit_desktop.ui.labels_panel import (
     LabelsPanel,
     _load_custom_presets,
 )
+from neuroedit_desktop.ui.main_window_utils import (
+    IMAGE_EXTENSIONS,
+    MASK_PALETTE,
+    VIDEO_EXTENSIONS,
+    delete_orphan_masks,
+    format_time,
+    hex_to_rgb,
+    propagation_window_s,
+    referenced_mask_paths,
+)
 from neuroedit_desktop.ui.editor_panels import (
     AudioPanel,
     MediaExplorerPanel,
@@ -123,15 +133,23 @@ __all__ = [
     "ExportDialog",
     "ExportHistoryDialog",
     "ExportWorker",
+    "IMAGE_EXTENSIONS",
     "LabelsPanel",
+    "MASK_PALETTE",
     "PhiReviewDialog",
     "SamSetupDialog",
     "StorageLocationDialog",
+    "VIDEO_EXTENSIONS",
+    "delete_orphan_masks",
     "default_project_root",
+    "format_time",
+    "hex_to_rgb",
     "legacy_project_root",
     "migrate_storage_root",
+    "propagation_window_s",
     "recommended_preset_key",
     "recommended_project_root",
+    "referenced_mask_paths",
 ]
 
 VIDEO_TYPES = [
@@ -161,74 +179,6 @@ PANELS: list[tuple[PanelType, str, str]] = [
     ("slides", "Slides", ACCENT_SLIDES),
     ("audio",  "Audio",  ACCENT_RED),
 ]
-
-# Auto-assigned SAM mask colors: cyan, magenta, yellow, green, orange, blue,
-# pink, lime. Colorblind-aware and deliberately without red — red reads as
-# blood/danger on surgical video.
-MASK_PALETTE = [
-    "#22d3ee", "#e879f9", "#facc15", "#4ade80",
-    "#fb923c", "#60a5fa", "#f472b6", "#a3e635",
-]
-
-VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".webm"}
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".heic", ".bmp", ".webp"}
-
-def format_time(seconds: float) -> str:
-    seconds = max(0.0, seconds)
-    minutes = int(seconds // 60)
-    remainder = seconds % 60
-    return f"{minutes}:{remainder:04.1f}"
-
-
-def hex_to_rgb(color_hex: str) -> tuple[int, int, int]:
-    value = color_hex.lstrip("#")
-    return int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16)
-
-
-def propagation_window_s(remaining_s: float, to_clip_end: bool, window_s: float) -> float:
-    """Effective SAM propagation window: to the end of the clip, or the
-    user-chosen window clamped to the remaining clip length (never below 1 s)."""
-    if to_clip_end:
-        return max(1.0, remaining_s)
-    return max(1.0, min(window_s, remaining_s))
-
-
-def referenced_mask_paths(project_dicts: list[dict]) -> set[str]:
-    """Every mask PNG referenced by the given project dicts (current project
-    plus undo/redo snapshots), as resolved path strings."""
-    referenced: set[str] = set()
-    for data in project_dicts:
-        for ann in data.get("annotations") or []:
-            mask_path = ann.get("mask_path")
-            if mask_path:
-                referenced.add(str(Path(str(mask_path)).resolve()))
-            for frame in ann.get("mask_frames") or []:
-                frame_path = frame.get("mask_path")
-                if frame_path:
-                    referenced.add(str(Path(str(frame_path)).resolve()))
-    return referenced
-
-
-def delete_orphan_masks(masks_dir: Path, referenced: set[str]) -> int:
-    """Delete unreferenced files directly inside masks_dir. Never touches
-    anything outside that directory. Returns the number of files removed."""
-    if not masks_dir.is_dir():
-        return 0
-    masks_dir = masks_dir.resolve()
-    removed = 0
-    for path in masks_dir.iterdir():
-        resolved = path.resolve()
-        if not resolved.is_file() or resolved.parent != masks_dir:
-            continue
-        if str(resolved) in referenced:
-            continue
-        try:
-            resolved.unlink()
-            removed += 1
-        except OSError:
-            pass
-    return removed
-
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:

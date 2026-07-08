@@ -1687,3 +1687,22 @@ analyzed this content as uncommitted work). No code changed; markdown only.
   62.08 s); `git diff --check`; branding helper re-export compatibility probe.
 - No release tag is indicated for this internal refactor. The current release
   remains `v0.5.4-alpha`.
+
+## 57. MainWindow utility helper extraction (2026-07-08)
+
+- Moved pure `MainWindow` utility constants/helpers from `ui/main_window.py` to
+  `ui/main_window_utils.py` as a mechanical Phase 6 modularization slice. The new
+  module owns the mask palette, supported media extension sets, time/color
+  formatting helpers, SAM propagation-window math, and orphan-mask cleanup
+  helpers.
+- `main_window.py` imports and re-exports those names, so existing direct imports
+  such as `neuroedit_desktop.ui.main_window.delete_orphan_masks` and
+  `MASK_PALETTE` continue to resolve. `main_window.py` is now about 3,232 lines;
+  the broader mechanical `MainWindow` split remains the next code-health task.
+- Added a re-export identity regression alongside the existing SAM/orphan-mask
+  behavior tests.
+- Verification: `ruff check src tests scripts`; focused SAM/design-token tests
+  (28 passed); full suite (145 passed in 34.30 s); `git diff --check`;
+  utility re-export compatibility probe.
+- No release tag is indicated for this internal refactor. The current release
+  remains `v0.5.4-alpha`.

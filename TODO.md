@@ -176,7 +176,7 @@ template); see Completed section.
 
 Highest-leverage engineering work while P0 release items stay owner/hardware
 blocked and P5 stays parked. All items are measurement-first and
-behavior-preserving — the 144-test suite and `ruff` must stay green with no
+behavior-preserving — the 145-test suite and `ruff` must stay green with no
 user-visible change. Full rationale and acceptance criteria in
 [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md) Phase 6.
 
@@ -215,10 +215,14 @@ import audit.
   **Progress 2026-07-07:** moved the header/About brand identity helpers to
   `ui/branding.py`; `main_window` imports the shared SVG mark renderer and
   wordmark font helper, preserving existing compatibility imports.
+  **Progress 2026-07-08:** moved pure `MainWindow` utility constants/helpers
+  to `ui/main_window_utils.py`; `main_window` re-exports the mask palette,
+  media extension sets, formatting/color helpers, SAM propagation-window math,
+  and orphan-mask cleanup helpers for compatibility.
   The broader mechanical `MainWindow` split remains open. Current line counts:
-  `main_window.py` ~3,282, `branding.py` ~74, `labels_panel.py` ~525,
-  `sam_panel.py` ~412, `dialogs.py` ~804, `canvas.py` ~1,285,
-  `sam_workers.py` ~146.
+  `main_window.py` ~3,232, `main_window_utils.py` ~68, `branding.py` ~74,
+  `labels_panel.py` ~525, `sam_panel.py` ~412, `dialogs.py` ~804,
+  `canvas.py` ~1,285, `sam_workers.py` ~146.
 - [x] Modularize `ui/editor_panels.py` (~2,960 lines) — it is also over the
   ~2,500-line `ui/` target. Extract `AudioPanel` (~970 lines, the largest
   class) into its own `ui/audio_panel.py`, re-exported from `editor_panels`;

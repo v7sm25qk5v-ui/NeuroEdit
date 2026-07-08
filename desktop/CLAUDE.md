@@ -92,7 +92,7 @@ python -c "import py_compile; py_compile.compile('src/neuroedit_desktop/<file>.p
 hf auth login
 ```
 
-The suite under `tests/` collects **144 tests** (`python -m pytest tests/ -q`).
+The suite under `tests/` collects **145 tests** (`python -m pytest tests/ -q`).
 Keep it and `ruff check src tests scripts` green before every release tag.
 
 ### venv-location note (current setup is intentional)
@@ -184,6 +184,10 @@ layer paints the slide above it.
   removed after a repository-wide reference check on 2026-07-06. Still the
   biggest file; high-level app wiring lives here. It re-exports
   extracted UI classes where compatibility requires it.
+- `ui/main_window_utils.py` — pure helper/constants split out of `MainWindow`:
+  mask palette, supported media extensions, time/color formatting, SAM
+  propagation-window math, and orphan-mask cleanup. `main_window.py` re-exports
+  these names for compatibility.
 - `ui/branding.py` — header/About identity helpers: theme-matched SVG mark
   rasterization and bundled Space Grotesk wordmark font loading. `main_window.py`
   imports these helpers so existing compatibility imports keep working.
@@ -266,10 +270,11 @@ Other PHI safeguards:
 
 ## Optimization Automation Memory
 
-- **Last implementation:** 2026-07-06 — the unused legacy `TimelineWidget` was
-  removed after confirming that no repository import or runtime path used it.
-- **Last reviewed:** current automation pass (2026-07-06) chose the safe dead-code
-  cleanup; the broader `MainWindow` split and speculative undo pre-serialize
+- **Last implementation:** 2026-07-08 — pure `MainWindow` utility
+  constants/helpers moved to `ui/main_window_utils.py`, with `main_window.py`
+  re-exporting the existing names.
+- **Last reviewed:** current automation pass (2026-07-08) chose the safe utility
+  extraction; the broader `MainWindow` split and speculative undo pre-serialize
   shortcut remain deferred.
 - **Mode:** incremental. Next optimization review should deep-dive files changed
   after the §44 commit plus one hop. (Full-sweep baseline was `22085f9`,
@@ -320,12 +325,13 @@ Other PHI safeguards:
     push-then-autosave path. Compact byte storage, the 64 MiB cap, and fixture
     measurement are complete; only a correctness-preserving pre-serialize
     short-circuit remains open in P4.5.
-  - Modularization is mid-flight: `main_window.py` ~3,282 lines (down from
+  - Modularization is mid-flight: `main_window.py` ~3,232 lines (down from
     ~6,500); canvas → `ui/canvas.py`, SAM workers → `ui/sam_workers.py`,
     dialogs → `ui/dialogs.py`, export worker → `ui/export_worker.py`, branding →
-    `ui/branding.py`, audio → `ui/audio_panel.py`, project library →
-    `ui/project_library.py`, all re-exported from their origin module so import
-    paths stay stable. Remaining: split the still-large `MainWindow` class.
+    `ui/branding.py`, utility helpers → `ui/main_window_utils.py`, audio →
+    `ui/audio_panel.py`, project library → `ui/project_library.py`, all
+    re-exported from their origin module so import paths stay stable. Remaining:
+    split the still-large `MainWindow` class.
   - Playback-loop optimization is partially complete: `MainWindow._project_end_time()`
     caches `project_end_time()` for seek/playback/export and invalidates on
     document edits/project load/undo/redo restores. Playback uses the monotonic
@@ -354,7 +360,7 @@ Other PHI safeguards:
     Image, and single-file Media Explorer imports. A batch import loads one
     preview, selects the last successful clip, and creates one dirty/history
     operation; multi-video batches also share the §42 metadata progress dialog.
-  - Suite is **144 tests**; gate is `ruff check src tests scripts` +
+  - Suite is **145 tests**; gate is `ruff check src tests scripts` +
     `python -m pytest tests/ -q`, both green at this marker.
   - torch/SAM stack is lazy by design (venv has no torch → SAM no-ops);
     cold-start import audit (P4.5) is still unquantified.
