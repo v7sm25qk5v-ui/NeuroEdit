@@ -212,9 +212,13 @@ import audit.
   **Progress 2026-07-06:** removed the unused legacy `TimelineWidget` after a
   repository-wide reference check confirmed that `RichTimelineWidget` is the
   only live timeline implementation.
+  **Progress 2026-07-07:** moved the header/About brand identity helpers to
+  `ui/branding.py`; `main_window` imports the shared SVG mark renderer and
+  wordmark font helper, preserving existing compatibility imports.
   The broader mechanical `MainWindow` split remains open. Current line counts:
-  `main_window.py` ~3,350, `labels_panel.py` ~525, `sam_panel.py` ~412,
-  `dialogs.py` ~804, `canvas.py` ~1,285, `sam_workers.py` ~146.
+  `main_window.py` ~3,282, `branding.py` ~74, `labels_panel.py` ~525,
+  `sam_panel.py` ~412, `dialogs.py` ~804, `canvas.py` ~1,285,
+  `sam_workers.py` ~146.
 - [x] Modularize `ui/editor_panels.py` (~2,960 lines) — it is also over the
   ~2,500-line `ui/` target. Extract `AudioPanel` (~970 lines, the largest
   class) into its own `ui/audio_panel.py`, re-exported from `editor_panels`;

@@ -236,6 +236,9 @@ the 144-test suite and `ruff` must stay green with no unintended user-visible ch
    - Progress 2026-07-06: removed the unused legacy `TimelineWidget` after a
      repository-wide reference check; `RichTimelineWidget` remains the live
      timeline implementation.
+   - Progress 2026-07-07: moved the header/About brand identity helpers to
+     `ui/branding.py`; `main_window.py` imports and re-exports the helper names
+     that existing tests and downstream imports use.
    - Progress 2026-06-19: `MainWindow` gained a cached project-end-time helper
      used by seek/playback/export and invalidated on document edits/project
      loads. This addressed the playback loop's per-tick `project_end_time()`
@@ -324,7 +327,7 @@ the 144-test suite and `ruff` must stay green with no unintended user-visible ch
      module changed. Only the canonical `*.py` files remain under `src/`; tests
      and `ruff` stayed green.
 
-## Recommended immediate next sprint (updated 2026-07-06)
+## Recommended immediate next sprint (updated 2026-07-07)
 
 Phases 1–5 shipped (smoothness fixture + diagnostics, the Figma brand system and
 tokens, accessibility audit, smoothness caching, and the workflow refinements).
@@ -333,10 +336,10 @@ blockers are owner/hardware-bound (Windows installer smoke at 100/125/150 % DPI,
 signing/notarization, Stryker sample data). Take the code-health items in order —
 each is measurement-first and behavior-preserving:
 
-1. **Continue modularizing `ui/main_window.py`** (now ~3,350 lines after the
-   canvas, SAM worker/panel, labels-panel, dialog, and export-worker
-   extractions). Split the still-large `MainWindow` class mechanically before
-   touching behavior.
+1. **Continue modularizing `ui/main_window.py`** (now ~3,282 lines after the
+   canvas, SAM worker/panel, labels-panel, dialog, export-worker, and branding
+   helper extractions). Split the still-large `MainWindow` class mechanically
+   before touching behavior.
 2. **Evaluate an undo pre-serialize change check** — compact history storage and
    the cumulative-size cap are complete. Only add a short-circuit if it can prove
    document equality without duplicating mutation bookkeeping or weakening undo.

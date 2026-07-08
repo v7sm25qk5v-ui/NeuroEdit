@@ -184,6 +184,9 @@ layer paints the slide above it.
   removed after a repository-wide reference check on 2026-07-06. Still the
   biggest file; high-level app wiring lives here. It re-exports
   extracted UI classes where compatibility requires it.
+- `ui/branding.py` — header/About identity helpers: theme-matched SVG mark
+  rasterization and bundled Space Grotesk wordmark font loading. `main_window.py`
+  imports these helpers so existing compatibility imports keep working.
 - `ui/export_worker.py` — background export execution. The exporter import stays
   inside `ExportWorker.run()` so importing the main window does not load ffmpeg
   composition code. `main_window.py` re-exports the class for compatibility.
@@ -317,13 +320,12 @@ Other PHI safeguards:
     push-then-autosave path. Compact byte storage, the 64 MiB cap, and fixture
     measurement are complete; only a correctness-preserving pre-serialize
     short-circuit remains open in P4.5.
-  - Modularization is mid-flight: `main_window.py` ~3,350 lines (down from
-    ~6,500; ticked up ~190 from the §37/§38 identity+font code); canvas →
-    `ui/canvas.py`, SAM workers → `ui/sam_workers.py`,
-    dialogs → `ui/dialogs.py`, export worker → `ui/export_worker.py`, audio →
-    `ui/audio_panel.py`, project library → `ui/project_library.py`, all
-    re-exported from their origin module so import paths stay stable. Remaining:
-    split the still-large `MainWindow` class.
+  - Modularization is mid-flight: `main_window.py` ~3,282 lines (down from
+    ~6,500); canvas → `ui/canvas.py`, SAM workers → `ui/sam_workers.py`,
+    dialogs → `ui/dialogs.py`, export worker → `ui/export_worker.py`, branding →
+    `ui/branding.py`, audio → `ui/audio_panel.py`, project library →
+    `ui/project_library.py`, all re-exported from their origin module so import
+    paths stay stable. Remaining: split the still-large `MainWindow` class.
   - Playback-loop optimization is partially complete: `MainWindow._project_end_time()`
     caches `project_end_time()` for seek/playback/export and invalidates on
     document edits/project load/undo/redo restores. Playback uses the monotonic

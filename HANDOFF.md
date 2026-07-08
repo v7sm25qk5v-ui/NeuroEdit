@@ -1672,3 +1672,18 @@ analyzed this content as uncommitted work). No code changed; markdown only.
   98.74 s); `git diff --check`.
 - No release tag is indicated for this internal dead-code cleanup. The current
   release remains `v0.5.4-alpha`.
+
+## 56. Branding helper extraction (2026-07-07)
+
+- Moved the header/About identity helpers from `ui/main_window.py` to
+  `ui/branding.py` as a mechanical Phase 6 modularization slice. The new module
+  owns the theme-matched SVG mark path/rasterization and bundled Space Grotesk
+  wordmark font loading.
+- `main_window.py` imports those helpers, so existing direct imports such as
+  `neuroedit_desktop.ui.main_window._wordmark_font` continue to resolve.
+  `main_window.py` is now about 3,282 lines; the broader mechanical
+  `MainWindow` split remains the next code-health task.
+- Verification: `ruff check src tests scripts`; full suite (144 passed in
+  62.08 s); `git diff --check`; branding helper re-export compatibility probe.
+- No release tag is indicated for this internal refactor. The current release
+  remains `v0.5.4-alpha`.
