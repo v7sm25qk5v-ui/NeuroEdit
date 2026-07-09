@@ -243,6 +243,11 @@ the 145-test suite and `ruff` must stay green with no unintended user-visible ch
      `ui/main_window_utils.py`; `main_window.py` re-exports those names so the
      existing mask cleanup, mask palette, media-extension, formatting/color, and
      SAM propagation-window imports remain stable.
+   - Progress 2026-07-09: moved the SAM workflow orchestration methods to
+     `ui/sam_workflow.py` as a mixin. The existing `MainWindow` signal wiring
+     still targets the same method names, while SAM backend probing, setup,
+     segmentation, propagation, re-track, heartbeat, and weight-delete control
+     logic now live outside the window file.
    - Progress 2026-06-19: `MainWindow` gained a cached project-end-time helper
      used by seek/playback/export and invalidated on document edits/project
      loads. This addressed the playback loop's per-tick `project_end_time()`
@@ -331,7 +336,7 @@ the 145-test suite and `ruff` must stay green with no unintended user-visible ch
      module changed. Only the canonical `*.py` files remain under `src/`; tests
      and `ruff` stayed green.
 
-## Recommended immediate next sprint (updated 2026-07-08)
+## Recommended immediate next sprint (updated 2026-07-09)
 
 Phases 1–5 shipped (smoothness fixture + diagnostics, the Figma brand system and
 tokens, accessibility audit, smoothness caching, and the workflow refinements).
@@ -340,10 +345,10 @@ blockers are owner/hardware-bound (Windows installer smoke at 100/125/150 % DPI,
 signing/notarization, Stryker sample data). Take the code-health items in order —
 each is measurement-first and behavior-preserving:
 
-1. **Continue modularizing `ui/main_window.py`** (now ~3,232 lines after the
-   canvas, SAM worker/panel, labels-panel, dialog, export-worker, branding
-   helper, and utility-helper extractions). Split the still-large `MainWindow` class mechanically
-   before touching behavior.
+1. **Continue modularizing `ui/main_window.py`** (now ~2,742 lines after the
+   canvas, SAM worker/panel/workflow, labels-panel, dialog, export-worker,
+   branding-helper, and utility-helper extractions). One more mechanical slice
+   should bring it below the ~2,500-line target before touching behavior.
 2. **Evaluate an undo pre-serialize change check** — compact history storage and
    the cumulative-size cap are complete. Only add a short-circuit if it can prove
    document equality without duplicating mutation bookkeeping or weakening undo.

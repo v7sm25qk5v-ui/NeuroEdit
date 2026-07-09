@@ -114,9 +114,11 @@ sync delay — not to move the venv off iCloud.
 - Single `QApplication` process. UI on the main thread.
 - SAM (PyTorch + transformers) runs on background `QThread`s via four worker
   `QObject`s in `ui/sam_workers.py`: `SamProbeWorker`, `SamSegmentWorker`,
-  `SamPropagationWorker`, and `SamDownloadWorker`. `ui/main_window.py`
-  re-exports them for import stability. Each emits `progress(str)` and
-  `finished(...)`. Workers wrap calls into `sam_backend.SamBackend`.
+  `SamPropagationWorker`, and `SamDownloadWorker`. `ui/sam_workflow.py` owns the
+  `MainWindow` orchestration methods for probing, setup, segmentation,
+  propagation, re-track, and weight cleanup. `ui/main_window.py` re-exports the
+  workers for import stability. Each emits `progress(str)` and `finished(...)`.
+  Workers wrap calls into `sam_backend.SamBackend`.
 - Because torch import + first weight download can take tens of seconds, every
   long-running stage is paired with a 500 ms heartbeat timer
   (`_start_sam_heartbeat` / `_tick_sam_heartbeat`) that appends elapsed
@@ -184,6 +186,9 @@ layer paints the slide above it.
   removed after a repository-wide reference check on 2026-07-06. Still the
   biggest file; high-level app wiring lives here. It re-exports
   extracted UI classes where compatibility requires it.
+- `ui/sam_workflow.py` — `SamWorkflowMixin`, containing `MainWindow`'s SAM
+  backend probing, setup/download, segmentation, propagation/re-track,
+  heartbeat, and weight-cleanup orchestration.
 - `ui/main_window_utils.py` — pure helper/constants split out of `MainWindow`:
   mask palette, supported media extensions, time/color formatting, SAM
   propagation-window math, and orphan-mask cleanup. `main_window.py` re-exports
@@ -325,13 +330,14 @@ Other PHI safeguards:
     push-then-autosave path. Compact byte storage, the 64 MiB cap, and fixture
     measurement are complete; only a correctness-preserving pre-serialize
     short-circuit remains open in P4.5.
-  - Modularization is mid-flight: `main_window.py` ~3,232 lines (down from
-    ~6,500); canvas → `ui/canvas.py`, SAM workers → `ui/sam_workers.py`,
-    dialogs → `ui/dialogs.py`, export worker → `ui/export_worker.py`, branding →
-    `ui/branding.py`, utility helpers → `ui/main_window_utils.py`, audio →
-    `ui/audio_panel.py`, project library → `ui/project_library.py`, all
-    re-exported from their origin module so import paths stay stable. Remaining:
-    split the still-large `MainWindow` class.
+  - Modularization is mid-flight: `main_window.py` ~2,742 lines (down from
+    ~6,500); canvas → `ui/canvas.py`, SAM workers → `ui/sam_workers.py`, SAM
+    workflow → `ui/sam_workflow.py`, dialogs → `ui/dialogs.py`, export worker →
+    `ui/export_worker.py`, branding → `ui/branding.py`, utility helpers →
+    `ui/main_window_utils.py`, audio → `ui/audio_panel.py`, project library →
+    `ui/project_library.py`, all re-exported from their origin module where
+    compatibility requires it. Remaining: one more mechanical split to get
+    `main_window.py` under the ~2,500-line target.
   - Playback-loop optimization is partially complete: `MainWindow._project_end_time()`
     caches `project_end_time()` for seek/playback/export and invalidates on
     document edits/project load/undo/redo restores. Playback uses the monotonic

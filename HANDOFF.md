@@ -1706,3 +1706,19 @@ analyzed this content as uncommitted work). No code changed; markdown only.
   utility re-export compatibility probe.
 - No release tag is indicated for this internal refactor. The current release
   remains `v0.5.4-alpha`.
+
+## 58. SAM workflow mixin extraction (2026-07-09)
+
+- Moved the SAM workflow orchestration methods from `ui/main_window.py` to
+  `ui/sam_workflow.py` as `SamWorkflowMixin`. The moved methods cover SAM point
+  controls, backend probing, setup/download, segmentation, propagation,
+  re-track, heartbeat status, and weight deletion.
+- `MainWindow` now inherits the mixin while keeping the same signal wiring and
+  compatibility re-exports for SAM workers/dialogs. `main_window.py` is now
+  about 2,742 lines; one more mechanical slice should bring it below the
+  ~2,500-line `ui/` module target.
+- Verification: `ruff check src tests scripts`; focused SAM/headless coverage
+  (`35 passed`); full suite (`145 passed in 22.89 s`); `git diff --check`;
+  `MainWindow`/`SamWorkflowMixin` import compatibility probe.
+- No release tag is indicated for this internal refactor. The current release
+  remains `v0.5.4-alpha`.
