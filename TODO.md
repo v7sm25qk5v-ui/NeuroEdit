@@ -223,10 +223,15 @@ import audit.
   `ui/sam_workflow.py` as a mixin; `MainWindow` keeps the same signal wiring
   and SAM behavior while the segmentation/propagation/download controller logic
   is isolated from the rest of the window class.
-  The broader mechanical `MainWindow` split remains open. Current line counts:
-  `main_window.py` ~2,742, `sam_workflow.py` ~516, `main_window_utils.py` ~68,
-  `branding.py` ~74, `labels_panel.py` ~525, `sam_panel.py` ~412,
-  `dialogs.py` ~804, `canvas.py` ~1,285, `sam_workers.py` ~146.
+  **Progress 2026-07-10:** moved the MP4/caption export controller methods to
+  `ui/export_workflow.py` as a mixin; `MainWindow` keeps the same export button,
+  menu action, progress dialog, history, reveal, and report behavior. This brings
+  `main_window.py` below the ~2,500-line target. Current line counts:
+  `main_window.py` ~2,447, `export_workflow.py` ~312, `sam_workflow.py` ~516,
+  `main_window_utils.py` ~68, `branding.py` ~74, `labels_panel.py` ~525,
+  `sam_panel.py` ~412, `dialogs.py` ~804, `canvas.py` ~1,285,
+  `sam_workers.py` ~146. Remaining modularization is lower priority and should
+  only target cohesive slices that simplify future work.
 - [x] Modularize `ui/editor_panels.py` (~2,960 lines) — it is also over the
   ~2,500-line `ui/` target. Extract `AudioPanel` (~970 lines, the largest
   class) into its own `ui/audio_panel.py`, re-exported from `editor_panels`;

@@ -248,6 +248,11 @@ the 145-test suite and `ruff` must stay green with no unintended user-visible ch
      still targets the same method names, while SAM backend probing, setup,
      segmentation, propagation, re-track, heartbeat, and weight-delete control
      logic now live outside the window file.
+   - Progress 2026-07-10: moved MP4 export, caption export, export history,
+     reveal, and export-report controller methods to `ui/export_workflow.py` as
+     a mixin. `MainWindow` now inherits that mixin, keeps compatibility
+     re-exports for dialogs/workers, and is ~2,447 lines, below the ~2,500-line
+     module target.
    - Progress 2026-06-19: `MainWindow` gained a cached project-end-time helper
      used by seek/playback/export and invalidated on document edits/project
      loads. This addressed the playback loop's per-tick `project_end_time()`
@@ -336,7 +341,7 @@ the 145-test suite and `ruff` must stay green with no unintended user-visible ch
      module changed. Only the canonical `*.py` files remain under `src/`; tests
      and `ruff` stayed green.
 
-## Recommended immediate next sprint (updated 2026-07-09)
+## Recommended immediate next sprint (updated 2026-07-10)
 
 Phases 1–5 shipped (smoothness fixture + diagnostics, the Figma brand system and
 tokens, accessibility audit, smoothness caching, and the workflow refinements).
@@ -345,13 +350,12 @@ blockers are owner/hardware-bound (Windows installer smoke at 100/125/150 % DPI,
 signing/notarization, Stryker sample data). Take the code-health items in order —
 each is measurement-first and behavior-preserving:
 
-1. **Continue modularizing `ui/main_window.py`** (now ~2,742 lines after the
-   canvas, SAM worker/panel/workflow, labels-panel, dialog, export-worker,
-   branding-helper, and utility-helper extractions). One more mechanical slice
-   should bring it below the ~2,500-line target before touching behavior.
-2. **Evaluate an undo pre-serialize change check** — compact history storage and
+1. **Evaluate an undo pre-serialize change check** — compact history storage and
    the cumulative-size cap are complete. Only add a short-circuit if it can prove
    document equality without duplicating mutation bookkeeping or weakening undo.
+2. **Only continue `ui/main_window.py` modularization for cohesive slices** —
+   it is now below the ~2,500-line target, so further moves should be justified
+   by clearer ownership or an upcoming change, not by line count alone.
 3. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (145 tests)
    green before every release tag; feed any new regressions back into the roadmap.
 

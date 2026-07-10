@@ -1722,3 +1722,18 @@ analyzed this content as uncommitted work). No code changed; markdown only.
   `MainWindow`/`SamWorkflowMixin` import compatibility probe.
 - No release tag is indicated for this internal refactor. The current release
   remains `v0.5.4-alpha`.
+
+## 59. Export workflow mixin extraction (2026-07-10)
+
+- Moved the MP4 export, caption export, export history, reveal, progress, and
+  export-report controller methods from `ui/main_window.py` to
+  `ui/export_workflow.py` as `ExportWorkflowMixin`.
+- `MainWindow` now inherits the export mixin alongside `SamWorkflowMixin`.
+  Existing export button/menu signal wiring and compatibility re-exports for
+  export dialogs/workers remain in place. `main_window.py` is now about 2,447
+  lines, below the Phase 6 ~2,500-line `ui/` module target.
+- Verification: `ruff check` on changed export/headless files; export-focused
+  tests (`34 passed`); full `ruff check src tests scripts`; full suite
+  (`145 passed in 23.41 s`); `git diff --check`.
+- No release tag is indicated for this internal refactor. The current release
+  remains `v0.5.4-alpha`.

@@ -183,9 +183,9 @@ layer paints the slide above it.
   creation; keep that on-demand boundary intact. Live captions stay eager because
   `ui/canvas.py` uses them during normal preview, and torch remains lazy.
 - `ui/main_window.py` — `MainWindow`; the unused legacy `TimelineWidget` was
-  removed after a repository-wide reference check on 2026-07-06. Still the
-  biggest file; high-level app wiring lives here. It re-exports
-  extracted UI classes where compatibility requires it.
+  removed after a repository-wide reference check on 2026-07-06. High-level app
+  wiring lives here. It re-exports extracted UI classes where compatibility
+  requires it.
 - `ui/sam_workflow.py` — `SamWorkflowMixin`, containing `MainWindow`'s SAM
   backend probing, setup/download, segmentation, propagation/re-track,
   heartbeat, and weight-cleanup orchestration.
@@ -199,6 +199,9 @@ layer paints the slide above it.
 - `ui/export_worker.py` — background export execution. The exporter import stays
   inside `ExportWorker.run()` so importing the main window does not load ffmpeg
   composition code. `main_window.py` re-exports the class for compatibility.
+- `ui/export_workflow.py` — `ExportWorkflowMixin`, containing `MainWindow`'s MP4
+  export, caption export, export history, reveal, progress, and report-writing
+  controller methods.
 - `ui/canvas.py` — `VideoGraphicsView` and `AnnotationGraphicsItem`.
 - `ui/sam_workers.py` — SAM worker QObjects.
 - `ui/sam_panel.py` — SAM controls, tracked-mask list, and propagation settings.
@@ -330,14 +333,15 @@ Other PHI safeguards:
     push-then-autosave path. Compact byte storage, the 64 MiB cap, and fixture
     measurement are complete; only a correctness-preserving pre-serialize
     short-circuit remains open in P4.5.
-  - Modularization is mid-flight: `main_window.py` ~2,742 lines (down from
-    ~6,500); canvas → `ui/canvas.py`, SAM workers → `ui/sam_workers.py`, SAM
-    workflow → `ui/sam_workflow.py`, dialogs → `ui/dialogs.py`, export worker →
+  - Modularization is past the Phase 6 line-count target: `main_window.py`
+    ~2,447 lines (down from ~6,500); canvas → `ui/canvas.py`, SAM workers →
+    `ui/sam_workers.py`, SAM workflow → `ui/sam_workflow.py`, export workflow →
+    `ui/export_workflow.py`, dialogs → `ui/dialogs.py`, export worker →
     `ui/export_worker.py`, branding → `ui/branding.py`, utility helpers →
     `ui/main_window_utils.py`, audio → `ui/audio_panel.py`, project library →
     `ui/project_library.py`, all re-exported from their origin module where
-    compatibility requires it. Remaining: one more mechanical split to get
-    `main_window.py` under the ~2,500-line target.
+    compatibility requires it. Future splits should be ownership-driven rather
+    than line-count-driven.
   - Playback-loop optimization is partially complete: `MainWindow._project_end_time()`
     caches `project_end_time()` for seek/playback/export and invalidates on
     document edits/project load/undo/redo restores. Playback uses the monotonic
