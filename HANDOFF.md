@@ -1737,3 +1737,22 @@ analyzed this content as uncommitted work). No code changed; markdown only.
   (`145 passed in 23.41 s`); `git diff --check`.
 - No release tag is indicated for this internal refactor. The current release
   remains `v0.5.4-alpha`.
+
+## 60. Cached undo no-op serialization skip (2026-07-11)
+
+- Implemented the safe part of the remaining undo-cost item: `_push_history()`
+  now compares the freshly built `ProjectState.to_dict()` result with the cached
+  autosave dict before building the compact JSON payload and BLAKE2 hash. When
+  they match, the no-op history push returns early after clearing redo
+  bookkeeping, preserving the existing net-zero-edit semantics and autosave
+  reuse.
+- Added focused coverage proving the cached no-op path skips payload
+  reserialization and still clears `_redo_stack`, `_redo_hashes`, and
+  `_redo_sizes`.
+- Deferred a true pre-`to_dict()` shortcut: the current model has no trustworthy
+  document revision signal, and adding broad mutation bookkeeping is not worth
+  the correctness risk for this micro-optimization.
+- Verification: focused undo/playback suite (`18 passed`). Full lint/suite
+  results are recorded with the commit for this run.
+- No release tag is indicated for this internal optimization. The current
+  release remains `v0.5.4-alpha`.

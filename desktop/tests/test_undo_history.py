@@ -248,6 +248,30 @@ def test_history_dedup_uses_snapshot_hash() -> None:
     assert len(window._undo_hashes) == 1
 
 
+def test_cached_snapshot_dedup_skips_payload_reserialize(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = ProjectState()
+    project.annotations.append(_annotation())
+    window = _window(project)
+    window._update_annotation_label("ann-1", "Updated")
+    window._redo_stack = [b'{"annotations":[{"label":"future"}]}']
+    window._redo_hashes = ["future"]
+    window._redo_sizes = [100]
+
+    def fail_snapshot_payload(_snapshot: dict) -> bytes:
+        raise AssertionError("unchanged cached snapshot should not be reserialized")
+
+    monkeypatch.setattr(window, "_snapshot_payload", fail_snapshot_payload)
+
+    window._push_history()
+
+    assert len(window._undo_stack) == 2
+    assert window._redo_stack == []
+    assert window._redo_hashes == []
+    assert window._redo_sizes == []
+
+
 def test_history_evicts_oldest_snapshots_over_byte_limit() -> None:
     project = ProjectState()
     project.annotations.append(_annotation(label="Initial"))

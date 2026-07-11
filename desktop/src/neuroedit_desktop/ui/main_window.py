@@ -1088,6 +1088,16 @@ class MainWindow(ExportWorkflowMixin, SamWorkflowMixin, QMainWindow):
 
     def _push_history(self) -> None:
         project_data = self.project.to_dict()
+        if (
+            self._autosave_snapshot is not None
+            and project_data == self._autosave_snapshot
+        ):
+            self._autosave_snapshot = project_data
+            self._redo_stack.clear()
+            self._redo_hashes.clear()
+            self._redo_sizes.clear()
+            self._update_history_actions()
+            return
         snapshot = self._snapshot(project_data)
         snapshot_payload = self._snapshot_payload(snapshot)
         snapshot_hash = self._payload_hash(snapshot_payload)

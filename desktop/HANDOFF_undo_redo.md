@@ -144,3 +144,15 @@ stub panels/views, so no real Qt event loop):
 - Across 50 generated smoothness-fixture edits, traced retained memory fell from
   0.631 MiB to 0.400 MiB (36.6%). Median push time stayed effectively flat at
   0.640 ms before and 0.629 ms after.
+
+## 2026-07-11 — cached no-op history skip
+
+- `_push_history()` now checks whether the freshly built project dict matches
+  `_autosave_snapshot` before building the transient-stripped compact JSON
+  payload and BLAKE2 hash. This covers cached no-op history pushes after a prior
+  history push while still clearing redo and preserving autosave reuse.
+- The change intentionally does not add broad mutation bookkeeping or a new
+  `ProjectState` revision counter. A true pre-`to_dict()` short-circuit remains
+  deferred unless document equality can be proven without weakening undo.
+- Focused coverage asserts the cached no-op path skips payload reserialization
+  and still clears redo bookkeeping.

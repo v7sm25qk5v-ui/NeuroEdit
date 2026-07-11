@@ -92,7 +92,7 @@ python -c "import py_compile; py_compile.compile('src/neuroedit_desktop/<file>.p
 hf auth login
 ```
 
-The suite under `tests/` collects **145 tests** (`python -m pytest tests/ -q`).
+The suite under `tests/` collects **146 tests** (`python -m pytest tests/ -q`).
 Keep it and `ruff check src tests scripts` green before every release tag.
 
 ### venv-location note (current setup is intentional)
@@ -278,12 +278,12 @@ Other PHI safeguards:
 
 ## Optimization Automation Memory
 
-- **Last implementation:** 2026-07-08 — pure `MainWindow` utility
-  constants/helpers moved to `ui/main_window_utils.py`, with `main_window.py`
-  re-exporting the existing names.
-- **Last reviewed:** current automation pass (2026-07-08) chose the safe utility
-  extraction; the broader `MainWindow` split and speculative undo pre-serialize
-  shortcut remain deferred.
+- **Last implementation:** 2026-07-11 — cached no-op undo history pushes now
+  skip the compact JSON/hash pass when the current project dict matches the
+  cached autosave dict, while preserving redo clearing and autosave reuse.
+- **Last reviewed:** current automation pass (2026-07-11) chose the safe cached
+  no-op undo optimization; a true pre-`to_dict()` shortcut remains deferred
+  unless the model gains a trustworthy document revision signal.
 - **Mode:** incremental. Next optimization review should deep-dive files changed
   after the §44 commit plus one hop. (Full-sweep baseline was `22085f9`,
   2026-06-17.)
@@ -325,14 +325,15 @@ Other PHI safeguards:
 - **Architecture notes (high-signal):**
   - Undo/redo = full `ProjectState.to_dict()` JSON snapshots (cap 50 entries and
     64 MiB of compact serialized bytes), deduped
-    by BLAKE2 hash; `_snapshot()` still serializes on every dirty tick *before*
-    the hash decides to discard a no-op. As of `6700b67`, `_push_history()`
-    builds `to_dict()` once and caches the full dict in `_autosave_snapshot`;
+    by BLAKE2 hash. `_push_history()` builds `to_dict()` once and caches the full
+    dict in `_autosave_snapshot`;
     autosave (2 s when dirty) reuses it via `ProjectStore.save_data(dict)` when
     still valid, so the third independent serialize is gone on the common
-    push-then-autosave path. Compact byte storage, the 64 MiB cap, and fixture
-    measurement are complete; only a correctness-preserving pre-serialize
-    short-circuit remains open in P4.5.
+    push-then-autosave path. As of 2026-07-11, a cached no-op push also skips
+    the compact JSON/hash pass when the current dict matches `_autosave_snapshot`.
+    Compact byte storage, the 64 MiB cap, and fixture measurement are complete;
+    only a true pre-`to_dict()` short-circuit remains open, and only if it can
+    be proven without broad mutation bookkeeping.
   - Modularization is past the Phase 6 line-count target: `main_window.py`
     ~2,447 lines (down from ~6,500); canvas → `ui/canvas.py`, SAM workers →
     `ui/sam_workers.py`, SAM workflow → `ui/sam_workflow.py`, export workflow →
@@ -370,7 +371,7 @@ Other PHI safeguards:
     Image, and single-file Media Explorer imports. A batch import loads one
     preview, selects the last successful clip, and creates one dirty/history
     operation; multi-video batches also share the §42 metadata progress dialog.
-  - Suite is **145 tests**; gate is `ruff check src tests scripts` +
+  - Suite is **146 tests**; gate is `ruff check src tests scripts` +
     `python -m pytest tests/ -q`, both green at this marker.
   - torch/SAM stack is lazy by design (venv has no torch → SAM no-ops);
     cold-start import audit (P4.5) is still unquantified.

@@ -176,7 +176,7 @@ template); see Completed section.
 
 Highest-leverage engineering work while P0 release items stay owner/hardware
 blocked and P5 stays parked. All items are measurement-first and
-behavior-preserving — the 145-test suite and `ruff` must stay green with no
+behavior-preserving — the 146-test suite and `ruff` must stay green with no
 user-visible change. Full rationale and acceptance criteria in
 [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md) Phase 6.
 
@@ -262,7 +262,12 @@ import audit.
   now retain those compact JSON bytes instead of duplicate nested dictionaries.
   On 50 smoothness-fixture edits, traced retained memory fell from 0.631 MiB to
   0.400 MiB (36.6%) while median push time stayed flat (0.640 ms to 0.629 ms).
-  A pre-serialize short-circuit remains open.
+  **Progress 2026-07-11:** a cached no-op history push now compares the current
+  project dict against the cached autosave dict and returns before the compact
+  JSON/hash pass, preserving redo clearing and autosave reuse. A true
+  pre-`to_dict()` short-circuit remains deferred unless the model gains a safe
+  document revision signal; do not add broad mutation bookkeeping for this
+  micro-optimization.
 - [x] Audit cold-start import cost — completed 2026-06-29. The export pipeline
   is now imported only when export, still capture, or export-settings creation
   is requested; `torch` remains lazy. Live-caption helpers remain eager because
