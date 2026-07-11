@@ -55,12 +55,16 @@ def _read_project_meta(path: Path) -> dict:
         "missing_count": 0,
         "first_source_path": None,
         "first_clip_duration": 0.0,
+        "thumbnail_allowed": False,
         "ok": False,
     }
     try:
         with path.open(encoding="utf-8") as f:
             data = json.load(f)
         result["project_name"] = data.get("project_name")
+        # A source-frame thumbnail is a new persistent image derivative. Only
+        # create one after the project has an explicit de-identification attestation.
+        result["thumbnail_allowed"] = bool(data.get("deidentified_confirmed", False))
         clips = data.get("clips") or []
         audio = data.get("audio_tracks") or data.get("audio") or []
         slides = data.get("slides") or []
@@ -91,6 +95,10 @@ def _read_project_meta(path: Path) -> dict:
     return result
 
 
+def _thumbnail_path(project_path: Path) -> Path:
+    return project_path.parent / ".neuroedit-thumbnail.jpg"
+
+
 def _make_gray_placeholder(width: int = 160, height: int = 90) -> QPixmap:
     img = QImage(width, height, QImage.Format.Format_RGB32)
     img.fill(QColor("#2c3340"))
@@ -118,7 +126,7 @@ class ThumbnailWorker(QObject):
         for project_path, source_path, clip_dur in self._tasks:
             if self._stopped:
                 break
-            thumb = Path(project_path).with_suffix(".thumb.jpg")
+            thumb = _thumbnail_path(Path(project_path))
             try:
                 proj_mtime = Path(project_path).stat().st_mtime
                 if thumb.exists() and thumb.stat().st_mtime >= proj_mtime:
@@ -237,7 +245,7 @@ class ProjectLibraryDialog(QDialog):
             self._entries.append(
                 {"path": path_str, "meta": meta, "mtime": mtime, "order": order}
             )
-            if meta["first_source_path"]:
+            if meta["thumbnail_allowed"] and meta["first_source_path"]:
                 thumb_tasks.append(
                     (path_str, meta["first_source_path"], meta["first_clip_duration"])
                 )
@@ -437,6 +445,10 @@ class ProjectLibraryDialog(QDialog):
         if path_str in recents:
             recents.remove(path_str)
         settings.setValue("recentProjects", recents)
+        try:
+            _thumbnail_path(Path(path_str)).unlink(missing_ok=True)
+        except OSError:
+            pass
         self._reload()
 
     def closeEvent(self, event) -> None:

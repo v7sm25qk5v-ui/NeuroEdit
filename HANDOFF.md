@@ -1756,3 +1756,33 @@ analyzed this content as uncommitted work). No code changed; markdown only.
   results are recorded with the commit for this run.
 - No release tag is indicated for this internal optimization. The current
   release remains `v0.5.4-alpha`.
+
+## 61. Codebase review integrity fixes (2026-07-11)
+
+- Implemented the review findings across project state, privacy, VFR media
+  handling, SAM assets, export safety, thumbnails, and release packaging.
+  Project replacement now prompts for unsaved work, does not cross-contaminate
+  undo history, and Save As stages a new project while copying `masks/`,
+  `audio/`, and `stills/` assets. Content-changing media/timeline/audio actions
+  clear PHI/de-identification/audio-review attestations.
+- Export and SAM frame selection now seek by media timestamp rather than an
+  average-FPS frame index. SAM masks have run-unique filenames and stale async
+  results are discarded. Exports reject missing inputs and source-overwriting
+  targets; audio muxing writes a staged file before atomically replacing output.
+- Project-library thumbnail generation is disabled until de-identification is
+  confirmed. Packaged alpha builds are documented as editor-only (SAM requires
+  a source `[sam]` build). CI runs the quality suite before installer/release
+  jobs; version plumbing now follows the release version, and packaging uses
+  release constraints.
+- Verification: `ruff check src tests scripts`; full suite (`153 passed in
+  26.27 s`); `git diff --check`; `.venv/bin/python -m compileall -q src`.
+  The expected Qt missing-media diagnostic appeared in a fixture test; all tests
+  passed. Released as `v0.5.5-alpha` after the final documentation/version sync.
+
+## 62. v0.5.5-alpha release (2026-07-11)
+
+- Released the codebase-review integrity fixes as `v0.5.5-alpha`. The root
+  README's installer names and release notes, Python/package version, macOS
+  bundle version, and Windows installer version are aligned to this tag.
+- The tagged CI workflow runs lint and the full test suite before producing the
+  macOS and Windows alpha installers and publishing the prerelease assets.

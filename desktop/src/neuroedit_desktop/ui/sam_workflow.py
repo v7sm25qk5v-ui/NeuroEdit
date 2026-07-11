@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import sys
 import time
 from pathlib import Path
 
@@ -137,8 +138,17 @@ class SamWorkflowMixin:
         self.statusBar().showMessage(f"SAM backend: {info.status}", 4000)
 
     def _show_sam_install_help(self) -> None:
-        # There is no in-app installer for the optional SAM stack; point the
-        # user at the documented one-line install instead.
+        if getattr(sys, "frozen", False):
+            QMessageBox.information(
+                self,
+                "SAM unavailable in this alpha",
+                "This installer is an editor-only alpha and does not include the "
+                "optional SAM/PyTorch runtime. Use a SAM-enabled source build for "
+                "segmentation and tracking.",
+            )
+            return
+        # There is no in-app installer for the optional SAM stack; point source
+        # users at the documented one-line install instead.
         QMessageBox.information(
             self,
             "Install SAM dependencies",
@@ -239,6 +249,12 @@ class SamWorkflowMixin:
         mask_dir = self.store.project_path.parent / "masks"
         self._pending_mask_color = self._next_mask_color()
         self._pending_prompt_points = self._current_prompt_points()
+        self._sam_job_context = {
+            "project": self.project,
+            "time_s": self.project.current_time,
+            "mask_color": self._pending_mask_color,
+            "prompt_points": list(self._pending_prompt_points),
+        }
         self._sam_segment_thread = QThread(self)
         self._sam_segment_worker = SamSegmentWorker(
             self.sam_backend,
@@ -266,6 +282,11 @@ class SamWorkflowMixin:
         self._sam_segment_thread = None
         self._sam_segment_worker = None
         self.sam_panel.set_busy(False)
+        context = getattr(self, "_sam_job_context", None) or {}
+        if context.get("project", self.project) is not self.project:
+            self._discard_sam_result(result)
+            self.sam_panel.set_status("Segmentation result discarded after project changed.")
+            return
         if error:
             # Single-frame runs stamp sam_last_run just like propagation, so
             # the SAM panel's "Last run" row reflects whichever ran last.
@@ -281,17 +302,17 @@ class SamWorkflowMixin:
             return
         annotation = Annotation(
             id=new_id(),
-            frame_time=self.project.current_time,
+            frame_time=float(context.get("time_s", self.project.current_time)),
             ann_duration=0.0,
             type="mask",
             label=self.project.draw_label or f"Mask {self._mask_count() + 1}",
-            color=getattr(self, "_pending_mask_color", self.project.draw_color),
+            color=str(context.get("mask_color", self.project.draw_color)),
             visible=True,
             opacity=0.55,
             geometry={},
             mask_path=str(result.mask_path),
             score=float(result.score),
-            prompt_points=list(getattr(self, "_pending_prompt_points", [])),
+            prompt_points=list(context.get("prompt_points", [])),
         )
         self.project.annotations.append(annotation)
         self.project.sam_last_run = self._sam_run_record("success", 1, result.backend, "")
@@ -302,7 +323,24 @@ class SamWorkflowMixin:
             f"SAM: {result.backend} mask saved (score {result.score:.2f})",
             4000,
         )
-        self._mark_dirty()
+        self._mark_dirty(review_relevant=True)
+
+    @staticmethod
+    def _discard_sam_result(result) -> None:  # type: ignore[no-untyped-def]
+        if result is None:
+            return
+        paths = []
+        mask_path = getattr(result, "mask_path", None)
+        if mask_path:
+            paths.append(Path(mask_path))
+        for frame in getattr(result, "mask_frames", []) or []:
+            if path := frame.get("mask_path"):
+                paths.append(Path(str(path)))
+        for path in paths:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     def _mask_count(self) -> int:
         return sum(1 for a in self.project.annotations if a.type in ("mask", "tracked-mask"))
@@ -393,6 +431,12 @@ class SamWorkflowMixin:
         mask_color_hex: str,
     ) -> None:
         self._pending_mask_color = mask_color_hex
+        self._sam_job_context = {
+            "project": self.project,
+            "retrack_id": getattr(self, "_retrack_target_id", None),
+            "prompt_points": list(getattr(self, "_pending_prompt_points", [])),
+            "mask_color": mask_color_hex,
+        }
         self._sam_run_started_iso = datetime.datetime.now().isoformat(timespec="seconds")
         self._sam_run_start_monotonic = time.monotonic()
         self.sam_panel.set_status(
@@ -446,11 +490,16 @@ class SamWorkflowMixin:
         self._sam_propagation_thread = None
         self._sam_propagation_worker = None
         self.sam_panel.set_busy(False)
+        context = getattr(self, "_sam_job_context", None) or {}
+        if context.get("project", self.project) is not self.project:
+            self._discard_sam_result(result)
+            self.sam_panel.set_status("Propagation result discarded after project changed.")
+            return
         diagnostics.log(
             "sam_job", job="propagate", state="finished",
             ok=int(error is None and result is not None and bool(result.mask_frames)),
         )
-        retrack_id = getattr(self, "_retrack_target_id", None)
+        retrack_id = context.get("retrack_id")
         self._retrack_target_id = None
 
         if error:
@@ -488,7 +537,7 @@ class SamWorkflowMixin:
                 ann_duration=ann_duration,
                 type="tracked-mask",
                 label=self.project.draw_label or f"Mask {self._mask_count() + 1}",
-                color=getattr(self, "_pending_mask_color", self.project.draw_color),
+                color=str(context.get("mask_color", self.project.draw_color)),
                 visible=True,
                 opacity=0.55,
                 geometry={},
@@ -496,7 +545,7 @@ class SamWorkflowMixin:
                 mask_frames=result.mask_frames,
                 score=float(result.score),
                 sample_rate=float(result.sample_rate),
-                prompt_points=list(getattr(self, "_pending_prompt_points", [])),
+                prompt_points=list(context.get("prompt_points", [])),
             )
             self.project.annotations.append(annotation)
             self.project.sam_points.clear()
@@ -513,4 +562,4 @@ class SamWorkflowMixin:
             f"SAM: {result.backend} propagation saved {len(result.mask_frames)} frames",
             4000,
         )
-        self._mark_dirty()
+        self._mark_dirty(review_relevant=True)

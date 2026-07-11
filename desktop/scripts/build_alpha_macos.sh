@@ -16,12 +16,12 @@ fi
 
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -e ".[package]"
+python -m pip install -c requirements-release.txt -e ".[package]"
 
 rm -rf build dist "$ARCHIVE_DIR"
 mkdir -p "$ARCHIVE_DIR"
 
-pyinstaller --clean --noconfirm NeuroEdit.spec
+NEUROEDIT_VERSION="${VERSION#v}" pyinstaller --clean --noconfirm NeuroEdit.spec
 
 if [[ ! -d "$APP_PATH" ]]; then
   echo "Build failed: $APP_PATH was not created." >&2

@@ -57,12 +57,12 @@ def recommended_project_root() -> Path:
 
 def default_project_root() -> Path:
     """Where unsaved scratch projects autosave. Configurable via the one-time
-    storage prompt / File menu; defaults to the legacy Documents location for
-    existing users who never chose."""
+    storage prompt / File menu; defaults to the local app-support location so
+    first-run autosaves do not silently enter cloud-synced Documents folders."""
     stored = QSettings("NeuroEdit", "Desktop").value("storage/projectRoot", "")
     if stored:
         return Path(str(stored))
-    return legacy_project_root()
+    return recommended_project_root()
 
 
 def migrate_storage_root(old_root: Path, new_root: Path) -> str | None:

@@ -10,7 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from neuroedit_desktop.exporter import ExportSettings, ProjectExporter
+from neuroedit_desktop.exporter import AudioSource, ExportSettings, ProjectExporter
 from neuroedit_desktop.models import (
     AudioTrack,
     ProjectState,
@@ -117,3 +117,67 @@ def test_default_export_dialog_produces_no_source_audio(app):
     assert settings.mute_source_audio is True
     exporter = ProjectExporter(project, settings)
     assert exporter._audio_sources("ffmpeg") == []
+
+
+def test_export_rejects_missing_source_media(tmp_path):
+    project = ProjectState()
+    project.clips.append(_clip(0.0, 5.0))
+    exporter = ProjectExporter(
+        project,
+        ExportSettings(
+            output_path=tmp_path / "export.mp4", width=320, height=180,
+            fps=30, crf=20, label="test",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="source media is missing"):
+        exporter.export()
+
+
+def test_audio_mux_replaces_output_only_after_success(tmp_path, monkeypatch):
+    project = ProjectState()
+    exporter = ProjectExporter(
+        project,
+        ExportSettings(
+            output_path=tmp_path / "export.mp4", width=320, height=180,
+            fps=30, crf=20, label="test",
+        ),
+    )
+    tmp_video = tmp_path / "visual.mp4"
+    output = tmp_path / "export.mp4"
+    tmp_video.write_bytes(b"visual")
+    output.write_bytes(b"existing")
+    source = AudioSource(tmp_path / "audio.m4a", 0.0, 0.0, 1.0, 1.0)
+
+    def write_staged(cmd: list[str], _message: str) -> None:
+        Path(cmd[-1]).write_bytes(b"muxed")
+
+    monkeypatch.setattr(exporter, "_run_ffmpeg", write_staged)
+    exporter._mux_audio(tmp_video, output, [source], "ffmpeg", 1.0)
+
+    assert output.read_bytes() == b"muxed"
+
+
+def test_audio_mux_failure_preserves_existing_output(tmp_path, monkeypatch):
+    project = ProjectState()
+    exporter = ProjectExporter(
+        project,
+        ExportSettings(
+            output_path=tmp_path / "export.mp4", width=320, height=180,
+            fps=30, crf=20, label="test",
+        ),
+    )
+    tmp_video = tmp_path / "visual.mp4"
+    output = tmp_path / "export.mp4"
+    tmp_video.write_bytes(b"visual")
+    output.write_bytes(b"existing")
+    source = AudioSource(tmp_path / "audio.m4a", 0.0, 0.0, 1.0, 1.0)
+
+    def fail_mux(_cmd: list[str], _message: str) -> None:
+        raise RuntimeError("ffmpeg failed")
+
+    monkeypatch.setattr(exporter, "_run_ffmpeg", fail_mux)
+    with pytest.raises(RuntimeError, match="ffmpeg failed"):
+        exporter._mux_audio(tmp_video, output, [source], "ffmpeg", 1.0)
+
+    assert output.read_bytes() == b"existing"

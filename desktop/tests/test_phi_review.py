@@ -22,7 +22,6 @@ from neuroedit_desktop.ui.main_window import (
     ExportChecklistDialog,
     PhiReviewDialog,
     default_project_root,
-    legacy_project_root,
     recommended_project_root,
 )
 
@@ -214,7 +213,7 @@ def test_default_project_root_respects_setting(app):
     original = settings.value("storage/projectRoot", "")
     try:
         settings.setValue("storage/projectRoot", "")
-        assert default_project_root() == legacy_project_root()
+        assert default_project_root() == recommended_project_root()
         settings.setValue("storage/projectRoot", str(recommended_project_root()))
         assert default_project_root() == recommended_project_root()
     finally:

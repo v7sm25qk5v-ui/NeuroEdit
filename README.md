@@ -4,16 +4,16 @@ NeuroEdit is a standalone desktop video editor for preparing operative video for
 conference, research, and educational use. It runs entirely on your own machine —
 no video, audio, or patient content ever leaves the computer.
 
-Current alpha release: [v0.5.4-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.4-alpha)
+Current alpha release: [v0.5.5-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.5-alpha)
 
-### What's new in v0.5.4-alpha
+### What's new in v0.5.5-alpha
 
-- New aperture-and-scalpel visual identity across the in-app header, About
-  dialog, macOS app icon, and Windows app/installer icon.
-- Overlay slides now remain composited above a video while the video continues
-  playing in the miniplayer; full-frame slides still pause it.
-- Unloadable media can no longer leave timeline playback permanently blocked on
-  a deferred seek.
+- Project switches now protect unsaved work and keep undo history isolated per
+  case; Save As also carries app-managed masks, stills, and audio with the case.
+- PHI/de-identification attestations and cached project thumbnails are refreshed
+  after content changes, and exported media rejects missing or unsafe sources.
+- VFR source frames are selected by timestamp for export and SAM work; SAM masks
+  use collision-resistant filenames and stale background results are discarded.
 
 ## Features
 
@@ -22,9 +22,9 @@ Current alpha release: [v0.5.4-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit
   chapter markers, zoom-to-fit, and keyboard delete of selected items.
 - **Annotation tools** — rectangle, ellipse, arrow, text, and brush overlays
   with per-anatomy label presets and a duplicate-at-playhead shortcut.
-- **SAM segmentation** — click-to-segment an anatomical structure and track it
-  through the video. Runs locally on Apple Silicon (MPS) or CPU; weights are
-  downloaded once from Hugging Face.
+- **SAM segmentation (source builds)** — click-to-segment an anatomical structure
+  and track it through the video. Runs locally on Apple Silicon (MPS) or CPU;
+  weights are downloaded once from Hugging Face.
 - **Privacy / PHI review** — a guided, resumable PHI review stepper, a redaction
   tool that burns opaque boxes over on-screen identifiers, metadata stripping on
   every export, a pre-export attestation checklist, and a configurable
@@ -45,7 +45,7 @@ Current alpha release: [v0.5.4-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit
 
 ### macOS
 
-Download `NeuroEdit-v0.5.4-alpha-macOS-unsigned.dmg` from the release page.
+Download `NeuroEdit-v0.5.5-alpha-macOS-unsigned.dmg` from the release page.
 Open the DMG, drag `NeuroEdit.app` into Applications, then right-click the app
 and choose `Open` for the first launch.
 
@@ -55,13 +55,16 @@ If macOS blocks launch, open `System Settings` -> `Privacy & Security`, choose
 
 ### Windows
 
-Download `NeuroEdit-v0.5.4-alpha-Windows-Setup.exe` from the release page on a
+Download `NeuroEdit-v0.5.5-alpha-Windows-Setup.exe` from the release page on a
 Windows PC. If SmartScreen warns, choose `More info` -> `Run anyway`, then follow
 the installer.
 
 The Windows installer is built by CI from the same source as macOS. Runtime UI
 verification on Windows is still pending; testers should capture toolbar
 screenshots at 100%, 125%, and 150% display scaling.
+
+The downloadable alpha installers are editor-only and do not include the optional
+SAM/PyTorch runtime. Use a source build with the `[sam]` extra for segmentation.
 
 ## Clinical Disclaimer
 

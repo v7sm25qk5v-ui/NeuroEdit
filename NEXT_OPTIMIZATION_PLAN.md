@@ -361,7 +361,7 @@ each is measurement-first and behavior-preserving:
 2. **Only continue `ui/main_window.py` modularization for cohesive slices** —
    it is now below the ~2,500-line target, so further moves should be justified
    by clearer ownership or an upcoming change, not by line count alone.
-3. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (146 tests)
+3. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (153 tests)
    green before every release tag; feed any new regressions back into the roadmap.
 
 This keeps the project on a safe optimization loop: measure first, keep the codebase

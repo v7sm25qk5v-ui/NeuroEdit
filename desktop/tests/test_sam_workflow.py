@@ -11,7 +11,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from neuroedit_desktop.models import Annotation, ProjectState  # noqa: E402
+from neuroedit_desktop.models import Annotation, ProjectState, SamPoint  # noqa: E402
 from neuroedit_desktop.sam_backend import SamBackend  # noqa: E402
 from neuroedit_desktop.ui import main_window_utils  # noqa: E402
 from neuroedit_desktop.ui.main_window import (  # noqa: E402
@@ -173,6 +173,27 @@ def test_save_mask_rgba_uses_custom_color(tmp_path) -> None:
     img = cv2.imread(str(out), cv2.IMREAD_UNCHANGED)
     b, g, r, _a = img[1, 2]
     assert (int(r), int(g), int(b)) == (34, 211, 238)
+
+
+def test_segment_frame_never_reuses_an_existing_mask_filename(tmp_path, monkeypatch) -> None:
+    np = pytest.importorskip("numpy")
+    backend = SamBackend()
+    frame = np.zeros((4, 4, 3), dtype=np.uint8)
+    mask = np.ones((4, 4), dtype=bool)
+    monkeypatch.setattr(backend, "_grab_frame", lambda *_args: frame)
+    monkeypatch.setattr(backend, "_run_sam3_on_frame", lambda *_args: (mask, 0.9))
+
+    first = backend.segment_frame(
+        tmp_path / "video.mp4", 1.0, [SamPoint(0.5, 0.5)], tmp_path / "masks"
+    )
+    first.mask_path.write_bytes(b"original")
+    second = backend.segment_frame(
+        tmp_path / "video.mp4", 1.0, [SamPoint(0.5, 0.5)], tmp_path / "masks"
+    )
+
+    assert first.mask_path != second.mask_path
+    assert first.mask_path.read_bytes() == b"original"
+    assert second.mask_path.exists()
 
 
 # ── SamPanel mask list ────────────────────────────────────────────────────

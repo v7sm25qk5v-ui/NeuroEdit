@@ -38,6 +38,7 @@ from neuroedit_desktop.ui.timeline_utils import fmt_time, project_end_time
 
 class AudioPanel(QWidget):
     project_changed = Signal()
+    review_state_changed = Signal()
     seek_requested = Signal(float)
     export_captions_requested = Signal()
 
@@ -252,7 +253,7 @@ class AudioPanel(QWidget):
         if self._refreshing:
             return
         self.project.audio_reviewed_for_phi = checked
-        self.project_changed.emit()
+        self.review_state_changed.emit()
 
     def _apply_caption_fields(self) -> None:
         if self._refreshing:

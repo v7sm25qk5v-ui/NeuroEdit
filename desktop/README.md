@@ -29,7 +29,7 @@ the upstream SAM stack is Python/PyTorch-first.
 cd desktop
 python3.12 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e ".[sam]"
+python -m pip install -e ".[dev,sam]"
 python -m neuroedit_desktop
 ```
 
@@ -39,7 +39,7 @@ If `python3.12` is not installed, Python 3.13 can launch the UI shell:
 cd desktop
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e ".[sam]"
+python -m pip install -e ".[dev,sam]"
 python -m neuroedit_desktop
 ```
 

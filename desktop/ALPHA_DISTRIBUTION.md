@@ -50,7 +50,10 @@ That removes the download quarantine flag from this unsigned alpha only.
 
 ## What Is Not Included
 
-This unsigned alpha intentionally does not bundle SAM/ML model weights. That keeps the app small enough for testing the editor workflow, timeline, labels, slides, audio, transcript editing, and export.
+This unsigned alpha is intentionally **editor-only**: it does not bundle the
+SAM/PyTorch runtime or model weights. That keeps the app small enough for testing
+the editor workflow, timeline, labels, slides, audio, transcript editing, and
+export. SAM segmentation requires a source build with `pip install -e ".[dev,sam]"`.
 
 ## Test Feedback To Request
 

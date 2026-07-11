@@ -19,6 +19,16 @@ The primary open code-health/runtime work lives in **P4.5** (modularize the
 audit cold-start imports). The items here are smaller, fresh findings surfaced
 by the optimization automation; they are not duplicated into P4.5.
 
+- [x] **Project, export, SAM, and release-integrity review fixes.** Fixed
+  2026-07-11: project switches now confirm unsaved work and reseed undo history;
+  Save As stages the new project and migrates app-managed assets; media/content
+  changes invalidate PHI attestations; VFR export/SAM use media timestamps;
+  SAM output names are collision-resistant and stale results are discarded;
+  export refuses missing or source-overwriting media and atomically replaces an
+  audio-muxed output. Project-library thumbnails require de-identification
+  confirmation. Installer messaging now accurately declares SAM source-build
+  support, and tagged release builds wait for lint/test quality gates.
+
 - [x] **Stale `project_end_time` cache after undo/redo (correctness).** Fixed
   2026-06-20: `_apply_snapshot()` now clears `_project_end_time_cache` after
   replacing the project, so undo/redo cannot reuse a duration from the prior

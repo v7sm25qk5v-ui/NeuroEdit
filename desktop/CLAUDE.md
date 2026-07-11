@@ -278,12 +278,13 @@ Other PHI safeguards:
 
 ## Optimization Automation Memory
 
-- **Last implementation:** 2026-07-11 — cached no-op undo history pushes now
-  skip the compact JSON/hash pass when the current project dict matches the
-  cached autosave dict, while preserving redo clearing and autosave reuse.
-- **Last reviewed:** current automation pass (2026-07-11) chose the safe cached
-  no-op undo optimization; a true pre-`to_dict()` shortcut remains deferred
-  unless the model gains a trustworthy document revision signal.
+- **Last implementation:** 2026-07-11 — code-review integrity fixes now protect
+  project switching/Save As assets, invalidate PHI attestations after content
+  changes, use timestamps for VFR export/SAM work, and gate tagged builds on
+  lint and the full test suite.
+- **Last reviewed:** the 2026-07-11 codebase review was implemented with focused
+  regressions; a true pre-`to_dict()` undo shortcut remains deferred unless the
+  model gains a trustworthy document revision signal.
 - **Mode:** incremental. Next optimization review should deep-dive files changed
   after the §44 commit plus one hop. (Full-sweep baseline was `22085f9`,
   2026-06-17.)
@@ -349,10 +350,9 @@ Other PHI safeguards:
     timeline clock rather than sparse media-position events so VFR recordings
     keep smooth playhead motion. Still open: measure and reduce redundant
     annotation repaint work; decoded-frame changes must not gate playhead refresh.
-    Note: both project-open paths end with `_mark_dirty()` (which invalidates
-    the cache), so the trailing dirty-mark is intentional — don't flag "opening
-    a project marks it dirty" as a bug. All project swap paths now also clear
-    the cache immediately after the swap.
+  - Project replacement now confirms unsaved edits, blocks only result-producing
+    export/SAM jobs, clears media caches, and reseeds undo/redo history for the
+    loaded document. Do not reintroduce a trailing dirty-mark on project open.
   - Deferred-seek state machine (§30b): a seek issued right after `setSource()`
     is silently dropped because the media isn't loaded, so a trimmed clip would
     play from 0 instead of `trim_start`. On a **fresh** source
@@ -371,10 +371,11 @@ Other PHI safeguards:
     Image, and single-file Media Explorer imports. A batch import loads one
     preview, selects the last successful clip, and creates one dirty/history
     operation; multi-video batches also share the §42 metadata progress dialog.
-  - Suite is **146 tests**; gate is `ruff check src tests scripts` +
+  - Suite is **153 tests**; gate is `ruff check src tests scripts` +
     `python -m pytest tests/ -q`, both green at this marker.
-  - torch/SAM stack is lazy by design (venv has no torch → SAM no-ops);
-    cold-start import audit (P4.5) is still unquantified.
+  - torch/SAM stack is lazy by design (venv has no torch → SAM no-ops); the
+    cold-start import audit is complete and keeps the exporter out of the normal
+    startup module graph.
   - Identity assets (§37/§38): header + About lockups use theme-matched SVG marks
     (`neuroedit-mark-{light,dark}.svg`) rasterized at DPR via `_render_svg_pixmap`;
     `_restyle_identity` re-renders them on theme change. The wordmark font is the

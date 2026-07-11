@@ -46,10 +46,11 @@ To remove it later: Settings -> Apps -> NeuroEdit -> Uninstall.
 
 ## What Is Not Included
 
-Same as the macOS alpha: the SAM/ML model weights are intentionally excluded to
-keep the download small. The editor workflow, timeline, labels, slides, audio,
-transcript editing, and export all work without them. `ffmpeg` **is** bundled
-(via `imageio-ffmpeg`), so export works with no extra install.
+Same as the macOS alpha: this is an editor-only build. The optional SAM/PyTorch
+runtime and model weights are excluded to keep the download small. The editor
+workflow, timeline, labels, slides, audio, transcript editing, and export all
+work without them. `ffmpeg` **is** bundled (via `imageio-ffmpeg`), so export
+works with no extra install.
 
 ## Removing the SmartScreen warning later
 

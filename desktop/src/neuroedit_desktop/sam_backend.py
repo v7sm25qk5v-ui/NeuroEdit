@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Literal
+from uuid import uuid4
 
 from neuroedit_desktop.models import SamPoint
 
@@ -136,7 +136,9 @@ class SamBackend:
             backend = "SAM1 fallback"
 
         mask_dir.mkdir(parents=True, exist_ok=True)
-        mask_path = mask_dir / f"mask_{backend.lower().replace(' ', '_')}_{int(time_s * 1000):08d}.png"
+        mask_path = mask_dir / (
+            f"mask_{backend.lower().replace(' ', '_')}_{int(time_s * 1000):08d}_{uuid4().hex}.png"
+        )
         self._save_mask_rgba(mask, (h, w), mask_path, color=mask_color)
         return SamSegmentResult(mask_path=mask_path, score=score, backend=backend)
 
@@ -155,10 +157,11 @@ class SamBackend:
         if not points:
             raise ValueError("Place at least one SAM prompt point before running propagation.")
         mask_dir.mkdir(parents=True, exist_ok=True)
+        run_id = uuid4().hex
         try:
             return self._propagate_video_sam3(
                 video_path, start_time_s, duration_s, points, mask_dir,
-                progress=progress, cancelled=cancelled, mask_color=mask_color,
+                progress=progress, cancelled=cancelled, mask_color=mask_color, run_id=run_id,
             )
         except SamCancelled:
             raise
@@ -176,6 +179,7 @@ class SamBackend:
                 sample_rate=sample_rate,
                 cancelled=cancelled,
                 mask_color=mask_color,
+                run_id=run_id,
             )
 
     def _ensure_sam3_tracker_model(self) -> tuple[Any, Any, str]:
@@ -291,6 +295,7 @@ class SamBackend:
         progress: ProgressFn | None = None,
         cancelled: CancelFn | None = None,
         mask_color: tuple[int, int, int] | None = None,
+        run_id: str = "",
     ) -> SamPropagationResult:
         import numpy as np
         import torch
@@ -341,7 +346,9 @@ class SamBackend:
                     binarize=True,
                 )[0]
                 mask = self._first_binary_mask(masks)
-                path = mask_dir / f"track_sam3_{int(start_time_s * 1000):08d}_{frame_idx:04d}.png"
+                path = mask_dir / (
+                    f"track_sam3_{int(start_time_s * 1000):08d}_{run_id}_{frame_idx:04d}.png"
+                )
                 self._save_mask_rgba(mask, (h, w), path, color=mask_color)
                 score = self._score_from_outputs(output)
                 mask_frames.append({"time": float(times[frame_idx]), "mask_path": str(path), "score": score})
@@ -366,6 +373,7 @@ class SamBackend:
         sample_rate: float = 2.0,
         cancelled: CancelFn | None = None,
         mask_color: tuple[int, int, int] | None = None,
+        run_id: str = "",
     ) -> SamPropagationResult:
         import cv2
         import numpy as np
@@ -418,7 +426,7 @@ class SamBackend:
                     [(float(x), float(y)) for x, y in point_pixels],
                     labels,
                 )
-                path = mask_dir / f"track_{int(start_time_s * 1000):08d}_{idx:04d}.png"
+                path = mask_dir / f"track_{int(start_time_s * 1000):08d}_{run_id}_{idx:04d}.png"
                 self._save_mask_rgba(mask, frame_rgb.shape[:2], path, color=mask_color)
                 mask_frames.append({"time": float(frame_time), "mask_path": str(path), "score": float(score)})
                 scores.append(float(score))
@@ -439,36 +447,37 @@ class SamBackend:
             raise RuntimeError(f"Could not open video: {video_path}")
         try:
             fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
-            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-            start_frame = max(0, int(math.floor(max(0.0, start_time_s) * fps)))
-            requested = max(1, int(math.ceil(max(0.1, duration_s) * fps)))
-            end_frame = min(start_frame + requested, frame_count) if frame_count > 0 else start_frame + requested
             max_frames = max(1, int(os.environ.get(self.SAM3_MAX_FRAMES_ENV, "240")))
-            stride = max(1, math.ceil((end_frame - start_frame) / max_frames))
-            # Seek once, then read sequentially — a seek per frame forces the
-            # decoder to re-enter the GOP each time and is dramatically slower
-            # on long-GOP H.264 sources. Skipped frames use grab(), which
-            # decodes without converting/copying the pixels out.
-            cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+            end_time_s = start_time_s + max(0.1, duration_s)
+            target_interval = max(1.0 / fps, (end_time_s - start_time_s) / max_frames)
+            # Preserve actual presentation timestamps for VFR media. Average-FPS
+            # frame indices drift from the source timeline and misalign masks.
+            cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, start_time_s) * 1000.0)
             frames, times = [], []
-            frame_idx = start_frame
-            while frame_idx < end_frame:
+            next_sample_s = start_time_s
+            fallback_time_s = start_time_s
+            while True:
                 ok, frame_bgr = cap.read()
                 if not ok or frame_bgr is None:
                     break
-                frames.append(self._downscale_frame(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)))
-                times.append(frame_idx / fps)
-                skipped_ok = True
-                for _ in range(stride - 1):
-                    if not cap.grab():
-                        skipped_ok = False
-                        break
-                if not skipped_ok:
+                frame_time_s = float(cap.get(cv2.CAP_PROP_POS_MSEC) or 0.0) / 1000.0
+                if frame_time_s <= 0.0 and fallback_time_s > 0.0:
+                    frame_time_s = fallback_time_s
+                fallback_time_s = frame_time_s + 1.0 / fps
+                if frame_time_s > end_time_s + 1e-6:
                     break
-                frame_idx += stride
+                if frame_time_s + 1e-6 < next_sample_s and frames:
+                    continue
+                frames.append(self._downscale_frame(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)))
+                times.append(frame_time_s)
+                next_sample_s = frame_time_s + target_interval
             if not frames:
                 raise RuntimeError("Failed to read frames from video for SAM3 propagation.")
-            return frames, times, fps / stride
+            if len(times) < 2:
+                effective_rate = fps
+            else:
+                effective_rate = 1.0 / max(1e-6, (times[-1] - times[0]) / (len(times) - 1))
+            return frames, times, effective_rate
         finally:
             cap.release()
 

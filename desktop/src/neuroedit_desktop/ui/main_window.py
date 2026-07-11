@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 import os
+import shutil
 import time
 from pathlib import Path
 
@@ -803,7 +804,7 @@ class MainWindow(ExportWorkflowMixin, SamWorkflowMixin, QMainWindow):
         # Timeline
         self.timeline = RichTimelineWidget(self.project)
         self.timeline.seek_requested.connect(self._seek_global)
-        self.timeline.project_changed.connect(self._mark_project_dirty)
+        self.timeline.project_changed.connect(self._mark_review_relevant_project_dirty)
         self.timeline.item_activated.connect(self._timeline_item_activated)
         self.timeline.setMinimumHeight(340)
 
@@ -866,8 +867,9 @@ class MainWindow(ExportWorkflowMixin, SamWorkflowMixin, QMainWindow):
         self.labels_panel.show_label_changed.connect(self._update_annotation_show_label)
         self.labels_panel.selection_changed.connect(self._on_panel_selection_changed)
         self.tips_panel.project_changed.connect(self._mark_project_metadata_dirty)
-        self.slides_panel.project_changed.connect(self._mark_project_dirty)
-        self.audio_panel.project_changed.connect(self._mark_project_dirty)
+        self.slides_panel.project_changed.connect(self._mark_review_relevant_project_dirty)
+        self.audio_panel.project_changed.connect(self._mark_review_relevant_project_dirty)
+        self.audio_panel.review_state_changed.connect(self._mark_project_metadata_dirty)
         self.audio_panel.seek_requested.connect(self._seek_global)
         self.audio_panel.export_captions_requested.connect(self._export_captions)
 
@@ -1009,7 +1011,9 @@ class MainWindow(ExportWorkflowMixin, SamWorkflowMixin, QMainWindow):
 
     # ── Helpers ───────────────────────────────────────────────────────────
 
-    def _mark_dirty(self, *, history: bool = True) -> None:
+    def _mark_dirty(self, *, history: bool = True, review_relevant: bool = False) -> None:
+        if review_relevant:
+            self._invalidate_review_attestations()
         self._invalidate_project_end_time()
         if history and not self._restoring:
             self._push_history()
@@ -1035,6 +1039,89 @@ class MainWindow(ExportWorkflowMixin, SamWorkflowMixin, QMainWindow):
         self.video_view.update_annotations()
         self.timeline.refresh()
         self.media_panel.refresh()
+
+    def _mark_review_relevant_project_dirty(self) -> None:
+        self._invalidate_review_attestations()
+        self._mark_project_dirty()
+
+    def _invalidate_review_attestations(self) -> None:
+        """Require fresh review after content that can introduce PHI changes."""
+        self.project.phi_review_confirmed = False
+        self.project.deidentified_confirmed = False
+        self.project.audio_reviewed_for_phi = False
+        self.project.phi_review_progress = {}
+        project_path = getattr(getattr(self, "store", None), "project_path", None)
+        if isinstance(project_path, Path):
+            try:
+                (project_path.parent / ".neuroedit-thumbnail.jpg").unlink()
+            except OSError:
+                pass
+
+    def _seed_history(self) -> None:
+        """Start a new undo session for the current project document."""
+        snapshot_payload = self._snapshot_payload(self._snapshot())
+        self._undo_stack = [snapshot_payload]
+        self._redo_stack = []
+        self._undo_hashes = [self._payload_hash(snapshot_payload)]
+        self._redo_hashes = []
+        self._undo_sizes = [len(snapshot_payload)]
+        self._redo_sizes = []
+        self._autosave_snapshot = None
+        self._update_history_actions()
+
+    def _has_active_background_job(self) -> bool:
+        for attr in (
+            "_export_thread",
+            "_sam_segment_thread",
+            "_sam_propagation_thread",
+        ):
+            thread = getattr(self, attr, None)
+            if thread is not None:
+                try:
+                    if thread.isRunning():
+                        return True
+                except RuntimeError:
+                    continue
+        return False
+
+    def _confirm_project_replacement(self) -> bool:
+        if self._has_active_background_job():
+            QMessageBox.information(
+                self,
+                "Background work in progress",
+                "Finish or cancel the current export or SAM job before changing projects.",
+            )
+            return False
+        if not self.dirty:
+            return True
+        reply = QMessageBox.question(
+            self,
+            "Unsaved Changes",
+            "Save changes to the current project before switching projects?",
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+        )
+        if reply == QMessageBox.StandardButton.Cancel:
+            return False
+        if reply == QMessageBox.StandardButton.Save:
+            self._save_project()
+            return not self.dirty
+        return True
+
+    def _activate_project(self, store: ProjectStore, project: ProjectState) -> None:
+        player = getattr(self, "player", None)
+        if player is not None:
+            player.stop()
+        self.store = store
+        self.project = project
+        self.dirty = False
+        if hasattr(self, "_media_warnings_shown"):
+            self._media_warnings_shown.clear()
+        if hasattr(self, "_media_problem_cache"):
+            self._media_problem_cache.clear()
+        self._invalidate_project_end_time()
+        self._seed_history()
 
     def _mark_project_metadata_dirty(self) -> None:
         self._autosave_snapshot = None
@@ -1280,7 +1367,6 @@ class MainWindow(ExportWorkflowMixin, SamWorkflowMixin, QMainWindow):
             return
         if settings.value("storage/promptShown", False, type=bool):
             return
-        settings.setValue("storage/promptShown", True)
         self._change_storage_location()
 
     def _change_storage_location(self) -> None:
@@ -1289,7 +1375,9 @@ class MainWindow(ExportWorkflowMixin, SamWorkflowMixin, QMainWindow):
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         root = dialog.chosen_root()
-        QSettings("NeuroEdit", "Desktop").setValue("storage/projectRoot", str(root))
+        settings = QSettings("NeuroEdit", "Desktop")
+        settings.setValue("storage/projectRoot", str(root))
+        settings.setValue("storage/promptShown", True)
         if root != old_root:
             self._offer_storage_migration(old_root, root)
         # Move the autosave target only when the open project is an untouched
@@ -1405,26 +1493,9 @@ class MainWindow(ExportWorkflowMixin, SamWorkflowMixin, QMainWindow):
     # ── Project actions ───────────────────────────────────────────────────
 
     def _new_project(self) -> None:
-        if self.dirty:
-            reply = QMessageBox.question(
-                self, "Unsaved Changes",
-                "Save changes to the current project before creating a new one?",
-                QMessageBox.StandardButton.Save |
-                QMessageBox.StandardButton.Discard |
-                QMessageBox.StandardButton.Cancel,
-            )
-            if reply == QMessageBox.StandardButton.Cancel:
-                return
-            if reply == QMessageBox.StandardButton.Save:
-                self._save_project()
-                if self.dirty:  # save was cancelled
-                    return
-        self.player.stop()
-        self.project = ProjectState()
-        self.store = ProjectStore.create(default_project_root())
-        self.dirty = False
-        self._autosave_snapshot = None
-        self._invalidate_project_end_time()
+        if not self._confirm_project_replacement():
+            return
+        self._activate_project(ProjectStore.create(default_project_root()), ProjectState())
         self._load_active_clip()
         self.refresh()
         self._update_title()
@@ -1437,18 +1508,20 @@ class MainWindow(ExportWorkflowMixin, SamWorkflowMixin, QMainWindow):
         )
         if not path:
             return
+        if not self._confirm_project_replacement():
+            return
         load_start = time.perf_counter()
         try:
-            self.store, self.project = ProjectStore.open(Path(path))
+            store, project = ProjectStore.open(Path(path))
         except Exception as exc:
             QMessageBox.critical(self, "Open failed", str(exc))
             return
-        self._invalidate_project_end_time()
+        self._activate_project(store, project)
         self._add_to_recent(Path(path))
         self._validate_loaded_project_media("Open project")
         self._load_active_clip()
         self._log_project_load(load_start, "dialog")
-        self._mark_dirty()
+        self.refresh()
 
     def _save_project(self) -> None:
         if self.store.project_path.parent == default_project_root():
@@ -1482,23 +1555,69 @@ class MainWindow(ExportWorkflowMixin, SamWorkflowMixin, QMainWindow):
         if not parent:
             return
 
-        # Create <parent>/<name>/ as the project folder
+        # Create <parent>/<name>/ as the project folder only after confirming
+        # any existing document and staging a self-contained copy of managed assets.
         project_folder = Path(parent) / name
-        self.project.project_name = name
-        self.store = ProjectStore.create(project_folder)
+        project_path = project_folder / "project.json"
+        if project_path.exists():
+            reply = QMessageBox.question(
+                self,
+                "Replace Existing Project?",
+                f"{project_path} already exists. Replace it with this project?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        old_store = self.store
+        old_root = old_store.project_path.parent
+        staged_project = copy.deepcopy(self.project)
+        staged_project.project_name = name
+        staged_store = ProjectStore.create(project_folder)
         try:
-            self.store.save(self.project)
+            self._migrate_managed_assets(staged_project, old_root, project_folder)
+            staged_store.save(staged_project)
         except Exception as exc:
             QMessageBox.critical(self, "Save failed", str(exc))
             return
-        self.dirty = False
-        self._autosave_snapshot = None
+        self._activate_project(staged_store, staged_project)
+        self.refresh()
         self._update_title()
         self._add_to_recent(self.store.project_path)
         self.statusBar().showMessage(f"Saved {self.store.project_path}", 3000)
         self.project_name.blockSignals(True)
         self.project_name.setText(self.project.project_name)
         self.project_name.blockSignals(False)
+
+    @staticmethod
+    def _migrate_managed_assets(project: ProjectState, old_root: Path, new_root: Path) -> None:
+        """Copy app-managed assets into Save As and rewrite their project paths."""
+        def migrate(path_str: str | None) -> str | None:
+            if not path_str:
+                return path_str
+            source = Path(path_str)
+            try:
+                relative = source.relative_to(old_root)
+            except ValueError:
+                return path_str
+            if not relative.parts or relative.parts[0] not in {"masks", "audio", "stills"}:
+                return path_str
+            if not source.is_file():
+                return path_str
+            destination = new_root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+            return str(destination)
+
+        for annotation in project.annotations:
+            annotation.mask_path = migrate(annotation.mask_path)
+            for frame in annotation.mask_frames:
+                frame["mask_path"] = migrate(str(frame.get("mask_path") or "")) or ""
+        for slide in project.slides:
+            slide.image_path = migrate(slide.image_path)
+        for track in project.audio_tracks:
+            track.path = migrate(track.path) or track.path
 
     def _add_to_recent(self, project_path: Path) -> None:
         settings = QSettings("NeuroEdit", "Desktop")
@@ -1542,18 +1661,20 @@ class MainWindow(ExportWorkflowMixin, SamWorkflowMixin, QMainWindow):
             settings.setValue("recentProjects", recents)
             self._rebuild_recent_menu()
             return
+        if not self._confirm_project_replacement():
+            return
         load_start = time.perf_counter()
         try:
-            self.store, self.project = ProjectStore.open(path)
+            store, project = ProjectStore.open(path)
         except Exception as exc:
             QMessageBox.critical(self, "Open failed", str(exc))
             return
-        self._invalidate_project_end_time()
+        self._activate_project(store, project)
         self._add_to_recent(path)
         self._validate_loaded_project_media("Open recent project")
         self._load_active_clip()
         self._log_project_load(load_start, "recent")
-        self._mark_dirty()
+        self.refresh()
 
     def _log_project_load(self, start_perf: float, source: str) -> None:
         # PHI-safe by construction: counts and timing only, no names or paths.
@@ -1666,7 +1787,7 @@ class MainWindow(ExportWorkflowMixin, SamWorkflowMixin, QMainWindow):
             return
         self.project.active_clip_id = clip.id
         self._load_active_clip()
-        self._mark_dirty()
+        self._mark_dirty(review_relevant=True)
 
     @staticmethod
     def _dropped_media_paths(mime_data: QMimeData) -> list[Path]:
@@ -1750,7 +1871,7 @@ class MainWindow(ExportWorkflowMixin, SamWorkflowMixin, QMainWindow):
         self.project.duration = self._project_end_time()
         self.project.active_panel = "slides"
         self._seek_global(time_s)
-        self._mark_dirty()
+        self._mark_dirty(review_relevant=True)
         self.statusBar().showMessage(f"Inserted still slide at {format_time(time_s)}", 3000)
 
     def _render_current_still(self, time_s: float) -> Path | None:
@@ -2241,7 +2362,7 @@ class MainWindow(ExportWorkflowMixin, SamWorkflowMixin, QMainWindow):
         self.project.selected_annotation_id = annotation.id
         self.project.active_panel = "labels"
         self._set_panel("labels")
-        self._mark_dirty()
+        self._mark_dirty(review_relevant=True)
 
     def _delete_annotation(self, annotation_id: str) -> None:
         self.project.annotations = [
@@ -2249,14 +2370,14 @@ class MainWindow(ExportWorkflowMixin, SamWorkflowMixin, QMainWindow):
         ]
         if self.project.selected_annotation_id == annotation_id:
             self.project.selected_annotation_id = None
-        self._mark_dirty()
+        self._mark_dirty(review_relevant=True)
 
     def _update_annotation_duration(self, annotation_id: str, duration: float) -> None:
         for ann in self.project.annotations:
             if ann.id == annotation_id:
                 ann.ann_duration = max(0.0, duration)
                 break
-        self._mark_dirty()
+        self._mark_dirty(review_relevant=True)
 
     def _find_annotation(self, annotation_id: str) -> Annotation | None:
         return next((a for a in self.project.annotations if a.id == annotation_id), None)
@@ -2265,43 +2386,43 @@ class MainWindow(ExportWorkflowMixin, SamWorkflowMixin, QMainWindow):
         ann = self._find_annotation(annotation_id)
         if ann is not None:
             ann.label = text
-            self._mark_dirty()
+            self._mark_dirty(review_relevant=True)
 
     def _update_annotation_color(self, annotation_id: str, color: str) -> None:
         ann = self._find_annotation(annotation_id)
         if ann is not None:
             ann.color = color
-            self._mark_dirty()
+            self._mark_dirty(review_relevant=True)
 
     def _set_annotation_visibility(self, annotation_id: str, visible: bool) -> None:
         ann = self._find_annotation(annotation_id)
         if ann is not None:
             ann.visible = bool(visible)
-            self._mark_dirty()
+            self._mark_dirty(review_relevant=True)
 
     def _update_annotation_font_size(self, annotation_id: str, size: int) -> None:
         ann = self._find_annotation(annotation_id)
         if ann is not None:
             ann.font_size = max(8, int(size))
-            self._mark_dirty()
+            self._mark_dirty(review_relevant=True)
 
     def _update_annotation_stroke(self, annotation_id: str, width: int) -> None:
         ann = self._find_annotation(annotation_id)
         if ann is not None:
             ann.geometry["width_px"] = float(max(1, int(width)))
-            self._mark_dirty()
+            self._mark_dirty(review_relevant=True)
 
     def _update_annotation_opacity(self, annotation_id: str, opacity: float) -> None:
         ann = self._find_annotation(annotation_id)
         if ann is not None:
             ann.opacity = max(0.05, min(1.0, float(opacity)))
-            self._mark_dirty()
+            self._mark_dirty(review_relevant=True)
 
     def _update_annotation_show_label(self, annotation_id: str, show: bool) -> None:
         ann = self._find_annotation(annotation_id)
         if ann is not None and ann.type in {"rect", "ellipse", "arrow"}:
             ann.show_label = bool(show)
-            self._mark_dirty()
+            self._mark_dirty(review_relevant=True)
 
     def _delete_selected_annotation(self) -> None:
         ann_id = self.project.selected_annotation_id
@@ -2318,7 +2439,7 @@ class MainWindow(ExportWorkflowMixin, SamWorkflowMixin, QMainWindow):
         new_ann.frame_time = self.project.current_time
         self.project.annotations.append(new_ann)
         self.project.selected_annotation_id = new_ann.id
-        self._mark_dirty()
+        self._mark_dirty(review_relevant=True)
 
     def _duplicate_selected_annotation(self) -> None:
         fw = QApplication.focusWidget()
@@ -2333,7 +2454,7 @@ class MainWindow(ExportWorkflowMixin, SamWorkflowMixin, QMainWindow):
         if ann is None:
             return
         ann.frame_time = self.project.current_time
-        self._mark_dirty()
+        self._mark_dirty(review_relevant=True)
 
     def _set_annotation_end_to_playhead(self, annotation_id: str) -> None:
         ann = self._find_annotation(annotation_id)
@@ -2341,7 +2462,7 @@ class MainWindow(ExportWorkflowMixin, SamWorkflowMixin, QMainWindow):
             return
         new_duration = self.project.current_time - ann.frame_time
         ann.ann_duration = max(0.1, new_duration)
-        self._mark_dirty()
+        self._mark_dirty(review_relevant=True)
 
     def _on_view_selection_changed(self, ann_id) -> None:
         self.project.selected_annotation_id = ann_id if isinstance(ann_id, str) else None
@@ -2370,7 +2491,7 @@ class MainWindow(ExportWorkflowMixin, SamWorkflowMixin, QMainWindow):
         # A move/resize drag on the canvas just finished. The in-progress drag
         # only marked the project dirty; push a single undo snapshot now so the
         # whole gesture is one undoable step.
-        self._mark_dirty()
+        self._mark_dirty(review_relevant=True)
 
     def _start_inline_label_edit(self, annotation_id: str) -> None:
         ann = self._find_annotation(annotation_id)
@@ -2403,6 +2524,7 @@ class MainWindow(ExportWorkflowMixin, SamWorkflowMixin, QMainWindow):
         pairs = [
             ("_export_thread", "_export_worker"),
             ("_sam_probe_thread", "_sam_probe_worker"),
+            ("_sam_download_thread", "_sam_download_worker"),
             ("_sam_segment_thread", "_sam_segment_worker"),
             ("_sam_propagation_thread", "_sam_propagation_worker"),
         ]
@@ -2438,11 +2560,16 @@ class MainWindow(ExportWorkflowMixin, SamWorkflowMixin, QMainWindow):
                 timer.stop()
         # Save BEFORE touching threads, while the heap is known-good — if a worker
         # later has to be force-terminated mid-allocation, the project is already
-        # safely on disk.
-        try:
-            self.store.save(self.project)
-        except Exception:  # noqa: BLE001
-            pass
+        # safely on disk. Never close silently after a failed dirty save.
+        if self.dirty:
+            try:
+                self.store.save(self.project)
+                self.dirty = False
+                self._autosave_snapshot = None
+            except Exception as exc:  # noqa: BLE001
+                QMessageBox.critical(self, "Save failed", str(exc))
+                event.ignore()
+                return
         force_terminated = self._shutdown_threads()
         if force_terminated:
             # A thread was killed at an arbitrary instruction (possibly inside the

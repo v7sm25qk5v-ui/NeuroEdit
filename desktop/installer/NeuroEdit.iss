@@ -6,7 +6,7 @@
 
 #define MyAppName "NeuroEdit"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.0-alpha"
+  #define MyAppVersion "0.5.5-alpha"
 #endif
 #define MyAppPublisher "NeuroEdit"
 #define MyAppExeName "NeuroEdit.exe"
@@ -29,6 +29,7 @@ OutputBaseFilename=NeuroEdit-{#MyAppVersion}-Windows-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=..\src\neuroedit_desktop\resources\NeuroEdit.ico
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayName={#MyAppName} {#MyAppVersion}

@@ -30,13 +30,14 @@ if (-not (Test-Path ".venv")) {
     python -m venv .venv
 }
 & ".\.venv\Scripts\python.exe" -m pip install --upgrade pip
-& ".\.venv\Scripts\python.exe" -m pip install -e ".[package]"
+& ".\.venv\Scripts\python.exe" -m pip install -c requirements-release.txt -e ".[package]"
 
 # 2. Clean previous build output (leave release/ in place; we add to it).
 Remove-Item -Recurse -Force "build", "dist" -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $ReleaseDir | Out-Null
 
 # 3. PyInstaller -> dist\NeuroEdit\NeuroEdit.exe
+$env:NEUROEDIT_VERSION = $Version.TrimStart('v')
 & ".\.venv\Scripts\pyinstaller.exe" --clean --noconfirm NeuroEdit.spec
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller failed (exit $LASTEXITCODE)."

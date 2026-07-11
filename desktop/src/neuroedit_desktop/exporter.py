@@ -89,6 +89,14 @@ class ProjectExporter:
 
         warnings: list[str] = []
         try:
+            output_path = self.settings.output_path.resolve()
+            if any(Path(clip.path).resolve() == output_path for clip in self.project.clips):
+                raise RuntimeError("Choose an export path that is not one of the source media files.")
+            missing = [clip.name for clip in self.project.clips if not Path(clip.path).is_file()]
+            if missing:
+                raise RuntimeError(
+                    "Cannot export while source media is missing: " + ", ".join(missing[:5])
+                )
             duration = self._duration()
             if duration <= 0:
                 raise RuntimeError("The project has no timeline content to export.")
@@ -466,13 +474,18 @@ class ProjectExporter:
         cached = self._ffmpeg_encoder_cache.get(encoder_name)
         if cached is not None:
             return cached
-        proc = subprocess.run(
-            [ffmpeg, "-hide_banner", "-encoders"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
-        )
+        try:
+            proc = subprocess.run(
+                [ffmpeg, "-hide_banner", "-encoders"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            self._ffmpeg_encoder_cache[encoder_name] = False
+            return False
         available = encoder_name in proc.stdout
         self._ffmpeg_encoder_cache[encoder_name] = available
         return available
@@ -534,8 +547,9 @@ class ProjectExporter:
         clip = self._clip_at_time(time_s)
         if clip is not None:
             clip_frame = self._frame_for_clip(clip, time_s)
-            if clip_frame is not None:
-                frame = self._fit_frame(clip_frame)
+            if clip_frame is None:
+                raise RuntimeError(f"Could not render source media for clip: {clip.name}")
+            frame = self._fit_frame(clip_frame)
 
         return self._paint_qt(frame, time_s, slide=slide, include_annotations=True)
 
@@ -556,35 +570,24 @@ class ProjectExporter:
         if cap is None:
             cap = cv2.VideoCapture(clip.path)
             self._captures[clip.path] = cap
-            fps = float(cap.get(cv2.CAP_PROP_FPS) or self.settings.fps or 30.0)
             self._video_states[clip.path] = {
-                "fps": fps,
-                "last_index": -1,
+                "last_time_s": None,
                 "last_frame": None,
             }
 
         state = self._video_states[clip.path]
-        source_fps = float(state["fps"])
         local_s = max(0.0, clip.trim_start + max(0.0, time_s - clip.start_time))
-        desired_index = max(0, int(round(local_s * source_fps)))
-        last_index = int(state["last_index"])
-        if desired_index == last_index and state["last_frame"] is not None:
+        if state["last_time_s"] == local_s and state["last_frame"] is not None:
             return state["last_frame"]  # type: ignore[return-value]
-        if desired_index < last_index or desired_index - last_index > max(2, int(source_fps)):
-            cap.set(cv2.CAP_PROP_POS_FRAMES, desired_index)
-            last_index = desired_index - 1
-        frame_bgr = None
-        ok = True
-        while last_index < desired_index:
-            ok, frame_bgr = cap.read()
-            if not ok or frame_bgr is None:
-                break
-            last_index += 1
+        # Frame indices derived from an average FPS select the wrong source frame
+        # for VFR recordings. Seek by the media timestamp for every rendered frame.
+        cap.set(cv2.CAP_PROP_POS_MSEC, local_s * 1000.0)
+        ok, frame_bgr = cap.read()
         if not ok or frame_bgr is None:
             cached = state.get("last_frame")
             return cached if isinstance(cached, np.ndarray) else None
         rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-        state["last_index"] = last_index
+        state["last_time_s"] = local_s
         state["last_frame"] = rgb
         return rgb
 
@@ -958,13 +961,18 @@ class ProjectExporter:
         cached = self._audio_probe_cache.get(key)
         if cached is not None:
             return cached
-        proc = subprocess.run(
-            [ffmpeg, "-hide_banner", "-i", str(path)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
-        )
+        try:
+            proc = subprocess.run(
+                [ffmpeg, "-hide_banner", "-i", str(path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            self._audio_probe_cache[key] = False
+            return False
         has_audio = "Audio:" in proc.stderr
         self._audio_probe_cache[key] = has_audio
         return has_audio
@@ -977,6 +985,7 @@ class ProjectExporter:
         ffmpeg: str,
         duration: float,
     ) -> None:
+        staged_output = tmp_video.with_name("muxed.mp4")
         cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-i", str(tmp_video)]
         for source in audio_sources:
             cmd.extend(["-i", str(source.path)])
@@ -1026,12 +1035,11 @@ class ProjectExporter:
                 f"{duration:.3f}",
                 "-movflags",
                 "+faststart",
-                str(output_path),
+                str(staged_output),
             ]
         )
-        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
-        if proc.returncode != 0:
-            raise RuntimeError(f"Audio mux failed: {proc.stderr.strip() or 'unknown error'}")
+        self._run_ffmpeg(cmd, "Audio mux failed")
+        os.replace(staged_output, output_path)
 
     def _release_captures(self) -> None:
         for cap in self._captures.values():

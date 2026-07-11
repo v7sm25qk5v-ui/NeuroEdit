@@ -13,7 +13,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import QUrl  # noqa: E402
 from PySide6.QtMultimedia import QMediaPlayer  # noqa: E402
 
-from neuroedit_desktop.models import Annotation, ProjectState, Slide, VideoClip  # noqa: E402
+from neuroedit_desktop.models import Annotation, AudioTrack, ProjectState, Slide, VideoClip  # noqa: E402
 from neuroedit_desktop.ui import main_window as main_window_module  # noqa: E402
 from neuroedit_desktop.ui.canvas import AnnotationGraphicsItem  # noqa: E402
 from neuroedit_desktop.ui.main_window import MainWindow  # noqa: E402
@@ -270,6 +270,69 @@ def test_cached_snapshot_dedup_skips_payload_reserialize(
     assert window._redo_stack == []
     assert window._redo_hashes == []
     assert window._redo_sizes == []
+
+
+def test_activating_another_project_reseeds_history() -> None:
+    window = _window(ProjectState(project_name="First case"))
+    window.project.annotations.append(_annotation())
+    window._push_history()
+
+    replacement = ProjectState(project_name="Second case")
+    window._activate_project(_StubStore(), replacement)
+
+    assert window.project is replacement
+    assert len(window._undo_stack) == 1
+    assert window._redo_stack == []
+
+
+def test_save_as_migrates_only_managed_assets(tmp_path) -> None:
+    old_root = tmp_path / "old"
+    new_root = tmp_path / "new"
+    mask = old_root / "masks" / "mask.png"
+    still = old_root / "stills" / "still.png"
+    audio = old_root / "audio" / "voice.m4a"
+    external = tmp_path / "external.png"
+    for path in (mask, still, audio, external):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(path.name.encode())
+
+    project = ProjectState()
+    project.annotations.append(_annotation())
+    project.annotations[0].mask_path = str(mask)
+    project.annotations[0].mask_frames = [{"time": 0.0, "mask_path": str(mask)}]
+    project.slides.append(Slide(id="slide", title="Still", image_path=str(still)))
+    project.audio_tracks.append(AudioTrack(id="audio", path=str(audio), name="Voice"))
+    project.annotations.append(
+        Annotation(
+            id="external", frame_time=0.0, ann_duration=1.0, type="mask",
+            label="external", color="#fff", mask_path=str(external),
+        )
+    )
+
+    MainWindow._migrate_managed_assets(project, old_root, new_root)
+
+    assert Path(project.annotations[0].mask_path or "").read_bytes() == b"mask.png"
+    assert Path(project.annotations[0].mask_frames[0]["mask_path"]).parent == new_root / "masks"
+    assert Path(project.slides[0].image_path or "").read_bytes() == b"still.png"
+    assert Path(project.audio_tracks[0].path).read_bytes() == b"voice.m4a"
+    assert project.annotations[1].mask_path == str(external)
+
+
+def test_review_invalidation_removes_cached_project_thumbnail(tmp_path) -> None:
+    window = _window(ProjectState())
+    window.project.phi_review_confirmed = True
+    window.project.deidentified_confirmed = True
+    window.project.audio_reviewed_for_phi = True
+    window.store.project_path = tmp_path / "project.json"
+    thumbnail = tmp_path / ".neuroedit-thumbnail.jpg"
+    thumbnail.write_bytes(b"derived preview")
+
+    window._invalidate_review_attestations()
+
+    assert not thumbnail.exists()
+    assert window.project.phi_review_confirmed is False
+    assert window.project.deidentified_confirmed is False
+    assert window.project.audio_reviewed_for_phi is False
 
 
 def test_history_evicts_oldest_snapshots_over_byte_limit() -> None:

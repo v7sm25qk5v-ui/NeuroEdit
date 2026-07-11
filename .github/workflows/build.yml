@@ -19,8 +19,29 @@ on:
         default: "dev"
 
 jobs:
+  quality:
+    name: Test and lint desktop app
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install desktop app with dev dependencies
+        working-directory: desktop
+        run: python -m pip install -e ".[dev]"
+      - name: Ruff
+        working-directory: desktop
+        run: ruff check src tests scripts
+      - name: Pytest
+        working-directory: desktop
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest tests/ -q
+
   macos:
     name: Build macOS (.dmg)
+    needs: quality
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -44,6 +65,7 @@ jobs:
 
   windows:
     name: Build Windows (Setup.exe)
+    needs: quality
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -80,6 +102,7 @@ jobs:
       - name: Create / update the release
         uses: softprops/action-gh-release@v2
         with:
+          prerelease: true
           files: artifacts/**/*
           fail_on_unmatched_files: true
           body: |

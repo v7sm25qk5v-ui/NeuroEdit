@@ -5,10 +5,13 @@
 # branches. Keep feature work in src/ so it carries to all platforms automatically.
 
 import sys
+import os
 from pathlib import Path
 
 IS_MACOS = sys.platform == "darwin"
 IS_WINDOWS = sys.platform == "win32"
+APP_VERSION = os.environ.get("NEUROEDIT_VERSION", "0.5.5-alpha").removeprefix("v")
+APP_BUILD_VERSION = APP_VERSION.removesuffix("-alpha")
 
 ROOT = Path.cwd()
 SRC = ROOT / "src"
@@ -112,8 +115,8 @@ if IS_MACOS:
         info_plist={
             "CFBundleName": "NeuroEdit",
             "CFBundleDisplayName": "NeuroEdit",
-            "CFBundleShortVersionString": "0.1.0-alpha",
-            "CFBundleVersion": "0.1.0",
+            "CFBundleShortVersionString": APP_VERSION,
+            "CFBundleVersion": APP_BUILD_VERSION,
             "NSMicrophoneUsageDescription": "NeuroEdit uses the microphone when you record narration.",
             "NSDocumentsFolderUsageDescription": "NeuroEdit opens and saves video editing projects.",
             "NSDownloadsFolderUsageDescription": "NeuroEdit can import media from Downloads.",
