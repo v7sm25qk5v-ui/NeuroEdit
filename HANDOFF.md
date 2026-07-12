@@ -1786,3 +1786,15 @@ analyzed this content as uncommitted work). No code changed; markdown only.
   bundle version, and Windows installer version are aligned to this tag.
 - The tagged CI workflow runs lint and the full test suite before producing the
   macOS and Windows alpha installers and publishing the prerelease assets.
+
+## 63. Post-release roadmap/docs consistency pass (2026-07-12)
+
+- Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, and
+  `desktop/CLAUDE.md` after the `v0.5.5-alpha` integrity release. The remaining
+  open roadmap work is still owner/hardware/sample-data gated or explicitly
+  measurement-first; no new surgical code change was justified by the live docs.
+- Synchronized active roadmap guidance to the current 153-test baseline while
+  leaving historical session entries unchanged.
+- Verification target for this docs-only pass remains `ruff check src tests
+  scripts`, the full desktop suite, `git diff --check`, and a no-tag push unless
+  a release-relevant change appears.
