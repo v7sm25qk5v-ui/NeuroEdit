@@ -29,6 +29,13 @@ by the optimization automation; they are not duplicated into P4.5.
   confirmation. Installer messaging now accurately declares SAM source-build
   support, and tagged release builds wait for lint/test quality gates.
 
+- [x] **Stale project-library thumbnail could survive a failed refresh.** Fixed
+  2026-08-09: when a cached `.neuroedit-thumbnail.jpg` is older than
+  `project.json`, the thumbnail worker removes it before invoking ffmpeg and only
+  emits a refreshed thumbnail after a successful command. This prevents a stale
+  derived preview from being reused after media or de-identification state
+  changes when thumbnail regeneration fails.
+
 - [x] **Stale `project_end_time` cache after undo/redo (correctness).** Fixed
   2026-06-20: `_apply_snapshot()` now clears `_project_end_time_cache` after
   replacing the project, so undo/redo cannot reuse a duration from the prior
@@ -186,7 +193,7 @@ template); see Completed section.
 
 Highest-leverage engineering work while P0 release items stay owner/hardware
 blocked and P5 stays parked. All items are measurement-first and
-behavior-preserving — the 153-test suite and `ruff` must stay green with no
+behavior-preserving — the 154-test suite and `ruff` must stay green with no
 user-visible change. Full rationale and acceptance criteria in
 [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md) Phase 6.
 

@@ -194,7 +194,7 @@ workflow refinements. The remaining roadmap work is owner/hardware-blocked
 (packaged-build smoke, signing, Stryker sample data), so the highest-leverage
 engineering work left is structural: keep the codebase cheap to change and
 cheap to run. Every item below is measurement-first and behavior-preserving —
-the 153-test suite and `ruff` must stay green with no unintended user-visible change.
+the 154-test suite and `ruff` must stay green with no unintended user-visible change.
 
 1. **Modularize `ui/main_window.py` (currently ~4,240 lines, down from ~6,500).**
    - `main_window.py` holds `MainWindow` plus `VideoGraphicsView`,
@@ -345,7 +345,7 @@ the 153-test suite and `ruff` must stay green with no unintended user-visible ch
      module changed. Only the canonical `*.py` files remain under `src/`; tests
      and `ruff` stayed green.
 
-## Recommended immediate next sprint (updated 2026-07-11)
+## Recommended immediate next sprint (updated 2026-08-09)
 
 Phases 1–5 shipped (smoothness fixture + diagnostics, the Figma brand system and
 tokens, accessibility audit, smoothness caching, and the workflow refinements).
@@ -361,8 +361,13 @@ each is measurement-first and behavior-preserving:
 2. **Only continue `ui/main_window.py` modularization for cohesive slices** —
    it is now below the ~2,500-line target, so further moves should be justified
    by clearer ownership or an upcoming change, not by line count alone.
-3. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (153 tests)
+3. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (154 tests)
    green before every release tag; feed any new regressions back into the roadmap.
+
+Automation note 2026-08-09: no Phase 6 code-health item was safe to advance
+without new evidence, so the run used the fallback review path and fixed a
+project-library thumbnail-cache correctness bug. The remaining sprint guidance
+above is unchanged.
 
 This keeps the project on a safe optimization loop: measure first, keep the codebase
 cheap to change and cheap to run, and only then restart larger feature bets

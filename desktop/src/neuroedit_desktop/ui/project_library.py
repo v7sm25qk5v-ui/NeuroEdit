@@ -132,6 +132,8 @@ class ThumbnailWorker(QObject):
                 if thumb.exists() and thumb.stat().st_mtime >= proj_mtime:
                     self.thumbnail_ready.emit(project_path, str(thumb))
                     continue
+                if thumb.exists():
+                    thumb.unlink()
                 offset = clip_dur * 0.15 if clip_dur > 0 else 5.0
                 # No manual quoting: subprocess passes list args verbatim, so
                 # wrapping the path in quote characters breaks paths with spaces.
@@ -148,8 +150,8 @@ class ThumbnailWorker(QObject):
                     "2",
                     str(thumb),
                 ]
-                subprocess.run(cmd, capture_output=True, timeout=15)
-                if thumb.exists():
+                completed = subprocess.run(cmd, capture_output=True, timeout=15)
+                if completed.returncode == 0 and thumb.exists():
                     self.thumbnail_ready.emit(project_path, str(thumb))
             except Exception:  # noqa: BLE001
                 pass

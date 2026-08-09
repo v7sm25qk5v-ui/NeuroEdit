@@ -1,5 +1,21 @@
 # NeuroEdit — Session Handoff
 
+## 2026-08-09 — Project-library stale thumbnail refresh fix
+
+- Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,
+  and recent desktop markdown. The live roadmap still leaves feature work
+  owner/hardware/sample-data gated or explicitly deferred without a safe
+  equality signal.
+- Fixed a fallback review finding in `ui/project_library.py`: stale cached
+  `.neuroedit-thumbnail.jpg` files are now removed before thumbnail regeneration
+  and are only emitted when ffmpeg succeeds, preventing old derived previews from
+  reappearing after project/media changes if refresh fails.
+- Added a focused regression in `tests/test_project_library.py` that simulates a
+  failed ffmpeg refresh and proves the stale thumbnail is not emitted or kept.
+- Verification: focused `ruff` plus `tests/test_project_library.py` (`6
+  passed`); full `ruff check src tests scripts`; full suite (`154 passed`).
+  No release tag is indicated for this internal correctness fix.
+
 Covers work completed across sessions (accumulated):
 
 1. **Cross-platform build & distribution** (macOS + Windows from one codebase) — the main effort.

@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
+import types
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -14,6 +17,7 @@ from PySide6.QtCore import QSettings, Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from neuroedit_desktop.ui.main_window import ProjectLibraryDialog  # noqa: E402
+from neuroedit_desktop.ui.project_library import ThumbnailWorker, _thumbnail_path  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -92,3 +96,33 @@ def test_sort_missing_media_first(library):
     library.sort_combo.setCurrentIndex(library.sort_combo.findData("name"))
     library.sort_combo.setCurrentIndex(library.sort_combo.findData("missing"))
     assert _row_names(library)[0] == "Beta Case"  # has 1 missing source file
+
+
+def test_thumbnail_worker_does_not_emit_stale_thumbnail_after_failed_refresh(
+    app, tmp_path, monkeypatch
+):
+    project = tmp_path / "Case" / "project.json"
+    project.parent.mkdir()
+    project.write_text(json.dumps({"project_name": "Case"}), encoding="utf-8")
+    thumb = _thumbnail_path(project)
+    thumb.write_bytes(b"old preview")
+    os.utime(thumb, (project.stat().st_mtime - 10, project.stat().st_mtime - 10))
+
+    monkeypatch.setitem(
+        sys.modules,
+        "imageio_ffmpeg",
+        types.SimpleNamespace(get_ffmpeg_exe=lambda: "/usr/bin/false"),
+    )
+
+    def fail_ffmpeg(cmd, capture_output, timeout):
+        return subprocess.CompletedProcess(cmd, returncode=1)
+
+    monkeypatch.setattr(subprocess, "run", fail_ffmpeg)
+    emitted = []
+    worker = ThumbnailWorker([(str(project), str(tmp_path / "source.mp4"), 10.0)])
+    worker.thumbnail_ready.connect(lambda project_path, thumb_path: emitted.append(thumb_path))
+
+    worker.run()
+
+    assert emitted == []
+    assert not thumb.exists()
