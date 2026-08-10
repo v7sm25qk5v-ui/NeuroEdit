@@ -1,5 +1,23 @@
 # NeuroEdit — Session Handoff
 
+## 2026-08-10 — Roadmap follow-up documentation sync
+
+- Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,
+  `desktop/CLAUDE.md`, and recently updated desktop markdown against the current
+  code/tests. No release tag is indicated; remaining release gates are still
+  owner/hardware/sample-data gated.
+- Synchronized the roadmap with already-implemented follow-ups: Project Library
+  search/sort, single-frame SAM `sam_last_run`, SAM busy-state list disabling,
+  the inline SAM setup prompt, persisted PHI per-stop progress, and copy-only
+  storage-root migration.
+- Left genuinely open items open: packaged macOS/Windows runtime smoke, owner
+  repository/signing decisions, Intel Mac evaluation if testers need it,
+  track-window UI preference persistence, and Stryker/DICOM work pending sample
+  data.
+- Verification: documentation diff review, `git diff --check`, focused
+  SAM/PHI/project-library tests, full `ruff check src tests scripts`, and the
+  full desktop test suite. No release tag is indicated for this docs sync.
+
 ## 2026-08-09 — Project-library stale thumbnail refresh fix
 
 - Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,

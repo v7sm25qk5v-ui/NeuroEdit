@@ -143,21 +143,22 @@ large integrations before broader alpha testing.
 1. **Project Library polish.**
    - Keep thumbnails, relative timestamps, duration/media counts, missing-media
      warnings, and reveal actions as a first-class entry point.
-   - Add search/filter and sort by recent/name/missing-media if testers accumulate
-     enough projects to need it.
+   - Done: search/filter and sorting by recent/name/missing-media are implemented
+     and covered by project-library tests.
    - Acceptance: a returning tester can find the right case in under five seconds.
 
 2. **SAM workflow follow-ups.**
-   - Stamp `sam_last_run` for single-frame segmentation, persist track-window UI
-     preferences, disable mask-list rows while a SAM job is running, and decide
-     whether to remove the auto-shown setup dialog now that the inline explainer
-     exists.
+   - Done: single-frame segmentation stamps `sam_last_run`, mask-list rows are
+     disabled while a SAM job is running, and the inline explainer is the setup
+     entry point when weights are ready-but-not-downloaded.
+   - Remaining: persist track-window UI preferences if repeated tester sessions
+     show the defaults are slowing reviewers down.
    - Acceptance: SAM setup/status feels like one coherent flow, not two competing
      prompts.
 
 3. **PHI/storage follow-ups.**
-   - Persist guided-review progress per stop, not just final completion.
-   - Provide a safe migration flow when the storage root changes.
+   - Done: guided-review progress persists per stop, and storage-root changes can
+     copy existing autosave data without deleting the previous location.
    - Acceptance: users can pause/resume PHI review and move storage without losing
      confidence in what has been reviewed.
 
@@ -368,6 +369,12 @@ Automation note 2026-08-09: no Phase 6 code-health item was safe to advance
 without new evidence, so the run used the fallback review path and fixed a
 project-library thumbnail-cache correctness bug. The remaining sprint guidance
 above is unchanged.
+
+Automation note 2026-08-10: live code already contains tested implementations for
+several Phase 4 follow-ups that the plan still described as open (Project Library
+search/sort, single-frame SAM `sam_last_run`, SAM busy-state list disabling, the
+single inline setup prompt, PHI per-stop progress, and copy-only storage
+migration). The plan was synchronized; no release is indicated.
 
 This keeps the project on a safe optimization loop: measure first, keep the codebase
 cheap to change and cheap to run, and only then restart larger feature bets

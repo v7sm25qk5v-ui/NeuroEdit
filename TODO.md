@@ -146,11 +146,11 @@ snap-indicator guide line.
 
 All six items implemented (named mask list, delete + orphan cleanup, re-track,
 persisted status row, missing-backend explainer, propagation window,
-per-mask palette colors); see Completed section. Follow-ups deliberately
-deferred: record `sam_last_run` for single-frame segmentation too; persist the
-track-window UI prefs; disable mask-list rows while a SAM job is running;
-consider dropping the auto-shown SamSetupDialog now that the explainer covers
-ready-but-no-weights (currently both appear).
+per-mask palette colors); see Completed section. Follow-ups since completed:
+single-frame segmentation now stamps `sam_last_run`, mask-list rows are disabled
+while a SAM job is running, and the inline missing-backend explainer is the
+single setup entry point instead of competing with an auto-opened setup dialog.
+Remaining deferred follow-up: persist the track-window UI prefs.
 
 ## P3 — Privacy and PHI review — ✅ SHIPPED 2026-06-10
 
@@ -159,9 +159,10 @@ checklist with flags written to the export report, `audio_reviewed_for_phi`
 flag + Audio-panel checkbox + warn-not-block on export-with-audio, Reveal
 MP4/Report buttons, configurable storage location with first-run prompt
 recommending a non-cloud-synced folder); see Completed section. Follow-ups
-deliberately deferred: per-stop review progress persistence (guided review
-state is per-session; completion sets `phi_review_confirmed`), migrating
-existing autosave contents when the storage root changes.
+since completed: per-stop review progress persists so a paused guided review can
+resume after reopening, and storage-root changes offer a copy-only migration of
+existing autosave data. No open P3 implementation follow-up is currently
+code-ready.
 
 ## P4 — Captions, transcript, and export polish — ✅ SHIPPED 2026-06-10
 
@@ -392,14 +393,16 @@ command-line tools.
   scrubbing never snaps. 13 new tests in `tests/test_timeline_editing.py`.
 - [x] P3 privacy/PHI review (2026-06-10): guided PHI review stepper (Edit
   menu) over clips/slides/audio with what-to-look-for hints — completing it
-  sets `phi_review_confirmed`; single pre-export attestation checklist
+  sets `phi_review_confirmed`; per-stop progress persists for paused/resumed
+  review sessions; single pre-export attestation checklist
   (PHI/de-id/consent required, audio warn-only) pre-filled from project state,
   flags written to the export report; `audio_reviewed_for_phi` flag +
   Audio-panel checkbox + preflight warning; Reveal MP4/Reveal Report on the
   completion dialog; configurable storage root (`storage/projectRoot` in
-  QSettings) with first-run prompt recommending non-cloud-synced folders.
-  UX grounded in clinical-software research (soft stops over hard stops,
-  alert-fatigue avoidance, human-in-the-loop review). 9 tests in
+  QSettings) with first-run prompt recommending non-cloud-synced folders and a
+  copy-only migration flow for existing autosave contents. UX grounded in
+  clinical-software research (soft stops over hard stops, alert-fatigue
+  avoidance, human-in-the-loop review). Focused tests in
   `tests/test_phi_review.py`.
 - [x] P4 captions + export polish (2026-06-10): `captions.py` turns transcript
   segments into accessibility-conventional cues (≤42 chars/line, ≤2 lines,
@@ -414,9 +417,10 @@ command-line tools.
   panel (color swatch, inline rename, visibility checkbox, context menu);
   delete routes through undo-safe `_delete_annotation`, orphan mask PNGs swept
   at app close (undo/redo stacks respected); explicit Re-track replays stored
-  `prompt_points` and replaces frames in place; `sam_last_run` persisted in
-  the project and shown as a status row; missing-backend explainer with
-  Install/Download buttons; track window spinbox + "To clip end" default;
-  8-color mask palette (no red) burned into the saved PNGs. 8 new tests in
+  `prompt_points` and replaces frames in place; propagation and single-frame
+  segmentation both persist `sam_last_run` in the project and show it as a
+  status row; missing-backend explainer with Install/Download buttons is the
+  setup entry point; track window spinbox + "To clip end" default; 8-color mask
+  palette (no red) burned into the saved PNGs. Focused tests in
   `tests/test_sam_workflow.py`. UX choices grounded in research on
   Premiere/Resolve/FCP/Roto Brush/3D Slicer conventions and complaints.
