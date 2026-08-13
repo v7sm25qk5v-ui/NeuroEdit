@@ -24,6 +24,12 @@ from PySide6.QtWidgets import (
 from neuroedit_desktop.ui.styles import DANGER, SUCCESS, TEXT_MUTED, TEXT_PRIMARY
 
 
+def _clip_display_duration(clip: dict) -> float:
+    if "trim_start" not in clip and "trim_end" not in clip:
+        return max(0.0, float(clip.get("duration") or 0.0))
+    return max(0.0, float(clip.get("trim_end") or 0.0) - float(clip.get("trim_start") or 0.0))
+
+
 def relative_time(ts: float) -> str:
     now = datetime.datetime.now()
     dt = datetime.datetime.fromtimestamp(ts)
@@ -69,12 +75,16 @@ def _read_project_meta(path: Path) -> dict:
         audio = data.get("audio_tracks") or data.get("audio") or []
         slides = data.get("slides") or []
         for clip in clips:
-            dur = clip.get("duration") or 0.0
-            result["total_duration"] += float(dur)
+            display_dur = _clip_display_duration(clip)
+            start = float(clip.get("start_time") or 0.0)
+            result["total_duration"] = max(result["total_duration"], start + display_dur)
             src = clip.get("path") or clip.get("source_path")
             if src and result["first_source_path"] is None:
                 result["first_source_path"] = src
-                result["first_clip_duration"] = float(dur)
+                trim_start = float(clip.get("trim_start") or 0.0)
+                result["first_clip_duration"] = trim_start + (
+                    display_dur * 0.15 if display_dur > 0 else 5.0
+                )
             if src and not Path(src).exists():
                 result["missing_count"] += 1
         result["clip_count"] = len(clips)
@@ -82,10 +92,16 @@ def _read_project_meta(path: Path) -> dict:
         result["slide_count"] = len(slides)
         result["media_count"] = len(clips) + len(audio) + len(slides)
         for track in audio:
+            start = float(track.get("start_time") or 0.0)
+            duration = max(0.1, float(track.get("duration") or 0.0))
+            result["total_duration"] = max(result["total_duration"], start + duration)
             src = track.get("path") or track.get("source_path")
             if src and not Path(src).exists():
                 result["missing_count"] += 1
         for slide in slides:
+            start = float(slide.get("start_time") or 0.0)
+            duration = max(0.1, float(slide.get("duration") or 0.0))
+            result["total_duration"] = max(result["total_duration"], start + duration)
             src = slide.get("image_path") or slide.get("source_path")
             if src and not Path(src).exists():
                 result["missing_count"] += 1
@@ -123,7 +139,7 @@ class ThumbnailWorker(QObject):
             ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
         except Exception:  # noqa: BLE001
             return
-        for project_path, source_path, clip_dur in self._tasks:
+        for project_path, source_path, thumbnail_offset in self._tasks:
             if self._stopped:
                 break
             thumb = _thumbnail_path(Path(project_path))
@@ -134,14 +150,13 @@ class ThumbnailWorker(QObject):
                     continue
                 if thumb.exists():
                     thumb.unlink()
-                offset = clip_dur * 0.15 if clip_dur > 0 else 5.0
                 # No manual quoting: subprocess passes list args verbatim, so
                 # wrapping the path in quote characters breaks paths with spaces.
                 cmd = [
                     ffmpeg,
                     "-y",
                     "-ss",
-                    str(offset),
+                    str(thumbnail_offset),
                     "-i",
                     source_path,
                     "-frames:v",

@@ -36,6 +36,13 @@ by the optimization automation; they are not duplicated into P4.5.
   derived preview from being reused after media or de-identification state
   changes when thumbnail regeneration fails.
 
+- [x] **Project Library used source duration for trimmed-case previews.** Fixed
+  2026-08-13: recent-project metadata now reports the timeline content end
+  across clips, audio, and slides instead of summing raw source durations, and
+  thumbnail generation seeks inside the first clip's trimmed source range. This
+  keeps the library row duration and derived preview aligned with what the
+  reviewer will actually see after opening a trimmed project.
+
 - [x] **Stale `project_end_time` cache after undo/redo (correctness).** Fixed
   2026-06-20: `_apply_snapshot()` now clears `_project_end_time_cache` after
   replacing the project, so undo/redo cannot reuse a duration from the prior
@@ -194,7 +201,7 @@ template); see Completed section.
 
 Highest-leverage engineering work while P0 release items stay owner/hardware
 blocked and P5 stays parked. All items are measurement-first and
-behavior-preserving — the 154-test suite and `ruff` must stay green with no
+behavior-preserving — the 155-test suite and `ruff` must stay green with no
 user-visible change. Full rationale and acceptance criteria in
 [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md) Phase 6.
 

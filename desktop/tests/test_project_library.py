@@ -17,7 +17,11 @@ from PySide6.QtCore import QSettings, Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from neuroedit_desktop.ui.main_window import ProjectLibraryDialog  # noqa: E402
-from neuroedit_desktop.ui.project_library import ThumbnailWorker, _thumbnail_path  # noqa: E402
+from neuroedit_desktop.ui.project_library import (  # noqa: E402
+    ThumbnailWorker,
+    _read_project_meta,
+    _thumbnail_path,
+)
 
 
 @pytest.fixture(scope="module")
@@ -96,6 +100,55 @@ def test_sort_missing_media_first(library):
     library.sort_combo.setCurrentIndex(library.sort_combo.findData("name"))
     library.sort_combo.setCurrentIndex(library.sort_combo.findData("missing"))
     assert _row_names(library)[0] == "Beta Case"  # has 1 missing source file
+
+
+def test_project_meta_uses_timeline_duration_and_trimmed_thumbnail_offset(
+    app, tmp_path, monkeypatch
+):
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"video")
+    project = tmp_path / "Trimmed" / "project.json"
+    project.parent.mkdir()
+    project.write_text(
+        json.dumps(
+            {
+                "project_name": "Trimmed Case",
+                "deidentified_confirmed": True,
+                "clips": [
+                    {
+                        "path": str(source),
+                        "duration": 100.0,
+                        "start_time": 10.0,
+                        "trim_start": 40.0,
+                        "trim_end": 50.0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    captured_tasks = []
+    monkeypatch.setattr(
+        ProjectLibraryDialog,
+        "_start_thumb_thread",
+        lambda self, tasks: captured_tasks.extend(tasks),
+    )
+
+    meta = _read_project_meta(project)
+    assert meta["total_duration"] == pytest.approx(20.0)
+    assert meta["first_clip_duration"] == pytest.approx(41.5)
+
+    settings = QSettings("NeuroEdit", "Desktop")
+    original = settings.value("recentProjects", []) or []
+    settings.setValue("recentProjects", [str(project)])
+    dialog = ProjectLibraryDialog()
+    try:
+        row_text = dialog.list_widget.item(0).text()
+        assert "0:20" in row_text
+        assert captured_tasks == [(str(project), str(source), pytest.approx(41.5))]
+    finally:
+        dialog.close()
+        settings.setValue("recentProjects", original)
 
 
 def test_thumbnail_worker_does_not_emit_stale_thumbnail_after_failed_refresh(

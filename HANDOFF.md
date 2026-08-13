@@ -1,5 +1,23 @@
 # NeuroEdit — Session Handoff
 
+## 2026-08-13 — Project-library trimmed-duration metadata fix
+
+- Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,
+  `desktop/CLAUDE.md`, and recently updated desktop markdown. The remaining
+  roadmap work is still owner/hardware/sample-data gated or explicitly deferred
+  without a safe implementation signal, so this run used the fallback review
+  path.
+- Fixed a Project Library metadata bug in `ui/project_library.py`: recent-case
+  rows now report the timeline content end across clips, audio, and slides
+  instead of summing raw source durations, and thumbnail generation seeks within
+  the first clip's trimmed source range.
+- Added a focused regression in `tests/test_project_library.py` for a trimmed
+  clip whose source duration is much longer than its displayed range.
+- Verification: focused `tests/test_project_library.py` (`7 passed`); focused
+  `ruff` on touched files; full `ruff check src tests scripts`; full suite
+  (`155 passed`); `git diff --check`. No release tag is indicated for this
+  internal metadata correctness fix.
+
 ## 2026-08-10 — Roadmap follow-up documentation sync
 
 - Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,
