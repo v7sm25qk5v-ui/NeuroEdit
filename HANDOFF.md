@@ -1,5 +1,20 @@
 # NeuroEdit — Session Handoff
 
+## 2026-08-14 — SAM roadmap preference-status sync
+
+- Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,
+  `desktop/README.md`, `desktop/CLAUDE.md`, and recently updated project
+  markdown. Remaining release and platform work is still owner/hardware/sample
+  data gated; no release tag is indicated.
+- Verified the stale P2/Phase 4 note about SAM track-window preference
+  persistence against the live implementation in `ui/sam_panel.py` and the
+  regression `tests/test_sam_workflow.py::test_track_window_prefs_persist_across_panels`.
+- Synchronized `TODO.md` and `NEXT_OPTIMIZATION_PLAN.md` so the active roadmap
+  now treats track-window preference persistence as complete instead of a
+  remaining deferred follow-up.
+- Verification: focused SAM workflow preference test, full `ruff check src tests
+  scripts`, full desktop test suite, and `git diff --check`.
+
 ## 2026-08-13 — Project-library trimmed-duration metadata fix
 
 - Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,

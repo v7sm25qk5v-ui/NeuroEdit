@@ -155,9 +155,10 @@ All six items implemented (named mask list, delete + orphan cleanup, re-track,
 persisted status row, missing-backend explainer, propagation window,
 per-mask palette colors); see Completed section. Follow-ups since completed:
 single-frame segmentation now stamps `sam_last_run`, mask-list rows are disabled
-while a SAM job is running, and the inline missing-backend explainer is the
-single setup entry point instead of competing with an auto-opened setup dialog.
-Remaining deferred follow-up: persist the track-window UI prefs.
+while a SAM job is running, the inline missing-backend explainer is the single
+setup entry point instead of competing with an auto-opened setup dialog, and
+track-window UI preferences persist across SAM panel instances via `QSettings`.
+No open P2 implementation follow-up is currently code-ready.
 
 ## P3 — Privacy and PHI review — ✅ SHIPPED 2026-06-10
 

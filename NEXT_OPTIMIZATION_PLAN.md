@@ -149,10 +149,9 @@ large integrations before broader alpha testing.
 
 2. **SAM workflow follow-ups.**
    - Done: single-frame segmentation stamps `sam_last_run`, mask-list rows are
-     disabled while a SAM job is running, and the inline explainer is the setup
-     entry point when weights are ready-but-not-downloaded.
-   - Remaining: persist track-window UI preferences if repeated tester sessions
-     show the defaults are slowing reviewers down.
+     disabled while a SAM job is running, the inline explainer is the setup
+     entry point when weights are ready-but-not-downloaded, and track-window UI
+     preferences persist across SAM panel instances via `QSettings`.
    - Acceptance: SAM setup/status feels like one coherent flow, not two competing
      prompts.
 
@@ -381,6 +380,10 @@ to advance without new evidence, so the fallback review path fixed Project
 Library metadata for trimmed projects. Recent-project rows now use timeline
 content end across clips/audio/slides, and thumbnail generation seeks within the
 first clip's trimmed source range. No release is indicated.
+
+Automation note 2026-08-14: live code and `tests/test_sam_workflow.py` already
+verify persisted SAM track-window preferences, so Phase 4 guidance was
+synchronized to remove that stale remaining follow-up. No release is indicated.
 
 This keeps the project on a safe optimization loop: measure first, keep the codebase
 cheap to change and cheap to run, and only then restart larger feature bets
