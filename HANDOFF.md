@@ -11,9 +11,9 @@
 - Preserved behavior and compatibility by keeping project actions, review
   invalidation, media sync, and UI refresh ownership in `main_window.py`; the
   extraction reduces `ui/main_window.py` to ~2,384 lines.
-- Verification: focused `tests/test_undo_history.py`, focused `ruff` on touched
-  files, full `ruff check src tests scripts`, full desktop test suite, and
-  `git diff --check`.
+- Verification: focused `tests/test_undo_history.py` (`21 passed`), focused
+  `ruff` on touched files, full `ruff check src tests scripts`, full desktop
+  test suite (`155 passed`), and `git diff --check`.
 
 ## 2026-08-14 — SAM roadmap preference-status sync
 
