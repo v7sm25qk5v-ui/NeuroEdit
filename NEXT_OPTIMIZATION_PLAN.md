@@ -253,6 +253,11 @@ the 155-test suite and `ruff` must stay green with no unintended user-visible ch
      a mixin. `MainWindow` now inherits that mixin, keeps compatibility
      re-exports for dialogs/workers, and is ~2,447 lines, below the ~2,500-line
      module target.
+   - Progress 2026-08-16: moved undo/redo, dirty-state marking, snapshot
+     serialization, history stack maintenance, and autosave controller methods
+     to `ui/history.py` as `HistoryMixin`. This keeps the compact snapshot and
+     autosave-reuse behavior intact while reducing `main_window.py` to ~2,384
+     lines.
    - Progress 2026-06-19: `MainWindow` gained a cached project-end-time helper
      used by seek/playback/export and invalidated on document edits/project
      loads. This addressed the playback loop's per-tick `project_end_time()`
@@ -384,6 +389,11 @@ first clip's trimmed source range. No release is indicated.
 Automation note 2026-08-14: live code and `tests/test_sam_workflow.py` already
 verify persisted SAM track-window preferences, so Phase 4 guidance was
 synchronized to remove that stale remaining follow-up. No release is indicated.
+
+Automation note 2026-08-16: the remaining safe Phase 6 modularization slice was
+the cohesive undo/autosave controller. It now lives in `ui/history.py` as a
+`HistoryMixin`; `main_window.py` stays below the target module size, and no
+release is indicated.
 
 This keeps the project on a safe optimization loop: measure first, keep the codebase
 cheap to change and cheap to run, and only then restart larger feature bets

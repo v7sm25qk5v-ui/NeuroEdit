@@ -1,5 +1,20 @@
 # NeuroEdit — Session Handoff
 
+## 2026-08-16 — Undo/autosave history mixin extraction
+
+- Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,
+  `desktop/CLAUDE.md`, and recently updated project markdown. Remaining release
+  gates are still owner/hardware/sample-data gated; no release tag is indicated.
+- Moved `MainWindow`'s undo/redo, dirty-state marking, compact snapshot
+  serialization, history stack maintenance, snapshot restore, and autosave
+  controller methods to `ui/history.py` as `HistoryMixin`.
+- Preserved behavior and compatibility by keeping project actions, review
+  invalidation, media sync, and UI refresh ownership in `main_window.py`; the
+  extraction reduces `ui/main_window.py` to ~2,384 lines.
+- Verification: focused `tests/test_undo_history.py`, focused `ruff` on touched
+  files, full `ruff check src tests scripts`, full desktop test suite, and
+  `git diff --check`.
+
 ## 2026-08-14 — SAM roadmap preference-status sync
 
 - Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,

@@ -202,6 +202,9 @@ layer paints the slide above it.
 - `ui/export_workflow.py` — `ExportWorkflowMixin`, containing `MainWindow`'s MP4
   export, caption export, export history, reveal, progress, and report-writing
   controller methods.
+- `ui/history.py` — `HistoryMixin`, containing `MainWindow`'s dirty-state,
+  autosave, compact undo/redo snapshot, history-size bookkeeping, and snapshot
+  restore controller methods.
 - `ui/canvas.py` — `VideoGraphicsView` and `AnnotationGraphicsItem`.
 - `ui/sam_workers.py` — SAM worker QObjects.
 - `ui/sam_panel.py` — SAM controls, tracked-mask list, and propagation settings.
