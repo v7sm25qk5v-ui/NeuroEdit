@@ -215,11 +215,12 @@ deferral is unaudited. No new test regressions. Recommended order is unchanged:
 modularize first (makes the rest safer to review), then undo cost, then the
 import audit.
 
-- [ ] Modularize `ui/main_window.py` (~4,240 lines) by responsibility — the
+- [x] Modularize `ui/main_window.py` by responsibility — the
   graphics view + annotation item and the SAM worker QObjects are already
   extracted (see Progress below), and the app dialogs now live in `ui/dialogs.py`;
-  the remaining slice is the still-large `MainWindow` class. Mechanical moves
-  only; no logic changes. Target: no `ui/` module over ~2,500 lines. **Progress
+  the `MainWindow` class has since been split into cohesive workflow mixins.
+  Mechanical moves only; no logic changes. Target met: no `ui/` module is over
+  ~2,500 lines. **Progress
   2026-06-14:**
   Project Library dialog + thumbnail worker extracted to `ui/project_library.py`
   and re-exported from `main_window`. **Progress 2026-06-16:** canvas graphics
@@ -260,8 +261,10 @@ import audit.
   `sam_workflow.py` ~565,
   `main_window_utils.py` ~68, `branding.py` ~74, `labels_panel.py` ~525,
   `sam_panel.py` ~412, `dialogs.py` ~804, `canvas.py` ~1,285,
-  `sam_workers.py` ~146. Remaining modularization is lower priority and should
-  only target cohesive slices that simplify future work.
+  `sam_workers.py` ~146. **Completed 2026-08-17:** current line-count review
+  confirms no `ui/` module is over the ~2,500-line target. Remaining
+  modularization is lower priority and should only target cohesive slices that
+  simplify future work.
 - [x] Modularize `ui/editor_panels.py` (~2,960 lines) — it is also over the
   ~2,500-line `ui/` target. Extract `AudioPanel` (~970 lines, the largest
   class) into its own `ui/audio_panel.py`, re-exported from `editor_panels`;

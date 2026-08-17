@@ -281,13 +281,13 @@ Other PHI safeguards:
 
 ## Optimization Automation Memory
 
-- **Last implementation:** 2026-07-11 — code-review integrity fixes now protect
-  project switching/Save As assets, invalidate PHI attestations after content
-  changes, use timestamps for VFR export/SAM work, and gate tagged builds on
-  lint and the full test suite.
-- **Last reviewed:** the 2026-07-11 codebase review was implemented with focused
-  regressions; a true pre-`to_dict()` undo shortcut remains deferred unless the
-  model gains a trustworthy document revision signal.
+- **Last implementation:** 2026-08-16 — `ui/history.py` now owns the
+  undo/redo, dirty-state, autosave, compact snapshot, and snapshot-restore
+  controller methods as `HistoryMixin`.
+- **Last reviewed:** 2026-08-17 — fallback review found the Phase 6
+  modularization target complete. Keep future splits ownership-driven rather
+  than line-count-driven; a true pre-`to_dict()` undo shortcut remains deferred
+  unless the model gains a trustworthy document revision signal.
 - **Mode:** incremental. Next optimization review should deep-dive files changed
   after the §44 commit plus one hop. (Full-sweep baseline was `22085f9`,
   2026-06-17.)
@@ -339,14 +339,15 @@ Other PHI safeguards:
     only a true pre-`to_dict()` short-circuit remains open, and only if it can
     be proven without broad mutation bookkeeping.
   - Modularization is past the Phase 6 line-count target: `main_window.py`
-    ~2,447 lines (down from ~6,500); canvas → `ui/canvas.py`, SAM workers →
+    ~2,384 lines (down from ~6,500); canvas → `ui/canvas.py`, SAM workers →
     `ui/sam_workers.py`, SAM workflow → `ui/sam_workflow.py`, export workflow →
     `ui/export_workflow.py`, dialogs → `ui/dialogs.py`, export worker →
     `ui/export_worker.py`, branding → `ui/branding.py`, utility helpers →
     `ui/main_window_utils.py`, audio → `ui/audio_panel.py`, project library →
     `ui/project_library.py`, all re-exported from their origin module where
-    compatibility requires it. Future splits should be ownership-driven rather
-    than line-count-driven.
+    compatibility requires it. `ui/history.py` owns dirty-state, autosave, and
+    undo/redo snapshot controller methods. Future splits should be
+    ownership-driven rather than line-count-driven.
   - Playback-loop optimization is partially complete: `MainWindow._project_end_time()`
     caches `project_end_time()` for seek/playback/export and invalidates on
     document edits/project load/undo/redo restores. Playback uses the monotonic

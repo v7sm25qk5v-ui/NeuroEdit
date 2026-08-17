@@ -1,5 +1,20 @@
 # NeuroEdit — Session Handoff
 
+## 2026-08-17 — Phase 6 roadmap status sync
+
+- Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,
+  `desktop/README.md`, `desktop/CLAUDE.md`, and recently updated project
+  markdown. Remaining release/platform work is still owner/hardware/sample-data
+  gated; no release tag is indicated.
+- Ran a fallback code-health review around the recently extracted history paths
+  and current `ui/` module sizes. No owner-independent code task was safer than
+  documentation synchronization in this run.
+- Synchronized `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, and `desktop/CLAUDE.md`
+  so the Phase 6 `main_window.py` module-size target is closed: current
+  `main_window.py` is ~2,384 lines and no `ui/` module is over ~2,500 lines.
+- Verification: line-count review, focused `tests/test_undo_history.py`, full
+  `ruff check src tests scripts`, full desktop test suite, and `git diff --check`.
+
 ## 2026-08-16 — Undo/autosave history mixin extraction
 
 - Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,

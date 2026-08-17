@@ -196,7 +196,7 @@ engineering work left is structural: keep the codebase cheap to change and
 cheap to run. Every item below is measurement-first and behavior-preserving —
 the 155-test suite and `ruff` must stay green with no unintended user-visible change.
 
-1. **Modularize `ui/main_window.py` (currently ~4,240 lines, down from ~6,500).**
+1. **Modularize `ui/main_window.py` — ✅ TARGET MET 2026-08-17.**
    - `main_window.py` holds `MainWindow` plus `VideoGraphicsView`,
      `AnnotationGraphicsItem`, four SAM worker `QObject`s
      (`SamProbeWorker`/`SamSegmentWorker`/`SamPropagationWorker`/`SamDownloadWorker`),
@@ -258,6 +258,9 @@ the 155-test suite and `ruff` must stay green with no unintended user-visible ch
      to `ui/history.py` as `HistoryMixin`. This keeps the compact snapshot and
      autosave-reuse behavior intact while reducing `main_window.py` to ~2,384
      lines.
+   - Completed 2026-08-17: current line-count review confirms `main_window.py`
+     is ~2,384 lines and no `ui/` module is over the ~2,500-line target. Further
+     modularization should be ownership-driven rather than line-count-driven.
    - Progress 2026-06-19: `MainWindow` gained a cached project-end-time helper
      used by seek/playback/export and invalidated on document edits/project
      loads. This addressed the playback loop's per-tick `project_end_time()`
@@ -350,7 +353,7 @@ the 155-test suite and `ruff` must stay green with no unintended user-visible ch
      module changed. Only the canonical `*.py` files remain under `src/`; tests
      and `ruff` stayed green.
 
-## Recommended immediate next sprint (updated 2026-08-09)
+## Recommended immediate next sprint (updated 2026-08-17)
 
 Phases 1–5 shipped (smoothness fixture + diagnostics, the Figma brand system and
 tokens, accessibility audit, smoothness caching, and the workflow refinements).
@@ -393,6 +396,12 @@ synchronized to remove that stale remaining follow-up. No release is indicated.
 Automation note 2026-08-16: the remaining safe Phase 6 modularization slice was
 the cohesive undo/autosave controller. It now lives in `ui/history.py` as a
 `HistoryMixin`; `main_window.py` stays below the target module size, and no
+release is indicated.
+
+Automation note 2026-08-17: fallback review found no owner-independent code task
+that was safer than documentation synchronization. The Phase 6 module-size target
+is now closed in `TODO.md` after a live line-count review confirmed
+`main_window.py` is ~2,384 lines and no `ui/` module is over ~2,500 lines. No
 release is indicated.
 
 This keeps the project on a safe optimization loop: measure first, keep the codebase
