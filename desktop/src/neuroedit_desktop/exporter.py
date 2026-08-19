@@ -90,9 +90,10 @@ class ProjectExporter:
         warnings: list[str] = []
         try:
             output_path = self.settings.output_path.resolve()
-            if any(Path(clip.path).resolve() == output_path for clip in self.project.clips):
+            sources = self._source_media()
+            if any(path.resolve() == output_path for _name, path in sources):
                 raise RuntimeError("Choose an export path that is not one of the source media files.")
-            missing = [clip.name for clip in self.project.clips if not Path(clip.path).is_file()]
+            missing = [name for name, path in sources if not path.is_file()]
             if missing:
                 raise RuntimeError(
                     "Cannot export while source media is missing: " + ", ".join(missing[:5])
@@ -127,6 +128,16 @@ class ProjectExporter:
             return warnings
         finally:
             self._release_captures()
+
+    def _source_media(self) -> list[tuple[str, Path]]:
+        sources = [(clip.name, Path(clip.path)) for clip in self.project.clips]
+        sources.extend((track.name, Path(track.path)) for track in self.project.audio_tracks)
+        sources.extend(
+            (slide.title or "Slide image", Path(slide.image_path))
+            for slide in self.project.slides
+            if slide.image_path
+        )
+        return sources
 
     def _duration(self) -> float:
         # Derived from actual content ends only — project.duration is a display

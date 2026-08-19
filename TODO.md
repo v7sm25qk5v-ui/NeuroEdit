@@ -43,6 +43,13 @@ by the optimization automation; they are not duplicated into P4.5.
   keeps the library row duration and derived preview aligned with what the
   reviewer will actually see after opening a trimmed project.
 
+- [x] **Export preflight missed non-clip source media.** Fixed 2026-08-19:
+  exports now apply the same missing-media and source-overwrite guard to
+  narration audio tracks and slide image/still assets that already protected
+  timeline clips. This prevents a missing narration/still from silently changing
+  the exported case, and prevents saving an MP4 over an app-managed still or
+  audio source.
+
 - [x] **Stale `project_end_time` cache after undo/redo (correctness).** Fixed
   2026-06-20: `_apply_snapshot()` now clears `_project_end_time_cache` after
   replacing the project, so undo/redo cannot reuse a duration from the prior

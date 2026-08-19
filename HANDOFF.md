@@ -1,5 +1,23 @@
 # NeuroEdit — Session Handoff
 
+## 2026-08-19 — Export source-media preflight fix
+
+- Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,
+  `desktop/README.md`, `desktop/CLAUDE.md`, and recently updated project
+  markdown. Remaining release/platform/Stryker work is still owner,
+  hardware, or sample-data gated; no release tag is indicated.
+- Used the fallback review path and fixed an export-safety gap in
+  `exporter.py`: export preflight now treats timeline clips, narration audio
+  tracks, and slide image/still assets as source media for both missing-file
+  rejection and source-overwrite rejection.
+- Added focused regressions proving export rejects missing audio sources,
+  missing slide image sources, and output paths that would overwrite non-clip
+  source media.
+- Verification: baseline full desktop test suite (`155 passed`), focused
+  `tests/test_regressions.py` (`11 passed`), focused `ruff` on touched code and
+  tests, full `ruff check src tests scripts`, full desktop test suite, and
+  `git diff --check`.
+
 ## 2026-08-17 — Phase 6 roadmap status sync
 
 - Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,

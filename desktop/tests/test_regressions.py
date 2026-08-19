@@ -134,6 +134,62 @@ def test_export_rejects_missing_source_media(tmp_path):
         exporter.export()
 
 
+def test_export_rejects_missing_audio_track_source(tmp_path):
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"video")
+    project = ProjectState()
+    video_clip = _clip(0.0, 5.0)
+    video_clip.path = str(clip)
+    project.clips.append(video_clip)
+    project.audio_tracks.append(
+        AudioTrack(id=new_id(), path=str(tmp_path / "missing.m4a"), name="Narration", duration=5.0)
+    )
+    exporter = ProjectExporter(
+        project,
+        ExportSettings(
+            output_path=tmp_path / "export.mp4", width=320, height=180,
+            fps=30, crf=20, label="test",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="Narration"):
+        exporter.export()
+
+
+def test_export_rejects_missing_slide_image_source(tmp_path):
+    project = ProjectState()
+    project.slides.append(
+        Slide(id=new_id(), title="Still", image_path=str(tmp_path / "missing.png"))
+    )
+    exporter = ProjectExporter(
+        project,
+        ExportSettings(
+            output_path=tmp_path / "export.mp4", width=320, height=180,
+            fps=30, crf=20, label="test",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="Still"):
+        exporter.export()
+
+
+def test_export_rejects_output_overwriting_slide_or_audio_source(tmp_path):
+    source = tmp_path / "still.png"
+    source.write_bytes(b"image")
+    project = ProjectState()
+    project.slides.append(Slide(id=new_id(), title="Still", image_path=str(source)))
+    exporter = ProjectExporter(
+        project,
+        ExportSettings(
+            output_path=source, width=320, height=180,
+            fps=30, crf=20, label="test",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="source media files"):
+        exporter.export()
+
+
 def test_audio_mux_replaces_output_only_after_success(tmp_path, monkeypatch):
     project = ProjectState()
     exporter = ProjectExporter(

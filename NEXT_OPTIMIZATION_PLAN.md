@@ -404,6 +404,12 @@ is now closed in `TODO.md` after a live line-count review confirmed
 `main_window.py` is ~2,384 lines and no `ui/` module is over ~2,500 lines. No
 release is indicated.
 
+Automation note 2026-08-19: fallback export-safety review found that the export
+preflight only rejected missing or source-overwritten timeline clips. Narration
+audio tracks and slide image/still assets now share the same source-media guard,
+with focused regressions for missing audio, missing slide images, and output
+paths that overwrite non-clip source media. No release is indicated.
+
 This keeps the project on a safe optimization loop: measure first, keep the codebase
 cheap to change and cheap to run, and only then restart larger feature bets
 (Windows packaging hardening, then the parked Stryker/DICOM work).
