@@ -57,6 +57,12 @@ by the optimization automation; they are not duplicated into P4.5.
   exports also get the same no-redaction-box reminder that clip-based exports
   already received.
 
+- [x] **Zero-duration slides extended export duration but rendered black.**
+  Fixed 2026-08-21: the exporter now uses one effective slide-duration floor
+  for content duration, timeline segment boundaries, and slide lookup, so
+  legacy/corrupt zero-duration slides render during the minimum export span
+  instead of padding the output with black frames.
+
 - [x] **Stale `project_end_time` cache after undo/redo (correctness).** Fixed
   2026-06-20: `_apply_snapshot()` now clears `_project_end_time_cache` after
   replacing the project, so undo/redo cannot reuse a duration from the prior

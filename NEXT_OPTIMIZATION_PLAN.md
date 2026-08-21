@@ -417,6 +417,13 @@ and the export checklist cover slides/stills and audio too. Readiness warnings
 now use the same reviewable-media model, with a focused slide-only regression.
 No release is indicated.
 
+Automation note 2026-08-21: fallback export review found a mismatch in the
+exporter's slide duration handling. `_duration()` gave zero-duration slides a
+minimum 0.1 s span, but segment boundaries and slide lookup used the raw zero
+duration, so the output could be extended with black frames instead of the
+slide. Export now uses one effective slide-duration floor for all three paths,
+with a focused regression. No release is indicated.
+
 This keeps the project on a safe optimization loop: measure first, keep the codebase
 cheap to change and cheap to run, and only then restart larger feature bets
 (Windows packaging hardening, then the parked Stryker/DICOM work).

@@ -89,6 +89,20 @@ def test_exporter_duration_is_content_end_not_project_duration():
     assert exporter._duration() == pytest.approx(8.0)
 
 
+def test_zero_duration_slide_renders_for_minimum_export_span():
+    project = ProjectState()
+    project.slides.append(Slide(id=new_id(), title="Intro", start_time=0.0, duration=0.0))
+    exporter = ProjectExporter(
+        project,
+        ExportSettings(output_path=Path("/tmp/o.mp4"), width=1280, height=720,
+                       fps=30, crf=20, label="t"),
+    )
+
+    assert exporter._duration() == pytest.approx(0.1)
+    assert exporter._timeline_boundaries(exporter._duration()) == [0.0, pytest.approx(0.1)]
+    assert exporter._slide_at_time(0.05) is project.slides[0]
+
+
 def test_from_dict_tolerates_unknown_keys():
     project = ProjectState()
     project.clips.append(_clip(0.0, 3.0))

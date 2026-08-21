@@ -1,5 +1,19 @@
 # NeuroEdit — Session Handoff
 
+## 2026-08-21 — Zero-duration slide export fix
+
+- Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,
+  `desktop/CLAUDE.md`, and recently updated project markdown. Remaining release,
+  platform, and Stryker work is still owner, hardware, or sample-data gated; no
+  release tag is indicated.
+- Used the fallback review path and fixed an export-duration mismatch: the
+  exporter now applies the same minimum slide-duration floor to content
+  duration, segment boundaries, and slide lookup.
+- Legacy/corrupt zero-duration slides now render during their minimum export
+  span instead of extending the MP4 with black frames.
+- Verification: focused `tests/test_regressions.py` (`12 passed`) and focused
+  `ruff` on touched code/tests.
+
 ## 2026-08-20 — PHI readiness warning coverage fix
 
 - Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,

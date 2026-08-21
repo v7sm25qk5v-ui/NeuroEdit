@@ -139,13 +139,16 @@ class ProjectExporter:
         )
         return sources
 
+    def _slide_duration(self, slide: Slide) -> float:
+        return max(0.1, slide.duration)
+
     def _duration(self) -> float:
         # Derived from actual content ends only — project.duration is a display
         # value that can ratchet past the real content (playhead padding) and
         # would add a black/silent tail to the export.
         ends: list[float] = []
         ends.extend(clip.start_time + clip.display_duration for clip in self.project.clips)
-        ends.extend(slide.start_time + max(0.1, slide.duration) for slide in self.project.slides)
+        ends.extend(slide.start_time + self._slide_duration(slide) for slide in self.project.slides)
         ends.extend(track.start_time + max(0.1, track.duration) for track in self.project.audio_tracks)
         return max(0.0, max(ends, default=0.0))
 
@@ -244,7 +247,7 @@ class ProjectExporter:
 
         for slide in self.project.slides:
             add(slide.start_time)
-            add(slide.start_time + slide.duration)
+            add(slide.start_time + self._slide_duration(slide))
 
         for ann in self.project.annotations:
             add(ann.frame_time)
@@ -923,7 +926,7 @@ class ProjectExporter:
 
     def _slide_at_time(self, time_s: float) -> Slide | None:
         for slide in reversed(self.project.slides):
-            if slide.start_time <= time_s < slide.start_time + slide.duration:
+            if slide.start_time <= time_s < slide.start_time + self._slide_duration(slide):
                 return slide
         return None
 
