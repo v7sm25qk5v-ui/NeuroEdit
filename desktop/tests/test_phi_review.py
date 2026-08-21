@@ -61,6 +61,20 @@ def test_preflight_warns_on_unreviewed_audio():
     assert not any("spoken PHI" in w for w in project_preflight_warnings(project))
 
 
+def test_preflight_privacy_warnings_cover_slide_only_exports():
+    project = ProjectState()
+    project.slides.append(
+        Slide(id=new_id(), title="Imported still", image_path="/tmp/still.png")
+    )
+
+    warnings = project_preflight_warnings(project)
+
+    assert any("consent" in warning for warning in warnings)
+    assert any("de-identification" in warning for warning in warnings)
+    assert any("PHI review" in warning for warning in warnings)
+    assert any("No redaction boxes" in warning for warning in warnings)
+
+
 def test_checklist_blocks_until_required_checked(app):
     project = _project_with_media()
     dialog = ExportChecklistDialog(

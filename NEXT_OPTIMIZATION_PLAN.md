@@ -410,6 +410,13 @@ audio tracks and slide image/still assets now share the same source-media guard,
 with focused regressions for missing audio, missing slide images, and output
 paths that overwrite non-clip source media. No release is indicated.
 
+Automation note 2026-08-20: fallback PHI-readiness review found that the
+readiness warnings only required consent, de-identification, PHI review, and
+redaction-box review when timeline clips existed, even though guided PHI review
+and the export checklist cover slides/stills and audio too. Readiness warnings
+now use the same reviewable-media model, with a focused slide-only regression.
+No release is indicated.
+
 This keeps the project on a safe optimization loop: measure first, keep the codebase
 cheap to change and cheap to run, and only then restart larger feature bets
 (Windows packaging hardening, then the parked Stryker/DICOM work).

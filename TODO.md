@@ -50,6 +50,13 @@ by the optimization automation; they are not duplicated into P4.5.
   the exported case, and prevents saving an MP4 over an app-managed still or
   audio source.
 
+- [x] **Readiness warnings were clip-only for privacy attestations.** Fixed
+  2026-08-20: export-readiness warnings now require consent, de-identification,
+  and PHI review for any reviewable media surface — clips, slides/stills, or
+  audio — matching the guided PHI review and export checklist. Slide/still-only
+  exports also get the same no-redaction-box reminder that clip-based exports
+  already received.
+
 - [x] **Stale `project_end_time` cache after undo/redo (correctness).** Fixed
   2026-06-20: `_apply_snapshot()` now clears `_project_end_time_cache` after
   replacing the project, so undo/redo cannot reuse a duration from the prior

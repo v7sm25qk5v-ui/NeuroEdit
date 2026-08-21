@@ -1,5 +1,22 @@
 # NeuroEdit — Session Handoff
 
+## 2026-08-20 — PHI readiness warning coverage fix
+
+- Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,
+  `desktop/README.md`, `desktop/CLAUDE.md`, and recently updated project
+  markdown. Remaining release/platform/Stryker work is still owner,
+  hardware, or sample-data gated; no release tag is indicated.
+- Used the fallback review path and fixed a privacy-readiness inconsistency in
+  `project_preflight_warnings`: consent, de-identification, and PHI review
+  warnings now apply when a project has any reviewable media surface, including
+  clips, slides/stills, or audio.
+- Slide/still-only exports now also receive the no-redaction-box reminder that
+  clip-based visual exports already received, matching the guided PHI review and
+  export checklist behavior.
+- Verification: focused `tests/test_phi_review.py` (`16 passed`), focused
+  `ruff` on touched code and tests, full `ruff check src tests scripts`, full
+  desktop test suite, and `git diff --check`.
+
 ## 2026-08-19 — Export source-media preflight fix
 
 - Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,

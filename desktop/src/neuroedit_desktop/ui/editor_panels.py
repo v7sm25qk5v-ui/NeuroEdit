@@ -2030,6 +2030,8 @@ def recommended_continuous_clip_seconds(project: ProjectState) -> tuple[float, s
 
 def project_preflight_warnings(project: ProjectState) -> list[str]:
     warnings: list[str] = []
+    has_reviewable_media = bool(project.clips or project.slides or project.audio_tracks)
+    has_visual_media = bool(project.clips or project.slides)
     max_clip_s, guidance = recommended_continuous_clip_seconds(project)
     long_clips = [
         clip for clip in project.clips
@@ -2047,18 +2049,18 @@ def project_preflight_warnings(project: ProjectState) -> list[str]:
         warnings.append("Outline the operative steps in the storyboard.")
     if not project.intended_audience.strip():
         warnings.append("Specify the intended audience.")
-    if project.clips and not project.consent_confirmed:
+    if has_reviewable_media and not project.consent_confirmed:
         warnings.append("Confirm patient consent or institutional authorization.")
-    if project.clips and not project.deidentified_confirmed:
+    if has_reviewable_media and not project.deidentified_confirmed:
         warnings.append("Confirm de-identification before distribution.")
-    if project.clips and not project.phi_review_confirmed:
+    if has_reviewable_media and not project.phi_review_confirmed:
         warnings.append("Complete a PHI review before export.")
     if project.audio_tracks and not project.audio_reviewed_for_phi:
         warnings.append(
             "Audio has not been reviewed for spoken PHI (Audio panel checkbox)."
         )
     if (
-        project.clips
+        has_visual_media
         and not project.phi_review_confirmed
         and not any(ann.type == "redact" for ann in project.annotations)
     ):
