@@ -131,7 +131,11 @@ class ProjectExporter:
 
     def _source_media(self) -> list[tuple[str, Path]]:
         sources = [(clip.name, Path(clip.path)) for clip in self.project.clips]
-        sources.extend((track.name, Path(track.path)) for track in self.project.audio_tracks)
+        sources.extend(
+            (track.name, Path(track.path))
+            for track in self.project.audio_tracks
+            if track.duration > 0 and track.volume > 0
+        )
         sources.extend(
             (slide.title or "Slide image", Path(slide.image_path))
             for slide in self.project.slides

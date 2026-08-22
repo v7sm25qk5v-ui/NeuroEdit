@@ -1,5 +1,19 @@
 # NeuroEdit — Session Handoff
 
+## 2026-08-22 — Inactive-audio export preflight fix
+
+- Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,
+  `desktop/CLAUDE.md`, and recently updated project markdown. Remaining release,
+  platform, and Stryker work is still owner, hardware, or sample-data gated; no
+  release tag is indicated.
+- Used the fallback review path and fixed an export-preflight mismatch: muted
+  or zero-duration audio tracks no longer count as required source media because
+  they cannot contribute to the muxed export.
+- Active missing narration still fails early before encoding, preserving the
+  source-media safety guard added for audio tracks.
+- Verification: focused `tests/test_regressions.py` (`13 passed`) and focused
+  `ruff` on touched code/tests.
+
 ## 2026-08-21 — Zero-duration slide export fix
 
 - Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,

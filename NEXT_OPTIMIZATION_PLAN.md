@@ -424,6 +424,13 @@ duration, so the output could be extended with black frames instead of the
 slide. Export now uses one effective slide-duration floor for all three paths,
 with a focused regression. No release is indicated.
 
+Automation note 2026-08-22: fallback export-preflight review found that missing
+audio tracks blocked export even when they had zero duration or zero volume and
+therefore could not contribute to the muxed audio. `_source_media()` now matches
+the active-audio criteria used by `_audio_sources()` for timeline audio tracks:
+only positive-duration, positive-volume tracks are required source media. Active
+missing narration still fails before encoding. No release is indicated.
+
 This keeps the project on a safe optimization loop: measure first, keep the codebase
 cheap to change and cheap to run, and only then restart larger feature bets
 (Windows packaging hardening, then the parked Stryker/DICOM work).

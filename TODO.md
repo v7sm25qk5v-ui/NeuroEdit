@@ -63,6 +63,12 @@ by the optimization automation; they are not duplicated into P4.5.
   legacy/corrupt zero-duration slides render during the minimum export span
   instead of padding the output with black frames.
 
+- [x] **Inactive audio placeholders blocked visual exports.** Fixed
+  2026-08-22: export source-media preflight now treats only audio tracks with a
+  positive duration and positive volume as required source media, matching the
+  audio mux path. Muted or empty missing narration placeholders no longer block
+  otherwise visual exports, while active missing narration still fails early.
+
 - [x] **Stale `project_end_time` cache after undo/redo (correctness).** Fixed
   2026-06-20: `_apply_snapshot()` now clears `_project_end_time_cache` after
   replacing the project, so undo/redo cannot reuse a duration from the prior
