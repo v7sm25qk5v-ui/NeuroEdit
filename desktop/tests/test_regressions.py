@@ -194,6 +194,44 @@ def test_export_source_preflight_ignores_inactive_audio_tracks(tmp_path):
     assert exporter._source_media() == [(video_clip.name, clip)]
 
 
+def test_export_duration_ignores_inactive_audio_tracks(tmp_path):
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"video")
+    project = ProjectState()
+    video_clip = _clip(0.0, 5.0)
+    video_clip.path = str(clip)
+    project.clips.append(video_clip)
+    project.audio_tracks.append(
+        AudioTrack(
+            id=new_id(),
+            path=str(tmp_path / "muted.m4a"),
+            name="Muted",
+            start_time=30.0,
+            duration=10.0,
+            volume=0.0,
+        )
+    )
+    project.audio_tracks.append(
+        AudioTrack(
+            id=new_id(),
+            path=str(tmp_path / "empty.m4a"),
+            name="Empty",
+            start_time=40.0,
+            duration=0.0,
+            volume=1.0,
+        )
+    )
+    exporter = ProjectExporter(
+        project,
+        ExportSettings(
+            output_path=tmp_path / "export.mp4", width=320, height=180,
+            fps=30, crf=20, label="test",
+        ),
+    )
+
+    assert exporter._duration() == pytest.approx(5.0)
+
+
 def test_export_rejects_missing_slide_image_source(tmp_path):
     project = ProjectState()
     project.slides.append(

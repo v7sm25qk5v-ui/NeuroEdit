@@ -14,7 +14,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QFont, QFontMetricsF, QImage, QPainter, QPen, QPolygonF
 
 from neuroedit_desktop.captions import build_caption_cues, cue_at_time, paint_caption
-from neuroedit_desktop.models import Annotation, ProjectState, Slide, VideoClip
+from neuroedit_desktop.models import Annotation, AudioTrack, ProjectState, Slide, VideoClip
 
 
 ProgressCallback = Callable[[int, str], None]
@@ -133,8 +133,7 @@ class ProjectExporter:
         sources = [(clip.name, Path(clip.path)) for clip in self.project.clips]
         sources.extend(
             (track.name, Path(track.path))
-            for track in self.project.audio_tracks
-            if track.duration > 0 and track.volume > 0
+            for track in self._active_audio_tracks()
         )
         sources.extend(
             (slide.title or "Slide image", Path(slide.image_path))
@@ -142,6 +141,13 @@ class ProjectExporter:
             if slide.image_path
         )
         return sources
+
+    def _active_audio_tracks(self) -> list[AudioTrack]:
+        return [
+            track
+            for track in self.project.audio_tracks
+            if track.duration > 0 and track.volume > 0
+        ]
 
     def _slide_duration(self, slide: Slide) -> float:
         return max(0.1, slide.duration)
@@ -153,7 +159,7 @@ class ProjectExporter:
         ends: list[float] = []
         ends.extend(clip.start_time + clip.display_duration for clip in self.project.clips)
         ends.extend(slide.start_time + self._slide_duration(slide) for slide in self.project.slides)
-        ends.extend(track.start_time + max(0.1, track.duration) for track in self.project.audio_tracks)
+        ends.extend(track.start_time + track.duration for track in self._active_audio_tracks())
         return max(0.0, max(ends, default=0.0))
 
     def _find_ffmpeg(self) -> str | None:

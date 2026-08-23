@@ -69,6 +69,12 @@ by the optimization automation; they are not duplicated into P4.5.
   audio mux path. Muted or empty missing narration placeholders no longer block
   otherwise visual exports, while active missing narration still fails early.
 
+- [x] **Inactive audio placeholders extended export duration.** Fixed
+  2026-08-23: the export duration calculation now uses the same active-audio
+  criteria as source-media preflight and audio muxing. Muted or zero-duration
+  narration placeholders no longer add a silent black tail to otherwise visual
+  exports.
+
 - [x] **Stale `project_end_time` cache after undo/redo (correctness).** Fixed
   2026-06-20: `_apply_snapshot()` now clears `_project_end_time_cache` after
   replacing the project, so undo/redo cannot reuse a duration from the prior
@@ -228,7 +234,7 @@ template); see Completed section.
 
 Highest-leverage engineering work while P0 release items stay owner/hardware
 blocked and P5 stays parked. All items are measurement-first and
-behavior-preserving — the 155-test suite and `ruff` must stay green with no
+behavior-preserving — the 162-test suite and `ruff` must stay green with no
 user-visible change. Full rationale and acceptance criteria in
 [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md) Phase 6.
 

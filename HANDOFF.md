@@ -1,5 +1,20 @@
 # NeuroEdit — Session Handoff
 
+## 2026-08-23 — Inactive-audio export duration fix
+
+- Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,
+  `desktop/README.md`, `desktop/CLAUDE.md`, and recently updated project
+  markdown. Remaining release, platform, and Stryker work is still owner,
+  hardware, or sample-data gated; no release tag is indicated.
+- Used the fallback review path and fixed the duration side of the inactive-audio
+  mismatch: muted or zero-duration narration placeholders no longer extend the
+  exported MP4 with a silent black tail.
+- Export source-media preflight, export duration, and audio muxing now share the
+  same active-audio criteria: positive duration and positive volume.
+- Verification: focused `tests/test_regressions.py` (`14 passed`), focused
+  `ruff` on touched code/tests, full `ruff check src tests scripts`, full suite
+  (`162 passed`), and `git diff --check`.
+
 ## 2026-08-22 — Inactive-audio export preflight fix
 
 - Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,

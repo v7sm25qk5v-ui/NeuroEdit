@@ -92,7 +92,7 @@ python -c "import py_compile; py_compile.compile('src/neuroedit_desktop/<file>.p
 hf auth login
 ```
 
-The suite under `tests/` collects **155 tests** (`python -m pytest tests/ -q`).
+The suite under `tests/` collects **162 tests** (`python -m pytest tests/ -q`).
 Keep it and `ruff check src tests scripts` green before every release tag.
 
 ### venv-location note (current setup is intentional)
@@ -268,8 +268,8 @@ Other PHI safeguards:
 - **Source audio** can be dropped on export via
   `ExportSettings.mute_source_audio` (Export dialog → Privacy checkbox); narration
   added on the Audio panel is kept.
-- `project_preflight_warnings` nudges toward the Redact tool when clips exist,
-  PHI review isn't confirmed, and no redactions are present.
+- `project_preflight_warnings` nudges toward the Redact tool when reviewable
+  media exists, PHI review isn't confirmed, and no redactions are present.
 
 ### Files to ignore
 
@@ -281,13 +281,15 @@ Other PHI safeguards:
 
 ## Optimization Automation Memory
 
-- **Last implementation:** 2026-08-16 — `ui/history.py` now owns the
-  undo/redo, dirty-state, autosave, compact snapshot, and snapshot-restore
-  controller methods as `HistoryMixin`.
-- **Last reviewed:** 2026-08-17 — fallback review found the Phase 6
-  modularization target complete. Keep future splits ownership-driven rather
-  than line-count-driven; a true pre-`to_dict()` undo shortcut remains deferred
-  unless the model gains a trustworthy document revision signal.
+- **Last implementation:** 2026-08-23 — export duration now uses the same
+  positive-duration, positive-volume active-audio criteria as source-media
+  preflight and audio muxing, so inactive narration placeholders do not extend
+  otherwise visual exports.
+- **Last reviewed:** 2026-08-23 — fallback review followed the export/audio
+  source handling changed on 2026-08-22. Phase 6 modularization remains complete;
+  keep future splits ownership-driven rather than line-count-driven, and keep a
+  true pre-`to_dict()` undo shortcut deferred unless the model gains a
+  trustworthy document revision signal.
 - **Mode:** incremental. Next optimization review should deep-dive files changed
   after the §44 commit plus one hop. (Full-sweep baseline was `22085f9`,
   2026-06-17.)
