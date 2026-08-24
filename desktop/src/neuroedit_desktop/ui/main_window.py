@@ -1864,7 +1864,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
 
     def _slide_at_time(self, time_s: float):
         for slide in reversed(self.project.slides):
-            if slide.start_time <= time_s < slide.start_time + slide.duration:
+            if slide.start_time <= time_s < slide.start_time + max(0.1, slide.duration):
                 return slide
         return None
 

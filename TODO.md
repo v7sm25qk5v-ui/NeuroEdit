@@ -63,6 +63,13 @@ by the optimization automation; they are not duplicated into P4.5.
   legacy/corrupt zero-duration slides render during the minimum export span
   instead of padding the output with black frames.
 
+- [x] **Zero-duration slides exported but were invisible to preview/playback.**
+  Fixed 2026-08-24: the canvas active-slide lookup, canvas time-state cache, and
+  `MainWindow` playback slide lookup now use the same effective slide-duration
+  floor as export and timeline duration code. Legacy/corrupt zero-duration
+  slides now preview during their minimum export span instead of only appearing
+  in the final MP4.
+
 - [x] **Inactive audio placeholders blocked visual exports.** Fixed
   2026-08-22: export source-media preflight now treats only audio tracks with a
   positive duration and positive volume as required source media, matching the
@@ -234,7 +241,7 @@ template); see Completed section.
 
 Highest-leverage engineering work while P0 release items stay owner/hardware
 blocked and P5 stays parked. All items are measurement-first and
-behavior-preserving — the 162-test suite and `ruff` must stay green with no
+behavior-preserving — the 163-test suite and `ruff` must stay green with no
 user-visible change. Full rationale and acceptance criteria in
 [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md) Phase 6.
 

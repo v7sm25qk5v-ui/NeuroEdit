@@ -1,5 +1,20 @@
 # NeuroEdit — Session Handoff
 
+## 2026-08-24 — Zero-duration slide preview/playback fix
+
+- Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,
+  `desktop/README.md`, `desktop/CLAUDE.md`, and recently updated project
+  markdown. Remaining release, platform, and Stryker work is still owner,
+  hardware, or sample-data gated; no release tag is indicated.
+- Used the fallback review path and fixed a preview/export mismatch:
+  legacy/corrupt zero-duration slides now use the same 0.1 s effective span in
+  canvas preview state, `MainWindow` playback sync, timeline duration, and
+  export.
+- This prevents a zero-duration slide from appearing in the exported MP4 while
+  being invisible to live preview/playback decisions.
+- Verification: focused `tests/test_undo_history.py` (`22 passed`), full `ruff
+  check src tests scripts`, full suite (`163 passed`), and `git diff --check`.
+
 ## 2026-08-23 — Inactive-audio export duration fix
 
 - Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,

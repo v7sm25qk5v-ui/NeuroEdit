@@ -178,6 +178,18 @@ def test_canvas_time_state_is_stable_between_overlay_boundaries() -> None:
     assert item.time_state(0.5) != item.time_state(1.1)
 
 
+def test_zero_duration_slide_is_visible_to_preview_lookup() -> None:
+    project = ProjectState(current_time=0.05)
+    slide = Slide(id="slide-1", title="Legacy", duration=0.0)
+    project.slides.append(slide)
+    item = _annotation_item(project)
+    window = _window(project)
+
+    assert item._active_slide() is slide
+    assert item.time_state(0.05)[0] == slide.id
+    assert window._slide_at_time(0.05) is slide
+
+
 def test_canvas_time_state_changes_during_clip_fade() -> None:
     project = ProjectState()
     project.clips.append(

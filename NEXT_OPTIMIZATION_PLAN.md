@@ -194,7 +194,7 @@ workflow refinements. The remaining roadmap work is owner/hardware-blocked
 (packaged-build smoke, signing, Stryker sample data), so the highest-leverage
 engineering work left is structural: keep the codebase cheap to change and
 cheap to run. Every item below is measurement-first and behavior-preserving —
-the 162-test suite and `ruff` must stay green with no unintended user-visible change.
+the 163-test suite and `ruff` must stay green with no unintended user-visible change.
 
 1. **Modularize `ui/main_window.py` — ✅ TARGET MET 2026-08-17.**
    - `main_window.py` holds `MainWindow` plus `VideoGraphicsView`,
@@ -369,7 +369,7 @@ each is measurement-first and behavior-preserving:
 2. **Only continue `ui/main_window.py` modularization for cohesive slices** —
    it is now below the ~2,500-line target, so further moves should be justified
    by clearer ownership or an upcoming change, not by line count alone.
-3. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (162 tests)
+3. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (163 tests)
    green before every release tag; feed any new regressions back into the roadmap.
 
 Automation note 2026-08-09: no Phase 6 code-health item was safe to advance
@@ -435,6 +435,13 @@ Automation note 2026-08-23: fallback export review found the same inactive-audio
 mismatch in duration calculation. `_duration()` now uses the shared active-audio
 criteria, so muted or zero-duration narration placeholders no longer extend the
 visual export with a silent black tail. No release is indicated.
+
+Automation note 2026-08-24: fallback preview/playback review found that the
+exporter and timeline utilities honored a 0.1 s minimum span for legacy
+zero-duration slides, but the canvas active-slide lookup, canvas time-state
+cache, and `MainWindow` playback lookup still used the raw duration. Those
+preview paths now use the same effective slide-duration floor, with a focused
+regression. No release is indicated.
 
 This keeps the project on a safe optimization loop: measure first, keep the codebase
 cheap to change and cheap to run, and only then restart larger feature bets

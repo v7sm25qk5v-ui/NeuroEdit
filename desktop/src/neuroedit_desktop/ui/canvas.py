@@ -500,7 +500,7 @@ class AnnotationGraphicsItem(QGraphicsObject):
         # Half-open end (`<`) to match exporter._slide_at_time so preview and export
         # agree on which frames are slide frames.
         for slide in reversed(self.project.slides):
-            if slide.start_time <= self.project.current_time < slide.start_time + slide.duration:
+            if slide.start_time <= self.project.current_time < slide.start_time + max(0.1, slide.duration):
                 return slide
         return None
 
@@ -510,7 +510,7 @@ class AnnotationGraphicsItem(QGraphicsObject):
             (
                 item
                 for item in reversed(self.project.slides)
-                if item.start_time <= time_s < item.start_time + item.duration
+                if item.start_time <= time_s < item.start_time + max(0.1, item.duration)
             ),
             None,
         )
