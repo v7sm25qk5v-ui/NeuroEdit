@@ -1,5 +1,21 @@
 # NeuroEdit — Session Handoff
 
+## 2026-08-25 — Inactive-audio export warning fix
+
+- Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,
+  `desktop/README.md`, `desktop/CLAUDE.md`, and recently updated project
+  markdown. Remaining release, platform, and Stryker work is still owner,
+  hardware, or sample-data gated; no release tag is indicated.
+- Used the fallback review path and fixed the final inactive-audio mismatch:
+  muted or zero-duration narration placeholders no longer trigger the
+  "No readable audio streams were found" completion warning after a visual
+  export.
+- Active audio tracks with no readable stream still warn, preserving the
+  user-facing signal for narration that should have contributed sound.
+- Verification: focused `tests/test_regressions.py` (`16 passed`), focused
+  `ruff` on touched code/tests, full `ruff check src tests scripts`, full suite
+  (`165 passed`), and `git diff --check`.
+
 ## 2026-08-24 — Zero-duration slide preview/playback fix
 
 - Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,

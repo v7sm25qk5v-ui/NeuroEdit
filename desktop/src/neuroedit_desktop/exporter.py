@@ -120,7 +120,7 @@ class ProjectExporter:
                     self.progress(92, "Mixing audio...")
                     self._mux_audio(tmp_video, self.settings.output_path, audio_sources, ffmpeg, duration)
                 else:
-                    if ffmpeg and self.project.audio_tracks:
+                    if ffmpeg and self._active_audio_tracks():
                         warnings.append("No readable audio streams were found, so the MP4 is silent.")
                     os.replace(tmp_video, self.settings.output_path)
 

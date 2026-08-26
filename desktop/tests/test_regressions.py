@@ -232,6 +232,70 @@ def test_export_duration_ignores_inactive_audio_tracks(tmp_path):
     assert exporter._duration() == pytest.approx(5.0)
 
 
+def test_export_warning_ignores_inactive_audio_tracks(tmp_path, monkeypatch):
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"video")
+    project = ProjectState()
+    video_clip = _clip(0.0, 5.0)
+    video_clip.path = str(clip)
+    project.clips.append(video_clip)
+    project.audio_tracks.append(
+        AudioTrack(id=new_id(), path=str(tmp_path / "muted.m4a"), name="Muted", duration=5.0, volume=0.0)
+    )
+    project.audio_tracks.append(
+        AudioTrack(id=new_id(), path=str(tmp_path / "empty.m4a"), name="Empty", duration=0.0, volume=1.0)
+    )
+    exporter = ProjectExporter(
+        project,
+        ExportSettings(
+            output_path=tmp_path / "export.mp4", width=320, height=180,
+            fps=30, crf=20, label="test",
+        ),
+    )
+
+    monkeypatch.setattr(exporter, "_find_ffmpeg", lambda: "ffmpeg")
+
+    def write_video(path: Path, _ffmpeg: str, _tmp_dir: Path, _duration: float) -> None:
+        path.write_bytes(b"visual")
+
+    monkeypatch.setattr(exporter, "_encode_timeline_video", write_video)
+
+    assert exporter.export() == []
+    assert (tmp_path / "export.mp4").read_bytes() == b"visual"
+
+
+def test_export_warns_when_active_audio_has_no_readable_stream(tmp_path, monkeypatch):
+    clip = tmp_path / "clip.mp4"
+    audio = tmp_path / "voice.m4a"
+    clip.write_bytes(b"video")
+    audio.write_bytes(b"not-audio")
+    project = ProjectState()
+    video_clip = _clip(0.0, 5.0)
+    video_clip.path = str(clip)
+    project.clips.append(video_clip)
+    project.audio_tracks.append(
+        AudioTrack(id=new_id(), path=str(audio), name="Narration", duration=5.0, volume=1.0)
+    )
+    exporter = ProjectExporter(
+        project,
+        ExportSettings(
+            output_path=tmp_path / "export.mp4", width=320, height=180,
+            fps=30, crf=20, label="test",
+        ),
+    )
+
+    monkeypatch.setattr(exporter, "_find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(exporter, "_audio_sources", lambda _ffmpeg: [])
+
+    def write_video(path: Path, _ffmpeg: str, _tmp_dir: Path, _duration: float) -> None:
+        path.write_bytes(b"visual")
+
+    monkeypatch.setattr(exporter, "_encode_timeline_video", write_video)
+
+    assert exporter.export() == ["No readable audio streams were found, so the MP4 is silent."]
+    assert (tmp_path / "export.mp4").read_bytes() == b"visual"
+
+
 def test_export_rejects_missing_slide_image_source(tmp_path):
     project = ProjectState()
     project.slides.append(

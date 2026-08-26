@@ -82,6 +82,12 @@ by the optimization automation; they are not duplicated into P4.5.
   narration placeholders no longer add a silent black tail to otherwise visual
   exports.
 
+- [x] **Inactive audio placeholders produced a false silent-export warning.**
+  Fixed 2026-08-25: the export completion warning now checks only active audio
+  tracks before reporting that no readable audio streams were found. Muted or
+  zero-duration narration placeholders no longer produce a spurious warning,
+  while active unreadable narration still warns.
+
 - [x] **Stale `project_end_time` cache after undo/redo (correctness).** Fixed
   2026-06-20: `_apply_snapshot()` now clears `_project_end_time_cache` after
   replacing the project, so undo/redo cannot reuse a duration from the prior
@@ -241,7 +247,7 @@ template); see Completed section.
 
 Highest-leverage engineering work while P0 release items stay owner/hardware
 blocked and P5 stays parked. All items are measurement-first and
-behavior-preserving — the 163-test suite and `ruff` must stay green with no
+behavior-preserving — the 165-test suite and `ruff` must stay green with no
 user-visible change. Full rationale and acceptance criteria in
 [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md) Phase 6.
 

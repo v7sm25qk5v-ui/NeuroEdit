@@ -194,7 +194,7 @@ workflow refinements. The remaining roadmap work is owner/hardware-blocked
 (packaged-build smoke, signing, Stryker sample data), so the highest-leverage
 engineering work left is structural: keep the codebase cheap to change and
 cheap to run. Every item below is measurement-first and behavior-preserving —
-the 163-test suite and `ruff` must stay green with no unintended user-visible change.
+the 165-test suite and `ruff` must stay green with no unintended user-visible change.
 
 1. **Modularize `ui/main_window.py` — ✅ TARGET MET 2026-08-17.**
    - `main_window.py` holds `MainWindow` plus `VideoGraphicsView`,
@@ -442,6 +442,13 @@ zero-duration slides, but the canvas active-slide lookup, canvas time-state
 cache, and `MainWindow` playback lookup still used the raw duration. Those
 preview paths now use the same effective slide-duration floor, with a focused
 regression. No release is indicated.
+
+Automation note 2026-08-25: fallback export review found one remaining
+inactive-audio mismatch in completion warnings. Export source-media preflight,
+duration, and muxing already ignored muted or zero-duration narration
+placeholders; the warning path now also checks only active audio tracks before
+reporting unreadable audio streams. Active unreadable narration still warns. No
+release is indicated.
 
 This keeps the project on a safe optimization loop: measure first, keep the codebase
 cheap to change and cheap to run, and only then restart larger feature bets
