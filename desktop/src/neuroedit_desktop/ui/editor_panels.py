@@ -77,6 +77,10 @@ def _hex_to_rgba(color_hex: str, alpha: float) -> str:
     return f"rgba({r}, {g}, {b}, {alpha:.2f})"
 
 
+def project_has_active_audio_tracks(project: ProjectState) -> bool:
+    return any(track.duration > 0 and track.volume > 0 for track in project.audio_tracks)
+
+
 class MediaExplorerPanel(QWidget):
     import_videos_requested = Signal()
     import_images_requested = Signal()
@@ -2032,6 +2036,7 @@ def project_preflight_warnings(project: ProjectState) -> list[str]:
     warnings: list[str] = []
     has_reviewable_media = bool(project.clips or project.slides or project.audio_tracks)
     has_visual_media = bool(project.clips or project.slides)
+    has_active_audio = project_has_active_audio_tracks(project)
     max_clip_s, guidance = recommended_continuous_clip_seconds(project)
     long_clips = [
         clip for clip in project.clips
@@ -2055,7 +2060,7 @@ def project_preflight_warnings(project: ProjectState) -> list[str]:
         warnings.append("Confirm de-identification before distribution.")
     if has_reviewable_media and not project.phi_review_confirmed:
         warnings.append("Complete a PHI review before export.")
-    if project.audio_tracks and not project.audio_reviewed_for_phi:
+    if has_active_audio and not project.audio_reviewed_for_phi:
         warnings.append(
             "Audio has not been reviewed for spoken PHI (Audio panel checkbox)."
         )
@@ -2074,7 +2079,7 @@ def project_preflight_warnings(project: ProjectState) -> list[str]:
     if tiny_labels:
         warnings.append("Some annotation labels may be too small for conference screens.")
     if project.video_goal in {"talk-adjunct", "standalone-publication", "teaching-module"}:
-        if not project.audio_tracks:
+        if not has_active_audio:
             warnings.append("Consider adding narration or captions for educational clarity.")
     return warnings
 

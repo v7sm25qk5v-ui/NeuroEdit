@@ -18,9 +18,16 @@ from neuroedit_desktop.ui.dialogs import (
     ExportHistoryDialog,
     record_export_history,
 )
-from neuroedit_desktop.ui.editor_panels import project_preflight_warnings
+from neuroedit_desktop.ui.editor_panels import (
+    project_has_active_audio_tracks,
+    project_preflight_warnings,
+)
 from neuroedit_desktop.ui.export_worker import ExportWorker
 from neuroedit_desktop.ui.main_window_utils import format_time
+
+
+def project_export_includes_audio(project: ProjectState, *, keeps_source_audio: bool) -> bool:
+    return keeps_source_audio or project_has_active_audio_tracks(project)
 
 
 class ExportWorkflowMixin:
@@ -58,7 +65,10 @@ class ExportWorkflowMixin:
         keeps_source_audio = not dialog.mute_source_audio_check.isChecked() and any(
             clip.media_type == "video" for clip in self.project.clips
         )
-        includes_audio = keeps_source_audio or bool(self.project.audio_tracks)
+        includes_audio = project_export_includes_audio(
+            self.project,
+            keeps_source_audio=keeps_source_audio,
+        )
         checklist = ExportChecklistDialog(
             self.project,
             export_includes_audio=includes_audio,

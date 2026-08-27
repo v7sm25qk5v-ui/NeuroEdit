@@ -95,6 +95,13 @@ by the optimization automation; they are not duplicated into P4.5.
   preview/playback duration, while positive-duration muted tracks remain
   visible on the timeline for editing.
 
+- [x] **Inactive audio placeholders produced false PHI/export-audio prompts.**
+  Fixed 2026-08-27: export preflight, educational narration guidance, and the
+  pre-export checklist now use the same active-audio criteria as export muxing:
+  positive duration and positive volume. Muted or empty narration placeholders
+  no longer force a spoken-PHI audio warning or audio checklist item for a
+  silent export, while active narration still does.
+
 - [x] **Stale `project_end_time` cache after undo/redo (correctness).** Fixed
   2026-06-20: `_apply_snapshot()` now clears `_project_end_time_cache` after
   replacing the project, so undo/redo cannot reuse a duration from the prior
@@ -254,7 +261,7 @@ template); see Completed section.
 
 Highest-leverage engineering work while P0 release items stay owner/hardware
 blocked and P5 stays parked. All items are measurement-first and
-behavior-preserving — the 166-test suite and `ruff` must stay green with no
+behavior-preserving — the 168-test suite and `ruff` must stay green with no
 user-visible change. Full rationale and acceptance criteria in
 [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md) Phase 6.
 

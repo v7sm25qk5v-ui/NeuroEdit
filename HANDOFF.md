@@ -1,5 +1,22 @@
 # NeuroEdit — Session Handoff
 
+## 2026-08-27 — Inactive-audio PHI/export prompt fix
+
+- Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`,
+  `desktop/CLAUDE.md`, and recently updated project markdown. Remaining release,
+  platform, Intel Mac, signing, and Stryker work is still owner, hardware, or
+  sample-data gated; no release tag is indicated.
+- Used the fallback review path and fixed the remaining inactive-audio UI
+  mismatch: export preflight and the pre-export checklist no longer treat muted
+  or zero-duration narration placeholders as exported audio.
+- Spoken-PHI audio warnings, educational narration guidance, and export
+  checklist visibility now share the exporter's active-audio rule: positive
+  duration and positive volume. Active narration still prompts for spoken-PHI
+  review.
+- Verification: focused `tests/test_phi_review.py` (`18 passed`), focused
+  `ruff` on touched code/tests, full `ruff check src tests scripts`, full suite
+  (`168 passed`), and `git diff --check`.
+
 ## 2026-08-26 — Zero-duration audio timeline-duration fix
 
 - Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`,

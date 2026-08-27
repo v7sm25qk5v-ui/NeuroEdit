@@ -18,6 +18,7 @@ from neuroedit_desktop.models import (
     new_id,
 )
 from neuroedit_desktop.ui.editor_panels import project_preflight_warnings
+from neuroedit_desktop.ui.export_workflow import project_export_includes_audio
 from neuroedit_desktop.ui.main_window import (
     ExportChecklistDialog,
     PhiReviewDialog,
@@ -59,6 +60,48 @@ def test_preflight_warns_on_unreviewed_audio():
     assert any("spoken PHI" in w for w in project_preflight_warnings(project))
     project.audio_reviewed_for_phi = True
     assert not any("spoken PHI" in w for w in project_preflight_warnings(project))
+
+
+def test_preflight_ignores_inactive_audio_for_spoken_phi():
+    project = ProjectState()
+    project.clips.append(
+        VideoClip(id=new_id(), path="/tmp/a.mp4", name="Clip A", duration=10.0,
+                  start_time=0.0, trim_start=0.0, trim_end=10.0)
+    )
+    project.audio_tracks.append(
+        AudioTrack(id=new_id(), path="/tmp/muted.m4a", name="Muted",
+                   start_time=0.0, duration=8.0, volume=0.0)
+    )
+    project.audio_tracks.append(
+        AudioTrack(id=new_id(), path="/tmp/empty.m4a", name="Empty",
+                   start_time=20.0, duration=0.0, volume=1.0)
+    )
+
+    warnings = project_preflight_warnings(project)
+
+    assert not any("spoken PHI" in warning for warning in warnings)
+    assert any("Consider adding narration" in warning for warning in warnings)
+
+
+def test_export_audio_detection_ignores_inactive_audio_tracks():
+    project = ProjectState()
+    project.audio_tracks.append(
+        AudioTrack(id=new_id(), path="/tmp/muted.m4a", name="Muted",
+                   start_time=0.0, duration=8.0, volume=0.0)
+    )
+    project.audio_tracks.append(
+        AudioTrack(id=new_id(), path="/tmp/empty.m4a", name="Empty",
+                   start_time=20.0, duration=0.0, volume=1.0)
+    )
+
+    assert project_export_includes_audio(project, keeps_source_audio=False) is False
+
+    project.audio_tracks.append(
+        AudioTrack(id=new_id(), path="/tmp/voice.m4a", name="Narration",
+                   start_time=0.0, duration=8.0, volume=1.0)
+    )
+    assert project_export_includes_audio(project, keeps_source_audio=False) is True
+    assert project_export_includes_audio(ProjectState(), keeps_source_audio=True) is True
 
 
 def test_preflight_privacy_warnings_cover_slide_only_exports():
