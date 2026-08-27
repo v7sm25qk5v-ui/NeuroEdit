@@ -1,5 +1,22 @@
 # NeuroEdit — Session Handoff
 
+## 2026-08-26 — Zero-duration audio timeline-duration fix
+
+- Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`,
+  `desktop/CLAUDE.md`, and recently updated project markdown. Remaining release,
+  platform, and Stryker work is still owner, hardware, or sample-data gated; no
+  release tag is indicated.
+- Used the fallback review path and fixed a preview/playback duration mismatch:
+  `project_end_time()` no longer assigns zero-duration audio placeholders a
+  synthetic 0.1 s span.
+- Legacy empty narration tracks no longer add a silent tail to the live project
+  duration after export duration has already learned to ignore them.
+  Positive-duration muted tracks still remain visible on the timeline for
+  editing.
+- Verification: focused `tests/test_timeline_editing.py` (`25 passed`), full
+  `ruff check src tests scripts`, full suite (`166 passed`), and `git diff
+  --check`.
+
 ## 2026-08-25 — Inactive-audio export warning fix
 
 - Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,

@@ -146,6 +146,22 @@ def test_zoom_to_fit_and_toggle_back() -> None:
     widget.hide()
 
 
+def test_project_end_time_ignores_zero_duration_audio_placeholders() -> None:
+    project = _project()
+    project.clips.append(_clip(duration=5.0))
+    project.audio_tracks.append(
+        AudioTrack(
+            id="empty",
+            path="/tmp/empty.m4a",
+            name="Empty",
+            start_time=40.0,
+            duration=0.0,
+        )
+    )
+
+    assert project_end_time(project) == pytest.approx(5.0)
+
+
 # --- Marker mutations -------------------------------------------------------
 
 

@@ -16,7 +16,11 @@ def project_end_time(project: ProjectState) -> float:
     # clamp uses this value), which then padded exports with a black tail.
     ends: list[float] = []
     ends.extend(clip.start_time + clip.display_duration for clip in project.clips)
-    ends.extend(track.start_time + max(0.1, track.duration) for track in project.audio_tracks)
+    ends.extend(
+        track.start_time + track.duration
+        for track in project.audio_tracks
+        if track.duration > 0
+    )
     ends.extend(slide.start_time + max(0.1, slide.duration) for slide in project.slides)
     ends.extend(marker.time + 1.0 for marker in project.markers)
     return max(1.0, max(ends, default=1.0))
