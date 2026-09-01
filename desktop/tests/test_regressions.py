@@ -57,6 +57,19 @@ def test_audio_track_delete_keeps_unattached_transcripts(app, tmp_path):
     assert remaining == ["floating"]
 
 
+def test_audio_panel_preserves_zero_duration_track_on_metadata_edit(app, tmp_path):
+    project = ProjectState()
+    track = AudioTrack(id=new_id(), path="/tmp/empty.m4a", name="Empty", duration=0.0)
+    project.audio_tracks.append(track)
+    panel = AudioPanel(project, tmp_path)
+    panel.list_widget.setCurrentRow(0)
+
+    panel.track_name.setText("Renamed placeholder")
+
+    assert track.name == "Renamed placeholder"
+    assert track.duration == pytest.approx(0.0)
+
+
 def test_cut_preserves_media_type_and_moves_fade_out(app):
     project = ProjectState()
     clip = _clip(0.0, 8.0, media_type="image", fade_in=0.5, fade_out=1.0)

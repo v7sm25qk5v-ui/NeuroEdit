@@ -1,5 +1,21 @@
 # NeuroEdit — Session Handoff
 
+## 2026-09-01 — Audio-panel zero-duration preservation fix
+
+- Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,
+  `desktop/README.md`, `desktop/CLAUDE.md`, and recently updated project
+  markdown. Remaining release, platform, Intel Mac, signing, and Stryker work is
+  still owner, hardware, or sample-data gated; no release tag is indicated.
+- Used the fallback review path and fixed an Audio-panel metadata mismatch:
+  selecting a legacy zero-duration narration placeholder no longer displays or
+  writes it back as `0.1 s`.
+- Renaming or editing metadata on an empty narration placeholder now preserves
+  its inactive `0.0 s` duration, so the recent inactive-audio timeline, PHI, and
+  export-audio fixes are not undone by the track inspector.
+- Verification: focused `tests/test_regressions.py` (`17 passed`), focused
+  `ruff` on touched code/tests, full `ruff check src tests scripts`, full suite
+  (`169 passed`), and `git diff --check`.
+
 ## 2026-08-27 — Inactive-audio PHI/export prompt fix
 
 - Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`,

@@ -87,7 +87,7 @@ class AudioPanel(QWidget):
         self.start_input.setSingleStep(0.5)
         self.start_input.setSuffix(" s")
         self.duration_input = QDoubleSpinBox()
-        self.duration_input.setRange(0.1, 24 * 60 * 60)
+        self.duration_input.setRange(0.0, 24 * 60 * 60)
         self.duration_input.setSingleStep(0.5)
         self.duration_input.setSuffix(" s")
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
@@ -332,7 +332,7 @@ class AudioPanel(QWidget):
         else:
             self.track_name.setText(track.name)
             self.start_input.setValue(track.start_time)
-            self.duration_input.setValue(max(0.1, track.duration))
+            self.duration_input.setValue(max(0.0, track.duration))
             self.volume_slider.setValue(int(max(0.0, min(1.0, track.volume)) * 100))
         self._refreshing = False
         self.refresh_transcript()
