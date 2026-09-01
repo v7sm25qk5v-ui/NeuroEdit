@@ -109,6 +109,13 @@ by the optimization automation; they are not duplicated into P4.5.
   reintroduces the false timeline, PHI, and export-audio prompts fixed in the
   inactive-audio sweep.
 
+- [x] **Inactive audio placeholders triggered privacy-review preflight.** Fixed
+  2026-09-01: export preflight warnings now treat audio as reviewable media only
+  when it uses the same active-audio criteria as export muxing: positive
+  duration and positive volume. Muted or empty audio-only placeholders no longer
+  require consent, de-identification, or PHI review for a silent export, while
+  visual media and active narration still keep those warnings.
+
 - [x] **Stale `project_end_time` cache after undo/redo (correctness).** Fixed
   2026-06-20: `_apply_snapshot()` now clears `_project_end_time_cache` after
   replacing the project, so undo/redo cannot reuse a duration from the prior
@@ -268,7 +275,7 @@ template); see Completed section.
 
 Highest-leverage engineering work while P0 release items stay owner/hardware
 blocked and P5 stays parked. All items are measurement-first and
-behavior-preserving — the 169-test suite and `ruff` must stay green with no
+behavior-preserving — the 170-test suite and `ruff` must stay green with no
 user-visible change. Full rationale and acceptance criteria in
 [NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md) Phase 6.
 

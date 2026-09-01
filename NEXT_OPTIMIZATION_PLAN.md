@@ -194,7 +194,7 @@ workflow refinements. The remaining roadmap work is owner/hardware-blocked
 (packaged-build smoke, signing, Stryker sample data), so the highest-leverage
 engineering work left is structural: keep the codebase cheap to change and
 cheap to run. Every item below is measurement-first and behavior-preserving —
-the 169-test suite and `ruff` must stay green with no unintended user-visible change.
+the 170-test suite and `ruff` must stay green with no unintended user-visible change.
 
 1. **Modularize `ui/main_window.py` — ✅ TARGET MET 2026-08-17.**
    - `main_window.py` holds `MainWindow` plus `VideoGraphicsView`,
@@ -369,7 +369,7 @@ each is measurement-first and behavior-preserving:
 2. **Only continue `ui/main_window.py` modularization for cohesive slices** —
    it is now below the ~2,500-line target, so further moves should be justified
    by clearer ownership or an upcoming change, not by line count alone.
-3. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (169 tests)
+3. Keep `ruff check src tests scripts` and `python -m pytest tests/ -q` (170 tests)
    green before every release tag; feed any new regressions back into the roadmap.
 
 Automation note 2026-08-09: no Phase 6 code-health item was safe to advance
@@ -469,6 +469,13 @@ legacy zero-duration narration placeholder displayed it as `0.1 s`, and any
 metadata edit wrote that synthetic duration back to the project. The Audio panel
 now preserves `0.0 s` durations during metadata edits, keeping empty placeholders
 inactive across timeline, PHI, and export-audio paths. No release is indicated.
+
+Automation note 2026-09-01: fallback PHI-preflight review found one remaining
+inactive-audio mismatch. General consent, de-identification, and PHI-review
+warnings treated muted or zero-duration audio-only placeholders as reviewable
+media even though the exporter skips them. Preflight warnings now use the same
+active-audio criteria as export muxing, while visual media and active narration
+still keep the required privacy prompts. No release is indicated.
 
 This keeps the project on a safe optimization loop: measure first, keep the codebase
 cheap to change and cheap to run, and only then restart larger feature bets

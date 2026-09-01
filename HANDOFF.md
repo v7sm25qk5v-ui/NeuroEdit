@@ -1,5 +1,22 @@
 # NeuroEdit — Session Handoff
 
+## 2026-09-01 — Inactive-audio privacy-preflight fix
+
+- Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,
+  `desktop/README.md`, `desktop/CLAUDE.md`, and recently updated project
+  markdown. Remaining release, platform, Intel Mac, signing, and Stryker work is
+  still owner, hardware, or sample-data gated; no release tag is indicated.
+- Used the fallback review path and fixed one remaining inactive-audio
+  mismatch: general consent, de-identification, and PHI-review warnings no
+  longer treat muted or zero-duration audio-only placeholders as reviewable
+  export media.
+- Export preflight warning logic now uses the same active-audio criteria as
+  export muxing for audio-only reviewability: positive duration and positive
+  volume. Visual media and active narration still keep the required privacy
+  prompts.
+- Verification: focused `tests/test_phi_review.py` (`19 passed`), full `ruff
+  check src tests scripts`, full suite (`170 passed`), and `git diff --check`.
+
 ## 2026-09-01 — Audio-panel zero-duration preservation fix
 
 - Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,

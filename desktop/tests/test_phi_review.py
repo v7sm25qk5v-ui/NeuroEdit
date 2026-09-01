@@ -83,6 +83,24 @@ def test_preflight_ignores_inactive_audio_for_spoken_phi():
     assert any("Consider adding narration" in warning for warning in warnings)
 
 
+def test_preflight_ignores_inactive_audio_for_privacy_review():
+    project = ProjectState()
+    project.audio_tracks.append(
+        AudioTrack(id=new_id(), path="/tmp/muted.m4a", name="Muted",
+                   start_time=0.0, duration=8.0, volume=0.0)
+    )
+    project.audio_tracks.append(
+        AudioTrack(id=new_id(), path="/tmp/empty.m4a", name="Empty",
+                   start_time=20.0, duration=0.0, volume=1.0)
+    )
+
+    warnings = project_preflight_warnings(project)
+
+    assert not any("consent" in warning for warning in warnings)
+    assert not any("de-identification" in warning for warning in warnings)
+    assert not any("PHI review" in warning for warning in warnings)
+
+
 def test_export_audio_detection_ignores_inactive_audio_tracks():
     project = ProjectState()
     project.audio_tracks.append(

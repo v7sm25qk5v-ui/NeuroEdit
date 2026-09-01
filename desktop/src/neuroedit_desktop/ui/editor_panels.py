@@ -2034,9 +2034,9 @@ def recommended_continuous_clip_seconds(project: ProjectState) -> tuple[float, s
 
 def project_preflight_warnings(project: ProjectState) -> list[str]:
     warnings: list[str] = []
-    has_reviewable_media = bool(project.clips or project.slides or project.audio_tracks)
     has_visual_media = bool(project.clips or project.slides)
     has_active_audio = project_has_active_audio_tracks(project)
+    has_reviewable_media = bool(has_visual_media or has_active_audio)
     max_clip_s, guidance = recommended_continuous_clip_seconds(project)
     long_clips = [
         clip for clip in project.clips
