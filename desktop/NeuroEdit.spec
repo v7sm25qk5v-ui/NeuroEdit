@@ -10,7 +10,7 @@ from pathlib import Path
 
 IS_MACOS = sys.platform == "darwin"
 IS_WINDOWS = sys.platform == "win32"
-APP_VERSION = os.environ.get("NEUROEDIT_VERSION", "0.5.7-alpha").removeprefix("v")
+APP_VERSION = os.environ.get("NEUROEDIT_VERSION", "0.5.8-alpha").removeprefix("v")
 APP_BUILD_VERSION = APP_VERSION.removesuffix("-alpha")
 
 ROOT = Path.cwd()
