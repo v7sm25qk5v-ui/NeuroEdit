@@ -2083,6 +2083,7 @@ def project_preflight_warnings(project: ProjectState) -> list[str]:
     has_visual_media = bool(project.clips or project.slides)
     has_active_audio = project_has_active_audio_tracks(project)
     has_reviewable_media = bool(has_visual_media or has_active_audio)
+    content_duration = project_end_time(project)
     max_clip_s, guidance = recommended_continuous_clip_seconds(project)
     long_clips = [
         clip for clip in project.clips
@@ -2092,7 +2093,7 @@ def project_preflight_warnings(project: ProjectState) -> list[str]:
         names = ", ".join(clip.name for clip in long_clips[:3])
         extra = "" if len(long_clips) <= 3 else f" and {len(long_clips) - 3} more"
         warnings.append(f"{guidance} Over-limit clips: {names}{extra}.")
-    if project.duration > 120 and not project.markers:
+    if content_duration > 120 and not project.markers:
         warnings.append("Add chapter markers for videos longer than 2 minutes.")
     if not project.storyboard_objective.strip():
         warnings.append("Add a primary learning objective before export.")

@@ -125,6 +125,13 @@ by the optimization automation; they are not duplicated into P4.5.
   require consent, de-identification, or PHI review for a silent export, while
   visual media and active narration still keep those warnings.
 
+- [x] **Stale project duration triggered false or missing marker preflight.**
+  Fixed 2026-09-02: export-readiness marker guidance now checks the same
+  content end used by preview and export instead of the persisted
+  `project.duration` cache. Long real content still prompts for chapter markers,
+  while stale duration values from inactive placeholders no longer create false
+  long-video warnings.
+
 - [x] **Stale `project_end_time` cache after undo/redo (correctness).** Fixed
   2026-06-20: `_apply_snapshot()` now clears `_project_end_time_cache` after
   replacing the project, so undo/redo cannot reuse a duration from the prior

@@ -1,5 +1,22 @@
 # NeuroEdit — Session Handoff
 
+## 2026-09-02 — Preflight marker-duration correction
+
+- Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,
+  `desktop/README.md`, `desktop/CLAUDE.md`, and recently updated project
+  markdown. Remaining packaged-build, signing/privacy, Intel Mac, and
+  Stryker/DICOM work is still owner, hardware, or sample-data gated; the live
+  repository already has `v0.5.10-alpha`, so no new release tag is indicated.
+- Used the fallback review path and fixed one export-readiness duration
+  mismatch: the chapter-marker warning now uses `project_end_time(project)`
+  instead of the persisted `project.duration` field.
+- This keeps marker guidance aligned with preview/export content duration. A
+  real long clip still prompts for chapter markers even if `project.duration`
+  is stale low, while stale high duration from inactive placeholders no longer
+  creates a false long-video warning.
+- Verification: focused `tests/test_phi_review.py` (`21 passed`), full `ruff
+  check src tests scripts`, full suite (`190 passed`), and `git diff --check`.
+
 ## 2026-09-02 — v0.5.10-alpha release
 
 - Released the iMovie-style split/ripple workflow, captured-still annotation

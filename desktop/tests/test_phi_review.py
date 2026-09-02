@@ -136,6 +136,30 @@ def test_preflight_privacy_warnings_cover_slide_only_exports():
     assert any("No redaction boxes" in warning for warning in warnings)
 
 
+def test_preflight_marker_warning_uses_content_duration_when_project_duration_is_stale_low():
+    project = ProjectState(duration=0.0)
+    project.clips.append(
+        VideoClip(id=new_id(), path="/tmp/long.mp4", name="Long", duration=130.0,
+                  start_time=0.0, trim_start=0.0, trim_end=130.0)
+    )
+
+    warnings = project_preflight_warnings(project)
+
+    assert any("chapter markers" in warning for warning in warnings)
+
+
+def test_preflight_marker_warning_ignores_stale_inactive_audio_duration():
+    project = ProjectState(duration=300.0)
+    project.audio_tracks.append(
+        AudioTrack(id=new_id(), path="/tmp/empty.m4a", name="Empty",
+                   start_time=300.0, duration=0.0, volume=1.0)
+    )
+
+    warnings = project_preflight_warnings(project)
+
+    assert not any("chapter markers" in warning for warning in warnings)
+
+
 def test_checklist_blocks_until_required_checked(app):
     project = _project_with_media()
     dialog = ExportChecklistDialog(
