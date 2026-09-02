@@ -14,7 +14,7 @@ from PySide6.QtGui import QKeySequence
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtWidgets import QApplication
 
-from neuroedit_desktop.models import ProjectState, VideoClip, new_id
+from neuroedit_desktop.models import Annotation, ProjectState, VideoClip, new_id
 from neuroedit_desktop.project_store import ProjectStore
 from neuroedit_desktop.sam_backend import SamBackend, SamBackendInfo
 from neuroedit_desktop.ui import styles as ui_styles
@@ -182,6 +182,37 @@ def test_take_still_split_keeps_reserved_gap_and_source_bounds(window):
     assert right.start_time == pytest.approx(9.0)
     assert right.trim_start == pytest.approx(4.0)
     assert right.source_in_limit == pytest.approx(4.0)
+
+
+def test_take_still_starts_without_centered_title(window, tmp_path, monkeypatch):
+    still_path = tmp_path / "still.png"
+    monkeypatch.setattr(window, "_render_current_still", lambda _time: still_path)
+    window.project = ProjectState(current_time=0.0)
+    window.timeline.set_project(window.project)
+
+    window._take_still()
+
+    assert window.project.slides[-1].title == ""
+
+
+def test_timeline_annotation_activation_selects_its_label(window):
+    window.project.clips.append(
+        VideoClip(
+            id="clip", path="/tmp/source.mp4", name="Source", duration=8.0,
+            trim_end=8.0,
+        )
+    )
+    annotation = Annotation(
+        id="label-1", frame_time=2.0, ann_duration=3.0, type="rect",
+        label="Optic nerve", color="#00e5ff",
+    )
+    window.project.annotations.append(annotation)
+
+    window._timeline_item_activated("annotation", annotation.id)
+
+    assert window.project.active_panel == "labels"
+    assert window.project.selected_annotation_id == annotation.id
+    assert window.project.current_time == pytest.approx(annotation.frame_time)
 
 
 def test_project_dirty_clamps_playhead_to_new_total(window, monkeypatch):

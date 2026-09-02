@@ -1,5 +1,19 @@
 # NeuroEdit — Session Handoff
 
+## 2026-09-02 — Timeline labels and quiet captured stills
+
+- Removed the timeline canvas's trailing 420 px edit padding. The visible ruler
+  and tracks now end at the last playable project item; slides and audio remain
+  part of that end so inserted stills stay playable.
+- Added a **Labels** timeline lane. Annotation blocks show their label and
+  duration (or “to end”), and clicking one seeks to its start and selects it in
+  the Labels panel.
+- Take Still now creates an untitled image slide, so captured frames do not
+  receive centered default title text. Users can add a title later in Slides.
+- Verification: focused timeline/main-window/regression suites, full `ruff
+  check src tests scripts`, full desktop suite, `python -m compileall -q src`,
+  and `git diff --check`.
+
 ## 2026-09-02 — Preflight marker-duration correction
 
 - Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,

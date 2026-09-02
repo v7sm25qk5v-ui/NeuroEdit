@@ -242,6 +242,7 @@ class TimelineCanvas(QWidget):
         ("video", "Video", TIMELINE_VIDEO),
         ("audio", "Audio", TIMELINE_AUDIO),
         ("slides", "Slides", TIMELINE_SLIDES),
+        ("annotations", "Labels", ACCENT_EMERALD),
         ("markers", "Markers", TIMELINE_MARKERS),
     ]
 
@@ -293,10 +294,10 @@ class TimelineCanvas(QWidget):
 
     def refresh_geometry(self) -> None:
         self._prune_selection()
-        width = int(self.LABEL_W + project_end_time(self.project) * self.project.zoom + 420)
+        width = int(self.LABEL_W + project_end_time(self.project) * self.project.zoom + 1)
         height = self.RULER_H + sum(self._track_heights())
-        self.setMinimumSize(max(width, 900), height)
-        self.resize(max(width, 900), height)
+        self.setMinimumSize(max(width, self.LABEL_W + 1), height)
+        self.resize(max(width, self.LABEL_W + 1), height)
 
     def _prune_selection(self) -> None:
         if self.selected_item is None:
@@ -306,6 +307,7 @@ class TimelineCanvas(QWidget):
             "clip": self.project.clips,
             "audio": self.project.audio_tracks,
             "slide": self.project.slides,
+            "annotation": self.project.annotations,
             "marker": self.project.markers,
         }
         if not any(item.id == item_id for item in pools.get(kind, [])):
@@ -363,6 +365,10 @@ class TimelineCanvas(QWidget):
             tuple(
                 (s.id, round(s.start_time, 3), round(s.duration, 3), s.title)
                 for s in p.slides
+            ),
+            tuple(
+                (a.id, round(a.frame_time, 3), round(a.ann_duration, 3), a.label, a.type, a.visible)
+                for a in p.annotations
             ),
             tuple((m.id, round(m.time, 3), m.label, m.color) for m in p.markers),
         )
@@ -427,6 +433,7 @@ class TimelineCanvas(QWidget):
         self._paint_video_blocks(painter, zoom)
         self._paint_audio_blocks(painter, zoom)
         self._paint_slide_blocks(painter, zoom)
+        self._paint_annotation_blocks(painter, zoom)
         self._paint_markers(painter, zoom)
 
     def _block_rect(self, start: float, duration: float, track_idx: int, zoom: float) -> QRectF:
@@ -604,8 +611,27 @@ class TimelineCanvas(QWidget):
                 selected=selected, hovered=hovered,
             )
 
+    def _annotation_timeline_duration(self, annotation) -> float:
+        remaining = max(0.1, project_end_time(self.project) - annotation.frame_time)
+        if annotation.ann_duration <= 0:
+            return remaining
+        return min(annotation.ann_duration, remaining)
+
+    def _paint_annotation_blocks(self, painter: QPainter, zoom: float) -> None:
+        for annotation in self.project.annotations:
+            duration = self._annotation_timeline_duration(annotation)
+            rect = self._block_rect(annotation.frame_time, duration, 3, zoom)
+            selected = self.selected_item == ("annotation", annotation.id)
+            hovered = self._hover_item == ("annotation", annotation.id)
+            name = annotation.label or annotation.type.replace("-", " ")
+            suffix = "to end" if annotation.ann_duration <= 0 else f"{annotation.ann_duration:g}s"
+            self._paint_block(
+                painter, rect, f"{name} · {suffix}", ACCENT_EMERALD, 36,
+                selected=selected, hovered=hovered,
+            )
+
     def _paint_markers(self, painter: QPainter, zoom: float) -> None:
-        y_top = self._track_y(3)
+        y_top = self._track_y(4)
         for marker in self.project.markers:
             x = self.LABEL_W + marker.time * zoom
             color = QColor(marker.color)
@@ -646,6 +672,11 @@ class TimelineCanvas(QWidget):
         if hit is not None:
             kind, item_id, offset = hit
             self._set_selection(("clip" if kind.startswith("clip") else kind, item_id))
+            if kind == "annotation":
+                self.seek_requested.emit(self._item_start_time(kind, item_id))
+                self.item_activated.emit(kind, item_id)
+                self.update()
+                return
             origin_start = self._item_start_time(kind, item_id)
             self._drag = (kind, item_id, offset, origin_start)
             if kind == "clip-trim-start":
@@ -846,7 +877,7 @@ class TimelineCanvas(QWidget):
 
     def _hit_marker(self, x: float, y: float) -> TimelineMarker | None:
         zoom = max(1.0, self.project.zoom)
-        y_top = self._track_y(3)
+        y_top = self._track_y(4)
         if not (y_top <= y <= y_top + self.TRACK_H):
             return None
         for marker in self.project.markers:
@@ -1005,6 +1036,10 @@ class TimelineCanvas(QWidget):
             for slide in self.project.slides:
                 if slide.id == item_id:
                     return slide.start_time
+        if kind == "annotation":
+            for annotation in self.project.annotations:
+                if annotation.id == item_id:
+                    return annotation.frame_time
         return 0.0
 
     def _apply_trim_start(self, clip, time_at: float) -> None:
@@ -1066,6 +1101,15 @@ class TimelineCanvas(QWidget):
             rect = self._slide_block_rect(slide, zoom)
             if rect.contains(x, y):
                 return "slide", slide.id, (x - rect.left()) / zoom
+        for annotation in self.project.annotations:
+            rect = self._block_rect(
+                annotation.frame_time,
+                self._annotation_timeline_duration(annotation),
+                3,
+                zoom,
+            )
+            if rect.contains(x, y):
+                return "annotation", annotation.id, (x - rect.left()) / zoom
         return None
 
 

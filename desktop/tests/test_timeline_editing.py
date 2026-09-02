@@ -310,9 +310,37 @@ def test_click_selects_marker() -> None:
     project.markers.append(_marker("m-1", at=2.0))
     canvas = TimelineCanvas(project)
 
-    y_top = canvas._track_y(3)
+    y_top = canvas._track_y(4)
     _press(canvas, TimelineCanvas.LABEL_W + 2.0 * project.zoom, y_top + 10)
     assert canvas.selected_item == ("marker", "m-1")
+
+
+def test_click_annotation_selects_and_seeks_to_its_start() -> None:
+    project = _project()
+    project.clips.append(_clip(duration=8.0))
+    project.annotations.append(
+        Annotation(
+            id="label-1", frame_time=2.0, ann_duration=3.0, type="rect",
+            label="Optic nerve", color="#00e5ff",
+        )
+    )
+    canvas = TimelineCanvas(project)
+    seeks: list[float] = []
+    canvas.seek_requested.connect(seeks.append)
+
+    y_top = canvas._track_y(3)
+    _press(canvas, TimelineCanvas.LABEL_W + 2.5 * project.zoom, y_top + 10)
+
+    assert canvas.selected_item == ("annotation", "label-1")
+    assert seeks == [2.0]
+
+
+def test_timeline_canvas_ends_at_project_content() -> None:
+    project = _project(zoom=100.0)
+    project.clips.append(_clip(duration=5.0))
+    canvas = TimelineCanvas(project)
+
+    assert canvas.width() == TimelineCanvas.LABEL_W + 501
 
 
 def test_stale_selection_cleared_on_refresh() -> None:

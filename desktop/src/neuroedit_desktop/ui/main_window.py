@@ -437,6 +437,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             ("video", "Video", ui_styles.TIMELINE_VIDEO),
             ("audio", "Audio", ui_styles.TIMELINE_AUDIO),
             ("slides", "Slides", ui_styles.TIMELINE_SLIDES),
+            ("annotations", "Labels", ui_styles.ACCENT_EMERALD),
             ("markers", "Markers", ui_styles.TIMELINE_MARKERS),
         ]
 
@@ -1690,6 +1691,14 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
                 self.project.active_panel = "audio"
                 self._seek_global(track.start_time)
                 self.audio_panel.select_track(item_id)
+        elif kind == "annotation":
+            annotation = self._find_annotation(item_id)
+            if annotation:
+                self.project.active_panel = "labels"
+                self.project.selected_annotation_id = annotation.id
+                self._set_panel("labels")
+                self._seek_global(annotation.frame_time)
+                self.labels_panel.set_selected_annotation(annotation.id)
         elif kind == "marker":
             marker = next((m for m in self.project.markers if m.id == item_id), None)
             if marker:
@@ -1705,7 +1714,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self._insert_timeline_gap(time_s, duration)
         slide = Slide(
             id=new_id(),
-            title=f"Still {format_time(time_s)}",
+            title="",
             image_path=str(still_path),
             duration=duration,
             start_time=time_s,

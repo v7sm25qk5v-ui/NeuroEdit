@@ -14,6 +14,12 @@ bet and stays parked until sample data and a design pass exist.
 ## Optimization Backlog
 _(automation-maintained — new findings appended below, checked off when implemented)_
 
+- [x] **Timeline end, label navigation, and captured-still defaults.** Fixed
+  2026-09-02: the timeline canvas now ends at the final playable project item
+  instead of reserving trailing edit space; labels/annotations appear as
+  duration-aware blocks in their own clickable timeline lane; and Take Still
+  creates an image slide without centered default title text.
+
 The primary open code-health/runtime work lives in **P4.5** (modularize the
 `main_window.py` dialog/MainWindow split, reduce undo-snapshot serialize cost,
 audit cold-start imports). The items here are smaller, fresh findings surfaced
