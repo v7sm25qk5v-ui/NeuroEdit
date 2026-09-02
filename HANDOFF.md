@@ -1,5 +1,15 @@
 # NeuroEdit — Session Handoff
 
+## 2026-09-02 — v0.5.11-alpha release
+
+- Released the bounded timeline, clickable Labels lane, and untitled captured
+  still defaults as `v0.5.11-alpha`.
+- Root download links, package metadata, macOS app bundle fallback, and Windows
+  installer version are aligned to the tag. The tagged workflow runs lint and
+  the full test suite before publishing the macOS and Windows installers.
+- Release gate: `ruff check src tests scripts`; full desktop suite;
+  `python -m compileall -q src`; `git diff --check`.
+
 ## 2026-09-02 — Timeline labels and quiet captured stills
 
 - Removed the timeline canvas's trailing 420 px edit padding. The visible ruler
