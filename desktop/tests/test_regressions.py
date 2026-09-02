@@ -453,7 +453,14 @@ def test_export_warning_ignores_inactive_audio_tracks(tmp_path, monkeypatch):
         ),
     )
 
+    probed_paths: list[Path] = []
+
+    def has_audio_stream(path: Path, _ffmpeg: str) -> bool:
+        probed_paths.append(path)
+        return False
+
     monkeypatch.setattr(exporter, "_find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(exporter, "_has_audio_stream", has_audio_stream)
 
     def write_video(path: Path, _ffmpeg: str, _tmp_dir: Path, _duration: float) -> None:
         path.write_bytes(b"visual")
@@ -462,6 +469,7 @@ def test_export_warning_ignores_inactive_audio_tracks(tmp_path, monkeypatch):
 
     assert exporter.export() == []
     assert (tmp_path / "export.mp4").read_bytes() == b"visual"
+    assert probed_paths == [clip]
 
 
 def test_export_warns_when_active_audio_has_no_readable_stream(tmp_path, monkeypatch):

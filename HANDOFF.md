@@ -1,10 +1,10 @@
 # NeuroEdit — Session Handoff
 
-## 2026-09-02 — v0.5.9-alpha release
+## 2026-09-02 — v0.5.10-alpha release
 
 - Released the iMovie-style split/ripple workflow, captured-still annotation
   corrections, freehand Brush/highlight implementation, tutorial completion
-  fix, and inactive-audio consistency fixes as `v0.5.9-alpha`.
+  fix, and inactive-audio consistency fixes as `v0.5.10-alpha`.
 - Root download links, Python/package version, macOS bundle fallback, and Windows
   installer version are aligned to the tag. The tagged workflow runs lint and
   the full test suite before publishing unsigned macOS and Windows installers.
@@ -15,6 +15,9 @@
 - CI now selects the Qt FFmpeg media backend and bounds the macOS quality job
   to 15 minutes, preventing a native-backend shutdown hang from blocking a
   release indefinitely.
+- The inactive-audio export regression now stubs its source-video audio probe
+  instead of requiring a system `ffmpeg` executable, while asserting that muted
+  and zero-duration narration tracks are not probed.
 - Release gate: `ruff check src tests scripts`; full suite (`188 passed`);
   `python -m compileall -q src`; `git diff --check`.
 
@@ -47,7 +50,7 @@
 - Verification: focused feature suites and full repository suite (`188 passed`),
   full `ruff check src tests scripts`, `git diff --check`, and current-run visual
   QA of Split Clip, ripple trim, arrow, brush, and the corrected tutorial step.
-  This feature/correctness pass is included in `v0.5.9-alpha`.
+  This feature/correctness pass is included in `v0.5.10-alpha`.
 
 ## 2026-09-01 — Inactive-audio privacy-preflight fix
 
@@ -321,6 +324,13 @@
 - Verification: focused `ruff` plus `tests/test_project_library.py` (`6
   passed`); full `ruff check src tests scripts`; full suite (`154 passed`).
   No release tag is indicated for this internal correctness fix.
+
+## 2026-07-12 — Tux pet v2 upgrade
+
+- Upgraded the installed Codex pet at `~/.codex/pets/tux` from the legacy 8x9 atlas contract to the 8x11 v2 contract with 16 clockwise look directions.
+- Preserved Tux's original nine animation rows. Repaired their legacy central white bib from transparency to opaque off-white without changing poses.
+- Added and validated unmistakable up/right/down/left cardinals plus intermediate look directions. Final atlas validation passes at 1536x2288 with `spriteVersionNumber: 2`.
+- QA artifacts are retained at `~/.codex/pet-runs/tux-v2-2026-07-12`, including contact sheets, direction semantics, three-reviewer blind direction results, continuity metrics, chroma cleanup, bib-opacity repair, and motion previews.
 
 Covers work completed across sessions (accumulated):
 
