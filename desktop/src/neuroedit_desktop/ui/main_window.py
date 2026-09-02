@@ -15,7 +15,9 @@ from PySide6.QtGui import (
     QDragEnterEvent,
     QDropEvent,
     QImage,
+    QKeySequence,
     QPixmap,
+    QShortcut,
 )
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
@@ -161,7 +163,7 @@ TOOLS = [
     ("ellipse", "○",  "Ellipse (E)"),
     ("arrow",   "↗",  "Arrow (A)"),
     ("text",    "T",  "Text (T)"),
-    ("brush",   "✏",  "Brush (B)"),
+    ("brush",   "✏",  "Freehand Brush / Highlight (B)"),
     ("redact",  "█",  "Redact PHI (X) — burns an opaque box over patient identifiers"),
 ]
 
@@ -300,6 +302,12 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self.redo_action.setShortcuts(["Ctrl+Shift+Z", "Ctrl+Y"])
         self.redo_action.setEnabled(False)
 
+        self.split_clip_action = QAction("Split Clip", self)
+        self.split_clip_action.setShortcut("Ctrl+B")
+        self.split_clip_action.triggered.connect(
+            lambda: self.timeline._cut_active_clip()
+        )
+
         self.duplicate_annotation_action = QAction("Duplicate Annotation at Playhead", self)
         self.duplicate_annotation_action.setShortcut("Ctrl+D")
         self.duplicate_annotation_action.triggered.connect(self._duplicate_selected_annotation)
@@ -372,6 +380,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         edit_menu = menubar.addMenu("Edit")
         edit_menu.addAction(self.undo_action)
         edit_menu.addAction(self.redo_action)
+        edit_menu.addSeparator()
+        edit_menu.addAction(self.split_clip_action)
         edit_menu.addSeparator()
         edit_menu.addAction(self.duplicate_annotation_action)
         edit_menu.addAction(self.delete_annotation_action)
@@ -751,17 +761,18 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
 
         back_btn = QPushButton("⟨")
         back_btn.setFixedSize(32, 32)
-        back_btn.setToolTip("Previous frame")
+        back_btn.setToolTip("Previous frame (Left Arrow)")
         back_btn.clicked.connect(lambda: self._step_frame(-1))
 
         self.play_button = QPushButton("▶")
         self.play_button.setFixedSize(38, 38)
         self.play_button.setProperty("variant", "primary")
+        self.play_button.setToolTip("Play or pause (Space)")
         self.play_button.clicked.connect(self._toggle_play)
 
         fwd_btn = QPushButton("⟩")
         fwd_btn.setFixedSize(32, 32)
-        fwd_btn.setToolTip("Next frame")
+        fwd_btn.setToolTip("Next frame (Right Arrow)")
         fwd_btn.clicked.connect(lambda: self._step_frame(1))
 
         for b in (skip_back_btn, back_btn, fwd_btn):
@@ -807,6 +818,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self.timeline.project_changed.connect(self._mark_review_relevant_project_dirty)
         self.timeline.item_activated.connect(self._timeline_item_activated)
         self.timeline.setMinimumHeight(340)
+        self._install_editor_shortcuts()
 
         self.media_panel = MediaExplorerPanel(self.project)
         self.media_panel.import_videos_requested.connect(self._import_video)
@@ -922,6 +934,41 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             self.media_scroll.minimumWidth() + video_column.minimumWidth() + panel_min + 30,
             600,
         )
+
+    def _install_editor_shortcuts(self) -> None:
+        """Install transport keys only on the two editing canvases, so Space
+        and arrow keys remain available inside text and numeric fields."""
+        self.editor_shortcuts: dict[str, list[QShortcut]] = {
+            "play_pause": [],
+            "previous_frame": [],
+            "next_frame": [],
+        }
+        bindings = (
+            ("play_pause", "Space", lambda: self._toggle_play()),
+            ("previous_frame", "Left", lambda: self._step_frame(-1)),
+            ("next_frame", "Right", lambda: self._step_frame(1)),
+        )
+        for target in (self.video_view, self.timeline.canvas):
+            for name, sequence, callback in bindings:
+                shortcut = QShortcut(QKeySequence(sequence), target)
+                shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+                shortcut.activated.connect(callback)
+                self.editor_shortcuts[name].append(shortcut)
+        self.tool_shortcuts: dict[str, QShortcut] = {}
+        for tool, sequence in (
+            ("select", "V"),
+            ("sam", "S"),
+            ("rect", "R"),
+            ("ellipse", "E"),
+            ("arrow", "A"),
+            ("text", "T"),
+            ("brush", "B"),
+            ("redact", "X"),
+        ):
+            shortcut = QShortcut(QKeySequence(sequence), self.video_view)
+            shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(lambda selected=tool: self._set_tool(selected))
+            self.tool_shortcuts[tool] = shortcut
 
     # ── Status bar ────────────────────────────────────────────────────────
 
@@ -1749,7 +1796,9 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             return
 
         original_trim_end = clip.trim_end
+        original_source_out_limit = clip.source_out_limit
         clip.trim_end = split_trim
+        clip.source_out_limit = split_trim
         right = VideoClip(
             id=new_id(),
             path=clip.path,
@@ -1758,6 +1807,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             start_time=time_s + gap_duration,
             trim_start=split_trim,
             trim_end=original_trim_end,
+            source_in_limit=split_trim,
+            source_out_limit=original_source_out_limit,
             width=clip.width,
             height=clip.height,
             thumbnail_path=clip.thumbnail_path,
@@ -2142,8 +2193,18 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         if duration_s > 0:
             old_duration = clip.duration
             clip.duration = duration_s
-            if clip.trim_end <= 0 or abs(clip.trim_end - old_duration) < 0.05 or clip.trim_end > duration_s:
-                clip.trim_end = duration_s
+            if clip.source_in_limit is not None:
+                clip.source_in_limit = min(clip.source_in_limit, duration_s)
+            if clip.source_out_limit is not None:
+                clip.source_out_limit = min(clip.source_out_limit, duration_s)
+            clip.trim_start = max(clip.effective_source_in_limit, clip.trim_start)
+            source_end = clip.effective_source_out_limit
+            if (
+                clip.trim_end <= 0
+                or (clip.source_out_limit is None and abs(clip.trim_end - old_duration) < 0.05)
+                or clip.trim_end > source_end
+            ):
+                clip.trim_end = source_end
                 self.project.arrange_clips_without_overlap(clip.id)
             self.project.duration = max(self.project.duration, clip.start_time + clip.display_duration)
             self._mark_dirty()

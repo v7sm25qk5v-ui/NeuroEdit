@@ -46,6 +46,14 @@ class HistoryMixin:
 
     def _mark_project_dirty(self) -> None:
         self._invalidate_project_end_time()
+        end_time = self._project_end_time()
+        if self.project.current_time > end_time:
+            self.project.current_time = end_time
+            if self._timeline_playing:
+                self._timeline_playing = False
+                self.timeline_clock.stop()
+                self.player.pause()
+                self.play_button.setText("▶")
         if not self._restoring:
             self._push_history()
         else:

@@ -97,14 +97,9 @@ class AnnotationGraphicsItem(QGraphicsObject):
             return
 
         active_slide = self._active_slide()
+        full_frame_slide = active_slide is not None and not active_slide.overlay
         if active_slide is not None:
             self._paint_slide(painter, active_slide, w, h)
-            if not active_slide.overlay:
-                # A full-frame slide covers the video, but captions (narration
-                # continues across slides) and redactions still paint on top.
-                self._paint_captions(painter, w, h)
-                self._paint_redactions(painter, w, h)
-                return
 
         for ann in self.project.annotations:
             if not ann.is_visible_at(self.project.current_time):
@@ -140,7 +135,8 @@ class AnnotationGraphicsItem(QGraphicsObject):
                 QPointF(point.x * w, point.y * h), 9.0, 9.0,
             )
 
-        self._paint_fade_overlay(painter, w, h)
+        if not full_frame_slide:
+            self._paint_fade_overlay(painter, w, h)
         self._paint_captions(painter, w, h)
         self._paint_redactions(painter, w, h)
 
@@ -247,6 +243,8 @@ class AnnotationGraphicsItem(QGraphicsObject):
             painter.drawEllipse(self._rect_from_geometry(ann, w, h))
         elif ann.type == "arrow":
             self._paint_arrow(painter, ann, w, h, color)
+        elif ann.type == "brush":
+            self._paint_brush(painter, ann, w, h)
         elif ann.type == "text":
             self._paint_text(painter, ann, w, h, color)
 
@@ -255,6 +253,29 @@ class AnnotationGraphicsItem(QGraphicsObject):
 
         if not preview and self.project.selected_annotation_id == ann.id:
             self._paint_selection(painter, ann, w, h)
+
+    def _paint_brush(
+        self,
+        painter: QPainter,
+        ann: Annotation,
+        w: float,
+        h: float,
+    ) -> None:
+        points = ann.geometry.get("points", [])
+        if not isinstance(points, list) or len(points) < 2:
+            return
+        polyline = QPolygonF([
+            QPointF(float(point[0]) * w, float(point[1]) * h)
+            for point in points
+            if isinstance(point, list) and len(point) >= 2
+        ])
+        if polyline.size() < 2:
+            return
+        pen = painter.pen()
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.drawPolyline(polyline)
 
     def _paint_text(
         self,
@@ -323,9 +344,23 @@ class AnnotationGraphicsItem(QGraphicsObject):
             rect = metrics.boundingRect(label).adjusted(-10, -6, 10, 6)
             rect.moveTopLeft(QPointF(x, y))
             return rect
+        if ann.type == "brush":
+            points = ann.geometry.get("points", [])
+            if not isinstance(points, list) or not points:
+                return None
+            xs = [float(point[0]) * w for point in points if isinstance(point, list)]
+            ys = [float(point[1]) * h for point in points if isinstance(point, list)]
+            if not xs or not ys:
+                return None
+            return QRectF(
+                QPointF(min(xs), min(ys)),
+                QPointF(max(xs), max(ys)),
+            )
         return None
 
     def handle_points(self, ann: Annotation, w: float, h: float) -> list[QPointF]:
+        if ann.type == "brush":
+            return []
         if ann.type == "arrow":
             return [
                 QPointF(float(ann.geometry.get("x1", 0.0)) * w,
@@ -359,6 +394,20 @@ class AnnotationGraphicsItem(QGraphicsObject):
                 y2 = float(ann.geometry.get("y2", 0.0)) * h
                 if _distance_to_segment(px, py, x1, y1, x2, y2) <= 10.0:
                     return ann
+                continue
+            if ann.type == "brush":
+                points = ann.geometry.get("points", [])
+                if isinstance(points, list):
+                    pixel_points = [
+                        (float(point[0]) * w, float(point[1]) * h)
+                        for point in points
+                        if isinstance(point, list) and len(point) >= 2
+                    ]
+                    if any(
+                        _distance_to_segment(px, py, *start, *end) <= 10.0
+                        for start, end in zip(pixel_points, pixel_points[1:])
+                    ):
+                        return ann
                 continue
             label_rect = self.attached_label_rect(ann, w, h)
             if label_rect is not None and label_rect.contains(QPointF(px, py)):
@@ -759,6 +808,7 @@ class VideoGraphicsView(QGraphicsView):
 
         self._drag_start: tuple[float, float] | None = None
         self._drag_current: tuple[float, float] | None = None
+        self._brush_points: list[list[float]] = []
         self._select_mode: str | None = None  # "move" | "resize"
         self._select_target_id: str | None = None
         self._select_handle: int | None = None
@@ -856,8 +906,9 @@ class VideoGraphicsView(QGraphicsView):
             norm = self._scene_to_norm(event.position().toPoint())
             if norm is not None:
                 project = self.annotation_item.project
-                # Drag slide text only when the Slides panel is open.
-                if project.active_panel == "slides":
+                # Slide layout handles belong to Select; explicit annotation
+                # tools must still draw over a captured still.
+                if project.active_panel == "slides" and project.active_tool == "select":
                     self._slide_did_mutate = False
                     handle_hit = self.annotation_item.slide_text_handle_hit_test(*norm)
                     if handle_hit is not None:
@@ -898,6 +949,12 @@ class VideoGraphicsView(QGraphicsView):
                         self._build_drag_annotation(project, norm, norm),
                     )
                     return
+                if project.active_tool == "brush":
+                    self._brush_points = [[norm[0], norm[1]]]
+                    self.annotation_item.set_preview(
+                        self._build_brush_annotation(project, self._brush_points),
+                    )
+                    return
                 if project.active_tool == "text":
                     self._place_text_annotation(norm)
                     return
@@ -934,7 +991,7 @@ class VideoGraphicsView(QGraphicsView):
                     self.annotation_mutated.emit()
                     self.annotation_item.update()
                 return
-        if project.active_panel == "slides":
+        if project.active_panel == "slides" and project.active_tool == "select":
             norm = self._scene_to_norm(event.position().toPoint())
             if norm is not None:
                 handle_hit = self.annotation_item.slide_text_handle_hit_test(*norm)
@@ -951,6 +1008,16 @@ class VideoGraphicsView(QGraphicsView):
                 self._drag_current = norm
                 preview = self._build_drag_annotation(project, self._drag_start, norm)
                 self.annotation_item.set_preview(preview)
+                return
+        if self._brush_points and project.active_tool == "brush":
+            norm = self._scene_to_norm(event.position().toPoint())
+            if norm is not None:
+                previous = self._brush_points[-1]
+                if math.hypot(norm[0] - previous[0], norm[1] - previous[1]) >= 0.002:
+                    self._brush_points.append([norm[0], norm[1]])
+                    self.annotation_item.set_preview(
+                        self._build_brush_annotation(project, self._brush_points),
+                    )
                 return
         if self._select_mode and project.active_tool == "select":
             norm = self._scene_to_norm(event.position().toPoint())
@@ -982,6 +1049,18 @@ class VideoGraphicsView(QGraphicsView):
                 return
             annotation = self._build_drag_annotation(project, start_norm, end_norm)
             self.annotation_added.emit(annotation)
+            return
+        if self._brush_points and project.active_tool == "brush":
+            end_norm = self._scene_to_norm(event.position().toPoint())
+            points = self._brush_points
+            self._brush_points = []
+            self.annotation_item.set_preview(None)
+            if end_norm is not None:
+                previous = points[-1]
+                if math.hypot(end_norm[0] - previous[0], end_norm[1] - previous[1]) >= 0.002:
+                    points.append([end_norm[0], end_norm[1]])
+            if len(points) >= 2:
+                self.annotation_added.emit(self._build_brush_annotation(project, points))
             return
         if self._select_mode and project.active_tool == "select":
             self._select_mode = None
@@ -1032,6 +1111,27 @@ class VideoGraphicsView(QGraphicsView):
             geometry={"x": norm[0], "y": norm[1]},
         )
         self.annotation_added.emit(annotation)
+
+    def _build_brush_annotation(
+        self,
+        project: ProjectState,
+        points: list[list[float]],
+    ) -> Annotation:
+        return Annotation(
+            id=new_id(),
+            frame_time=project.current_time,
+            ann_duration=5.0,
+            type="brush",
+            label=project.draw_label.strip() or "Highlight",
+            color=project.draw_color,
+            visible=True,
+            opacity=project.draw_opacity,
+            geometry={
+                "points": [list(point) for point in points],
+                "width_px": float(project.draw_width),
+            },
+            show_label=False,
+        )
 
     def _slide_rect_tuple(self, slide, kind: str) -> tuple[float, float, float, float]:
         if kind == "title":
@@ -1174,6 +1274,17 @@ class VideoGraphicsView(QGraphicsView):
                 ann.geometry["y1"] = float(start.get("y1", 0.0)) + dy
                 ann.geometry["x2"] = float(start.get("x2", 0.0)) + dx
                 ann.geometry["y2"] = float(start.get("y2", 0.0)) + dy
+            elif ann.type == "brush":
+                points = start.get("points", [])
+                if isinstance(points, list):
+                    ann.geometry["points"] = [
+                        [
+                            max(0.0, min(1.0, float(point[0]) + dx)),
+                            max(0.0, min(1.0, float(point[1]) + dy)),
+                        ]
+                        for point in points
+                        if isinstance(point, list) and len(point) >= 2
+                    ]
             else:
                 ann.geometry["x"] = float(start.get("x", 0.0)) + dx
                 ann.geometry["y"] = float(start.get("y", 0.0)) + dy

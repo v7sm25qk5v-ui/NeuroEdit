@@ -8,10 +8,14 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
+from PySide6.QtCore import QEvent, QPointF, QSizeF, Qt
+from PySide6.QtGui import QImage, QMouseEvent, QPainter
+from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 from PySide6.QtWidgets import QApplication
 
 from neuroedit_desktop.exporter import AudioSource, ExportSettings, ProjectExporter
 from neuroedit_desktop.models import (
+    Annotation,
     AudioTrack,
     ProjectState,
     Slide,
@@ -19,7 +23,9 @@ from neuroedit_desktop.models import (
     VideoClip,
     new_id,
 )
+from neuroedit_desktop.ui.canvas import AnnotationGraphicsItem, VideoGraphicsView
 from neuroedit_desktop.ui.editor_panels import AudioPanel, RichTimelineWidget
+from neuroedit_desktop.ui.timeline_utils import project_end_time
 from neuroedit_desktop.ui.main_window import ExportDialog
 
 
@@ -85,6 +91,187 @@ def test_cut_preserves_media_type_and_moves_fade_out(app):
     assert right.fade_out == 1.0
     assert right.fade_in == 0.0
     assert right.trim_start == pytest.approx(4.0)
+
+
+def test_split_clip_source_bounds_prevent_duplicate_footage(app):
+    project = ProjectState()
+    project.clips.append(_clip(0.0, 10.0))
+    project.current_time = 5.0
+    timeline = RichTimelineWidget(project)
+
+    timeline._cut_active_clip()
+    left, right = project.clips
+    timeline.canvas._apply_trim_end(left, 8.0)
+    timeline.canvas._apply_trim_start(right, 2.0)
+
+    assert left.trim_end == pytest.approx(5.0)
+    assert right.trim_start == pytest.approx(5.0)
+    assert project_end_time(project) == pytest.approx(10.0)
+    restored = ProjectState.from_dict(project.to_dict())
+    assert restored.clips[0].source_out_limit == pytest.approx(5.0)
+    assert restored.clips[1].source_in_limit == pytest.approx(5.0)
+
+
+def test_full_frame_still_preview_paints_visible_annotations(app, monkeypatch):
+    project = ProjectState(current_time=1.0)
+    project.slides.append(Slide(id="still", title="Still", start_time=0.0, duration=2.0))
+    project.annotations.append(
+        Annotation(
+            id="arrow",
+            frame_time=0.5,
+            ann_duration=1.0,
+            type="arrow",
+            label="Target",
+            color="#ffcc00",
+            geometry={"x1": 0.2, "y1": 0.7, "x2": 0.6, "y2": 0.4},
+        )
+    )
+    item = AnnotationGraphicsItem(project, QGraphicsVideoItem())
+    item.set_size(QSizeF(320, 180))
+    painted: list[str] = []
+    fades: list[bool] = []
+    monkeypatch.setattr(
+        item,
+        "_paint_shape",
+        lambda _painter, ann, _w, _h, *, preview: painted.append(ann.id),
+    )
+    monkeypatch.setattr(
+        item,
+        "_paint_fade_overlay",
+        lambda _painter, _w, _h: fades.append(True),
+    )
+    image = QImage(320, 180, QImage.Format.Format_RGB32)
+    painter = QPainter(image)
+
+    item._paint_impl(painter)
+    painter.end()
+
+    assert painted == ["arrow"]
+    assert fades == []
+
+
+def test_full_frame_still_export_paints_visible_annotations(monkeypatch):
+    project = ProjectState(current_time=1.0)
+    project.slides.append(Slide(id="still", title="Still", start_time=0.0, duration=2.0))
+    project.annotations.append(
+        Annotation(
+            id="arrow",
+            frame_time=0.5,
+            ann_duration=1.0,
+            type="arrow",
+            label="Target",
+            color="#ffcc00",
+            geometry={"x1": 0.2, "y1": 0.7, "x2": 0.6, "y2": 0.4},
+        )
+    )
+    exporter = ProjectExporter(
+        project,
+        ExportSettings(
+            output_path=Path("/tmp/o.mp4"), width=320, height=180,
+            fps=30, crf=20, label="test",
+        ),
+    )
+    annotations: list[float] = []
+    fades: list[float] = []
+    monkeypatch.setattr(
+        exporter,
+        "_paint_annotations",
+        lambda _painter, time_s, _w, _h: annotations.append(time_s),
+    )
+    monkeypatch.setattr(
+        exporter,
+        "_paint_fade",
+        lambda _painter, time_s, _w, _h: fades.append(time_s),
+    )
+
+    exporter._render_frame(1.0)
+
+    assert annotations == [1.0]
+    assert fades == []
+
+
+def test_arrow_tool_wins_over_slide_text_drag(app, monkeypatch):
+    project = ProjectState(current_time=1.0, active_panel="slides", active_tool="arrow")
+    project.slides.append(Slide(id="still", title="Still", start_time=0.0, duration=2.0))
+    view = VideoGraphicsView(project)
+    monkeypatch.setattr(view, "_scene_to_norm", lambda _position: (0.5, 0.2))
+    event = QMouseEvent(
+        QEvent.Type.MouseButtonPress,
+        QPointF(20, 20),
+        QPointF(20, 20),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+    view.mousePressEvent(event)
+
+    assert view._slide_drag is None
+    assert view._drag_start == (0.5, 0.2)
+
+
+def test_brush_drag_creates_freehand_annotation(app, monkeypatch):
+    project = ProjectState(current_time=1.0, active_tool="brush")
+    view = VideoGraphicsView(project)
+    positions = iter(((0.1, 0.1), (0.2, 0.2), (0.3, 0.25)))
+    monkeypatch.setattr(view, "_scene_to_norm", lambda _position: next(positions))
+    added: list[Annotation] = []
+    view.annotation_added.connect(added.append)
+
+    press = QMouseEvent(
+        QEvent.Type.MouseButtonPress, QPointF(10, 10), QPointF(10, 10),
+        Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    move = QMouseEvent(
+        QEvent.Type.MouseMove, QPointF(20, 20), QPointF(20, 20),
+        Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    release = QMouseEvent(
+        QEvent.Type.MouseButtonRelease, QPointF(30, 25), QPointF(30, 25),
+        Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+    view.mousePressEvent(press)
+    view.mouseMoveEvent(move)
+    view.mouseReleaseEvent(release)
+
+    assert len(added) == 1
+    assert added[0].type == "brush"
+    assert added[0].geometry["points"] == [[0.1, 0.1], [0.2, 0.2], [0.3, 0.25]]
+
+
+def test_brush_annotation_renders_in_export():
+    project = ProjectState()
+    project.annotations.append(
+        Annotation(
+            id="brush",
+            frame_time=0.0,
+            ann_duration=1.0,
+            type="brush",
+            label="Highlight",
+            color="#ffcc00",
+            opacity=1.0,
+            geometry={
+                "points": [[0.1, 0.1], [0.5, 0.5], [0.9, 0.2]],
+                "width_px": 12.0,
+            },
+        )
+    )
+    exporter = ProjectExporter(
+        project,
+        ExportSettings(
+            output_path=Path("/tmp/o.mp4"), width=320, height=180,
+            fps=30, crf=20, label="test",
+        ),
+    )
+
+    frame = exporter._render_frame(0.5)
+
+    assert frame[:, :, 0].max() > 200
+    assert frame[:, :, 1].max() > 150
 
 
 def test_exporter_duration_is_content_end_not_project_duration():

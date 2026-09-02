@@ -1,5 +1,47 @@
 # NeuroEdit — Session Handoff
 
+## 2026-09-01 — v0.5.6-alpha release
+
+- Released the iMovie-style split/ripple workflow, captured-still annotation
+  corrections, freehand Brush/highlight implementation, tutorial completion
+  fix, and inactive-audio consistency fixes as `v0.5.6-alpha`.
+- Root download links, Python/package version, macOS bundle fallback, and Windows
+  installer version are aligned to the tag. The tagged workflow runs lint and
+  the full test suite before publishing unsigned macOS and Windows installers.
+- Release gate: `ruff check src tests scripts`; full suite (`188 passed`);
+  `python -m compileall -q src`; `git diff --check`.
+
+## 2026-09-01 — iMovie-style split/trim and still-annotation review
+
+- Ran three independent feature reviews across still annotations, trim/timeline
+  behavior, and current iMovie keyboard conventions, then captured the affected
+  workflow before and after under `desktop/qa/audits/20260901_imovie_flow/`.
+- Renamed the timeline operation to **Split Clip** and added Command-B on macOS
+  (`Ctrl+B` on other platforms), Space play/pause, Left/Right frame stepping,
+  and the annotation-tool keys already advertised by the toolbar. Transport and
+  tool keys are scoped to the editing canvases so text fields retain normal key
+  behavior.
+- Split pieces now persist source-in/source-out limits. Their resize handles
+  cannot cross the split and duplicate footage. Trim and primary-clip deletion
+  ripple downstream clips, slides, audio, markers, and annotations by the edit
+  delta while preserving unrelated intentional gaps such as Take Still.
+- Timeline duration now ignores marker-only padding, clamps a playhead left
+  beyond a shortened project, and updates its displayed total during trim.
+- Captured/full-frame stills now paint ordinary annotations in both preview and
+  export. Explicit draw tools take priority over slide text handles, so arrows
+  work immediately after Take Still. The previously exposed but inert Brush
+  tool now creates, selects/moves, previews, persists, and exports freehand
+  highlights.
+- The tutorial's Rectangle step no longer preselects its own target before the
+  user clicks it, so the requested action now produces a visible selected-tool
+  state. A new hands-on Brush step teaches a continuous freehand highlight and
+  points users to the Labels panel for color, width, and opacity edits. Before
+  and after evidence is under `desktop/qa/audits/20260901_tutorial_flow/`.
+- Verification: focused feature suites and full repository suite (`188 passed`),
+  full `ruff check src tests scripts`, `git diff --check`, and current-run visual
+  QA of Split Clip, ripple trim, arrow, brush, and the corrected tutorial step.
+  This feature/correctness pass is included in `v0.5.6-alpha`.
+
 ## 2026-09-01 — Inactive-audio privacy-preflight fix
 
 - Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,

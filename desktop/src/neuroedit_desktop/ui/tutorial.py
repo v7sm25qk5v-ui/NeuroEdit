@@ -459,10 +459,6 @@ def build_default_steps(window) -> list[TutorialStep]:
         label_input = getattr(window, "label_input", None)
         if label_input is not None and not label_input.currentText().strip():
             label_input.setEditText("practice target")
-        project = getattr(window, "project", None)
-        if project is not None:
-            project.active_tool = "rect"
-            _refresh_window()
 
     def _prepare_sam_point() -> None:
         project = getattr(window, "project", None)
@@ -550,6 +546,17 @@ def build_default_steps(window) -> list[TutorialStep]:
             ),
             target_resolver=lambda: getattr(window, "video_view", None),
             on_enter=_set_tool("arrow"),
+            practice_mode=True,
+        ),
+        TutorialStep(
+            title="Add a Freehand Highlight",
+            body=(
+                "The Brush follows your pointer as a continuous freeform stroke. "
+                "Click and drag over the video to highlight a path; color, width, "
+                "and opacity remain editable in the Labels panel."
+            ),
+            target_resolver=lambda: getattr(window, "video_view", None),
+            on_enter=_set_tool("brush"),
             practice_mode=True,
         ),
         TutorialStep(

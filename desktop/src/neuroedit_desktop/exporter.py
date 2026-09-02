@@ -566,7 +566,13 @@ class ProjectExporter:
         frame = np.zeros((self.settings.height, self.settings.width, 3), dtype=np.uint8)
         slide = self._slide_at_time(time_s)
         if slide is not None and not slide.overlay:
-            return self._paint_qt(frame, time_s, slide=slide, include_annotations=False)
+            return self._paint_qt(
+                frame,
+                time_s,
+                slide=slide,
+                include_annotations=True,
+                include_fade=False,
+            )
 
         clip = self._clip_at_time(time_s)
         if clip is not None:
@@ -575,7 +581,13 @@ class ProjectExporter:
                 raise RuntimeError(f"Could not render source media for clip: {clip.name}")
             frame = self._fit_frame(clip_frame)
 
-        return self._paint_qt(frame, time_s, slide=slide, include_annotations=True)
+        return self._paint_qt(
+            frame,
+            time_s,
+            slide=slide,
+            include_annotations=True,
+            include_fade=True,
+        )
 
     def _frame_for_clip(self, clip: VideoClip, time_s: float) -> np.ndarray | None:
         import cv2  # noqa: PLC0415
@@ -638,6 +650,7 @@ class ProjectExporter:
         *,
         slide: Slide | None,
         include_annotations: bool,
+        include_fade: bool,
     ) -> np.ndarray:
         height, width = frame.shape[:2]
         qimage = QImage(
@@ -654,6 +667,7 @@ class ProjectExporter:
             self._paint_slide(painter, slide, width, height)
         if include_annotations:
             self._paint_annotations(painter, time_s, width, height)
+        if include_fade:
             self._paint_fade(painter, time_s, width, height)
         # Captions paint over slides too (narration continues across them), but
         # under redactions so a redaction can never be covered by caption text.
@@ -780,10 +794,29 @@ class ProjectExporter:
             painter.drawEllipse(self._annotation_rect(ann, w, h))
         elif ann.type == "arrow":
             self._paint_arrow(painter, ann, w, h, color)
+        elif ann.type == "brush":
+            self._paint_brush(painter, ann, w, h)
         elif ann.type == "text":
             self._paint_text_label(painter, ann, w, h, color)
         if ann.type in ("rect", "ellipse", "arrow"):
             self._paint_attached_label(painter, ann, w, h, color)
+
+    def _paint_brush(self, painter: QPainter, ann: Annotation, w: int, h: int) -> None:
+        points = ann.geometry.get("points", [])
+        if not isinstance(points, list) or len(points) < 2:
+            return
+        polyline = QPolygonF([
+            QPointF(float(point[0]) * w, float(point[1]) * h)
+            for point in points
+            if isinstance(point, list) and len(point) >= 2
+        ])
+        if polyline.size() < 2:
+            return
+        pen = painter.pen()
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.drawPolyline(polyline)
 
     def _annotation_rect(self, ann: Annotation, w: int, h: int) -> QRectF:
         return QRectF(

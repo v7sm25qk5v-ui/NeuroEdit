@@ -477,6 +477,16 @@ media even though the exporter skips them. Preflight warnings now use the same
 active-audio criteria as export muxing, while visual media and active narration
 still keep the required privacy prompts. No release is indicated.
 
+Feature review note 2026-09-01: the cutting and annotation workflow now uses a
+Split Clip action with Command-B, persistent per-segment source bounds, and
+delta-based ripple trim/delete behavior across downstream timeline items.
+Timeline totals match playable/exported content instead of marker padding.
+Captured stills accept arrows and other annotations in both preview and export,
+and the previously inert Brush tool now creates freehand highlights. The
+tutorial's Rectangle step now waits for the user's click, and a dedicated step
+teaches the freehand Brush workflow. Focused and full automated verification
+plus current-run visual QA passed; no release is indicated.
+
 This keeps the project on a safe optimization loop: measure first, keep the codebase
 cheap to change and cheap to run, and only then restart larger feature bets
 (Windows packaging hardening, then the parked Stryker/DICOM work).

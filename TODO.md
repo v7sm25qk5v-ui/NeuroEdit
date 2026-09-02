@@ -19,6 +19,15 @@ The primary open code-health/runtime work lives in **P4.5** (modularize the
 audit cold-start imports). The items here are smaller, fresh findings surfaced
 by the optimization automation; they are not duplicated into P4.5.
 
+- [x] **iMovie-style split/trim and still-annotation correctness.** Fixed
+  2026-09-01: Split Clip now has Command-B plus canvas-scoped playback/frame
+  shortcuts; split segments retain hard source bounds; trim/delete ripple later
+  timeline content and immediately update total time; markers no longer extend
+  playable duration; captured stills accept and render annotations in preview
+  and export; the exposed Brush tool now creates real freehand highlights; and
+  the tutorial no longer preselects Rectangle before asking the user to click
+  it and now includes Brush practice.
+
 - [x] **Project, export, SAM, and release-integrity review fixes.** Fixed
   2026-07-11: project switches now confirm unsaved work and reseed undo history;
   Save As stages the new project and migrates app-managed assets; media/content

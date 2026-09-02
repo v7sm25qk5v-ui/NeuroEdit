@@ -10,6 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtCore import QMimeData, QSettings, QUrl
+from PySide6.QtGui import QKeySequence
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtWidgets import QApplication
 
@@ -20,6 +21,7 @@ from neuroedit_desktop.ui import styles as ui_styles
 from neuroedit_desktop.ui import main_window as main_window_module
 from neuroedit_desktop.ui.labels_panel import LabelsPanel
 from neuroedit_desktop.ui.main_window import MainWindow
+from neuroedit_desktop.ui.tutorial import TutorialOverlay, build_default_steps
 
 
 @pytest.fixture(scope="module")
@@ -76,6 +78,126 @@ def test_construct_and_switch_all_panels(window, app):
         window._set_panel(panel)
         app.processEvents()
         assert window.project.active_panel == panel
+
+
+def test_imovie_style_editing_shortcuts_are_wired(window, monkeypatch):
+    calls: list[object] = []
+    monkeypatch.setattr(window, "_toggle_play", lambda: calls.append("play"))
+    monkeypatch.setattr(window, "_step_frame", lambda direction: calls.append(direction))
+
+    portable = QKeySequence.SequenceFormat.PortableText
+    assert window.split_clip_action.shortcut().toString(portable) == "Ctrl+B"
+    assert {shortcut.key().toString(portable)
+            for shortcut in window.editor_shortcuts["play_pause"]} == {"Space"}
+    assert {shortcut.key().toString(portable)
+            for shortcut in window.editor_shortcuts["previous_frame"]} == {"Left"}
+    assert {shortcut.key().toString(portable)
+            for shortcut in window.editor_shortcuts["next_frame"]} == {"Right"}
+    assert {
+        tool: shortcut.key().toString(portable)
+        for tool, shortcut in window.tool_shortcuts.items()
+    } == {
+        "select": "V", "sam": "S", "rect": "R", "ellipse": "E",
+        "arrow": "A", "text": "T", "brush": "B", "redact": "X",
+    }
+
+    window.editor_shortcuts["play_pause"][0].activated.emit()
+    window.editor_shortcuts["previous_frame"][0].activated.emit()
+    window.editor_shortcuts["next_frame"][0].activated.emit()
+
+    assert calls == ["play", -1, 1]
+
+
+def test_tutorial_rectangle_step_waits_for_the_user_click(window):
+    window.project.active_tool = "select"
+    step = next(
+        step for step in build_default_steps(window)
+        if step.title == "Choose the Rectangle Tool"
+    )
+
+    step.on_enter()
+
+    assert window.project.active_tool == "select"
+    step.target_resolver().click()
+    assert window.project.active_tool == "rect"
+
+
+def test_tutorial_includes_freehand_brush_practice(window):
+    step = next(
+        step for step in build_default_steps(window)
+        if step.title == "Add a Freehand Highlight"
+    )
+
+    step.on_enter()
+
+    assert window.project.active_tool == "brush"
+    assert step.target_resolver() is window.video_view
+    assert "click and drag" in step.body.lower()
+
+
+def test_tutorial_next_button_path_reaches_completion(window, app):
+    overlay = TutorialOverlay(window, build_default_steps(window))
+    finished: list[bool] = []
+    overlay.finished.connect(lambda: finished.append(True))
+
+    for _ in overlay.steps:
+        overlay.advance()
+        app.processEvents()
+
+    assert finished == [True]
+    assert overlay.isHidden()
+
+
+def test_split_clip_action_keeps_total_duration(window):
+    window.project = ProjectState(current_time=4.0)
+    window.project.clips.append(
+        VideoClip(
+            id="clip", path="/tmp/source.mp4", name="Source", duration=8.0,
+            start_time=0.0, trim_start=0.0, trim_end=8.0,
+        )
+    )
+    window.timeline.set_project(window.project)
+
+    window.split_clip_action.trigger()
+
+    assert len(window.project.clips) == 2
+    assert window.project.duration == pytest.approx(8.0)
+
+
+def test_take_still_split_keeps_reserved_gap_and_source_bounds(window):
+    window.project = ProjectState(current_time=4.0)
+    window.project.clips.append(
+        VideoClip(
+            id="clip", path="/tmp/source.mp4", name="Source", duration=8.0,
+            start_time=0.0, trim_start=0.0, trim_end=8.0,
+        )
+    )
+
+    window._insert_timeline_gap(4.0, 5.0)
+
+    left, right = window.project.clips
+    assert left.start_time == pytest.approx(0.0)
+    assert left.trim_end == pytest.approx(4.0)
+    assert left.source_out_limit == pytest.approx(4.0)
+    assert right.start_time == pytest.approx(9.0)
+    assert right.trim_start == pytest.approx(4.0)
+    assert right.source_in_limit == pytest.approx(4.0)
+
+
+def test_project_dirty_clamps_playhead_to_new_total(window, monkeypatch):
+    window.project = ProjectState(current_time=9.0)
+    window.project.clips.append(
+        VideoClip(
+            id="clip", path="/tmp/source.mp4", name="Source", duration=10.0,
+            start_time=0.0, trim_start=0.0, trim_end=5.0,
+        )
+    )
+    window.timeline.set_project(window.project)
+    monkeypatch.setattr(window, "_sync_player_to_timeline", lambda *, play: None)
+
+    window._mark_project_dirty()
+
+    assert window.project.current_time == pytest.approx(5.0)
 
 
 def test_labels_panel_is_reexported_from_main_window():

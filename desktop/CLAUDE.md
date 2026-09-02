@@ -92,7 +92,7 @@ python -c "import py_compile; py_compile.compile('src/neuroedit_desktop/<file>.p
 hf auth login
 ```
 
-The suite under `tests/` collects **170 tests** (`python -m pytest tests/ -q`).
+The suite under `tests/` collects **188 tests** (`python -m pytest tests/ -q`).
 Keep it and `ruff check src tests scripts` green before every release tag.
 
 ### venv-location note (current setup is intentional)
@@ -169,10 +169,11 @@ layer paints the slide above it.
 
 ### Module map (what lives where)
 
-- `models.py` — every dataclass + `to_dict`/`from_dict`. Includes
-  `ProjectState.arrange_clips_without_overlap`, an opt-in helper that re-packs
-  the video track sequentially. **It is not auto-called from trim/cut paths**
-  — those intentionally leave gaps.
+- `models.py` — every dataclass + `to_dict`/`from_dict`. Split clips persist
+  source-in/source-out limits so adjacent pieces cannot reuse the same frames.
+  `ProjectState.ripple_after` shifts only timeline items downstream of a
+  trim/delete delta, preserving unrelated intentional gaps; the separate
+  `arrange_clips_without_overlap` helper still resolves overlap/reorder cases.
 - `project_store.py` — JSON load/save with atomic temp-file rename.
 - `sam_backend.py` — model loading, frame extraction (OpenCV), and SAM3 with
   SAM1 (`facebook/sam-vit-base`) fallback. Uses `inspect.signature` to filter
@@ -218,9 +219,10 @@ layer paints the slide above it.
   scrollable timeline with trim handles, fade controls, cut), plus
   `SlideEditorPanel`, `SlidePreview`, `TipsPanel`, `AudioPanel`. Cut splits a
   clip into two pieces sharing the same source path.
-- `ui/tutorial.py` — `TutorialOverlay` coach-marks. Steps are
-  `(title, body, target_resolver)` triples; resolver returns a widget at
-  display time so dynamically-built widgets work.
+- `ui/tutorial.py` — `TutorialOverlay` coach-marks. Steps resolve target
+  widgets at display time and can prepare the next hands-on action with
+  `on_enter`; an action-selection step must not preselect the same control it
+  asks the user to click.
 - `ui/styles.py` — color tokens + global QSS.
 
 ### Tool routing in `VideoGraphicsView`

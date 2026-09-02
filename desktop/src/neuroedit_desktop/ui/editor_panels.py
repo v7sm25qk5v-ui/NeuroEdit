@@ -231,6 +231,7 @@ class MediaExplorerPanel(QWidget):
 class TimelineCanvas(QWidget):
     seek_requested = Signal(float)
     project_changed = Signal()
+    edit_preview_changed = Signal()
     item_activated = Signal(str, str)  # (kind, item_id)
     selection_changed = Signal(bool)   # True when a timeline item is selected
 
@@ -257,6 +258,7 @@ class TimelineCanvas(QWidget):
         super().__init__(parent)
         self.project = project
         self._drag: tuple[str, str, float, float] | None = None
+        self._trim_drag_origin: tuple[str, float, float] | None = None
         self._slide_lanes_key: tuple | None = None
         self._slide_lanes_value: dict[str, int] = {}
         # Widget-level selection only — never serialized or snapshotted.
@@ -646,6 +648,10 @@ class TimelineCanvas(QWidget):
             self._set_selection(("clip" if kind.startswith("clip") else kind, item_id))
             origin_start = self._item_start_time(kind, item_id)
             self._drag = (kind, item_id, offset, origin_start)
+            if kind == "clip-trim-start":
+                clip = next((c for c in self.project.clips if c.id == item_id), None)
+                if clip is not None:
+                    self._trim_drag_origin = (clip.id, clip.start_time, clip.trim_start)
             if kind.startswith("clip"):
                 self.project.active_clip_id = item_id
                 self.project_changed.emit()
@@ -729,6 +735,7 @@ class TimelineCanvas(QWidget):
                 insert_direction=insert_direction,
             )
         self.project.duration = project_end_time(self.project)
+        self.edit_preview_changed.emit()
         self.refresh_geometry()
         self.update()
         self._update_trash_arm(event.globalPosition().toPoint())
@@ -751,6 +758,7 @@ class TimelineCanvas(QWidget):
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         drag = self._drag
         self._drag = None
+        self._trim_drag_origin = None
         self._snap_indicator_time = None
         self.setCursor(Qt.CursorShape.ArrowCursor)
         dropped_on_trash = drag is not None and self._over_trash
@@ -784,7 +792,13 @@ class TimelineCanvas(QWidget):
             return
         kind, item_id = self.selected_item
         if kind == "clip":
+            removed = next((c for c in self.project.clips if c.id == item_id), None)
             self.project.clips = [c for c in self.project.clips if c.id != item_id]
+            if removed is not None:
+                self.project.ripple_after(
+                    removed.start_time + removed.display_duration,
+                    -removed.display_duration,
+                )
             if self.project.active_clip_id == item_id:
                 self.project.active_clip_id = (
                     self.project.clips[0].id if self.project.clips else None
@@ -994,24 +1008,43 @@ class TimelineCanvas(QWidget):
         return 0.0
 
     def _apply_trim_start(self, clip, time_at: float) -> None:
-        # Move the clip's left edge to `time_at` while keeping its right edge fixed.
         zoom_min_dur = 0.05
-        old_right = clip.start_time + clip.display_duration
-        time_at = max(0.0, min(time_at, old_right - zoom_min_dur))
-        delta = time_at - clip.start_time  # >0 trims more from start
-        new_trim_start = clip.trim_start + delta
-        new_trim_start = max(0.0, min(new_trim_start, clip.trim_end - zoom_min_dur))
+        old_duration = clip.display_duration
+        origin = self._trim_drag_origin
+        if origin is not None and origin[0] == clip.id:
+            timeline_start, trim_start = origin[1], origin[2]
+        else:
+            timeline_start, trim_start = clip.start_time, clip.trim_start
+        max_start = clip.trim_end - zoom_min_dur
+        source_delta = max(0.0, time_at) - timeline_start
+        new_trim_start = trim_start + source_delta
+        new_trim_start = max(
+            clip.effective_source_in_limit,
+            min(new_trim_start, max_start),
+        )
         clip.trim_start = new_trim_start
-        clip.start_time = time_at
+        clip.start_time = timeline_start
+        duration_delta = clip.display_duration - old_duration
+        if duration_delta < 0:
+            anchor = timeline_start + (new_trim_start - trim_start)
+        else:
+            anchor = timeline_start
+        self.project.ripple_after(anchor, duration_delta, excluded_clip_id=clip.id)
 
     def _apply_trim_end(self, clip, time_at: float) -> None:
         zoom_min_dur = 0.05
+        old_duration = clip.display_duration
+        old_end = clip.start_time + old_duration
         time_at = max(clip.start_time + zoom_min_dur, time_at)
         new_duration = time_at - clip.start_time
         new_trim_end = clip.trim_start + new_duration
-        if clip.duration > 0:
-            new_trim_end = min(clip.duration, new_trim_end)
+        new_trim_end = min(clip.effective_source_out_limit, new_trim_end)
         clip.trim_end = max(clip.trim_start + zoom_min_dur, new_trim_end)
+        self.project.ripple_after(
+            old_end,
+            clip.display_duration - old_duration,
+            excluded_clip_id=clip.id,
+        )
 
     def _hit_block(self, x: float, y: float) -> tuple[str, str, float] | None:
         zoom = max(1.0, self.project.zoom)
@@ -1115,7 +1148,8 @@ class RichTimelineWidget(QWidget):
         )
         self._pre_fit_state: tuple[float, int] | None = None
         self.marker_btn = QPushButton("Mark")
-        self.cut_btn = QPushButton("Cut")
+        self.cut_btn = QPushButton("Split Clip")
+        self.cut_btn.setToolTip("Split the clip at the playhead (Command-B on macOS).")
         self.marker_btn.setProperty("variant", "amber")
         self.cut_btn.setProperty("variant", "cyan")
 
@@ -1200,6 +1234,7 @@ class RichTimelineWidget(QWidget):
         self.canvas = TimelineCanvas(project)
         self.canvas.seek_requested.connect(self.seek_requested)
         self.canvas.project_changed.connect(self.project_changed)
+        self.canvas.edit_preview_changed.connect(self._refresh_edit_preview)
         self.canvas.item_activated.connect(self.item_activated)
 
         self.scroll = QScrollArea()
@@ -1284,6 +1319,13 @@ class RichTimelineWidget(QWidget):
             self.fade_color_combo.setCurrentIndex(max(0, idx))
         self.fade_color_combo.blockSignals(False)
 
+    def _refresh_edit_preview(self) -> None:
+        self.project.duration = project_end_time(self.project)
+        self.project.current_time = min(self.project.current_time, self.project.duration)
+        self.time_label.setText(
+            f"{fmt_time(self.project.current_time)} / {fmt_time(self.project.duration)}"
+        )
+
     def _timeline_scroll_height(self) -> int:
         return min(self.canvas.minimumHeight() + 20, 300)
 
@@ -1363,6 +1405,7 @@ class RichTimelineWidget(QWidget):
 
         cut_offset = playhead - target.start_time  # seconds into the timeline-visible portion
         original_trim_end = target.trim_end
+        original_source_out_limit = target.source_out_limit
         split_trim = target.trim_start + cut_offset
 
         # Need at least a tiny sliver on each side for a meaningful split.
@@ -1374,6 +1417,7 @@ class RichTimelineWidget(QWidget):
         # Trim the first piece. Its fade-out moves to the new right piece, since
         # the cut point is no longer the end of the source material.
         target.trim_end = split_trim
+        target.source_out_limit = split_trim
         right_fade_out = target.fade_out
         target.fade_out = 0.0
 
@@ -1387,6 +1431,8 @@ class RichTimelineWidget(QWidget):
             start_time=playhead,
             trim_start=split_trim,
             trim_end=original_trim_end,
+            source_in_limit=split_trim,
+            source_out_limit=original_source_out_limit,
             width=target.width,
             height=target.height,
             thumbnail_path=target.thumbnail_path,

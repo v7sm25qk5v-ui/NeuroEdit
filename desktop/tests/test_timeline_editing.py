@@ -13,6 +13,7 @@ from PySide6.QtGui import QKeyEvent, QMouseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from neuroedit_desktop.models import (  # noqa: E402
+    Annotation,
     AudioTrack,
     ProjectState,
     Slide,
@@ -162,6 +163,70 @@ def test_project_end_time_ignores_zero_duration_audio_placeholders() -> None:
     assert project_end_time(project) == pytest.approx(5.0)
 
 
+def test_project_end_time_is_not_extended_by_markers() -> None:
+    project = _project()
+    project.clips.append(_clip(duration=5.0))
+    project.markers.append(_marker(at=5.0))
+
+    assert project_end_time(project) == pytest.approx(5.0)
+
+
+def test_trim_end_ripples_later_clips_and_updates_total() -> None:
+    project = _project()
+    first = _clip("first", start=0.0, duration=5.0)
+    second = _clip("second", start=5.0, duration=5.0)
+    project.clips.extend([first, second])
+    canvas = TimelineCanvas(project)
+
+    canvas._apply_trim_end(first, 3.0)
+
+    assert first.display_duration == pytest.approx(3.0)
+    assert second.start_time == pytest.approx(3.0)
+    assert project_end_time(project) == pytest.approx(8.0)
+
+
+def test_trim_ripple_shifts_downstream_timeline_items() -> None:
+    project = _project()
+    first = _clip("first", start=0.0, duration=5.0)
+    second = _clip("second", start=5.0, duration=5.0)
+    project.clips.extend([first, second])
+    project.slides.append(Slide(id="slide", title="Still", start_time=5.0))
+    project.audio_tracks.append(
+        AudioTrack(id="audio", path="/tmp/a.m4a", name="Audio", start_time=5.0, duration=2.0)
+    )
+    project.markers.append(_marker(at=5.0))
+    project.annotations.append(
+        Annotation(
+            id="ann", frame_time=5.0, ann_duration=1.0, type="arrow",
+            label="Target", color="#fff",
+        )
+    )
+    canvas = TimelineCanvas(project)
+
+    canvas._apply_trim_end(first, 3.0)
+
+    assert second.start_time == pytest.approx(3.0)
+    assert project.slides[0].start_time == pytest.approx(3.0)
+    assert project.audio_tracks[0].start_time == pytest.approx(3.0)
+    assert project.markers[0].time == pytest.approx(3.0)
+    assert project.annotations[0].frame_time == pytest.approx(3.0)
+
+
+def test_trim_start_ripples_clip_to_primary_track_start() -> None:
+    project = _project()
+    first = _clip("first", start=0.0, duration=5.0)
+    second = _clip("second", start=5.0, duration=5.0)
+    project.clips.extend([first, second])
+    canvas = TimelineCanvas(project)
+
+    canvas._apply_trim_start(first, 2.0)
+
+    assert first.trim_start == pytest.approx(2.0)
+    assert first.start_time == pytest.approx(0.0)
+    assert second.start_time == pytest.approx(3.0)
+    assert project_end_time(project) == pytest.approx(8.0)
+
+
 # --- Marker mutations -------------------------------------------------------
 
 
@@ -302,6 +367,23 @@ def test_delete_key_removes_selected_clip() -> None:
     assert project.active_clip_id is None
     assert canvas.selected_item is None
     assert emitted
+
+
+def test_delete_clip_ripples_later_clips_to_start() -> None:
+    project = _project()
+    project.clips.extend([
+        _clip("first", start=0.0, duration=5.0),
+        _clip("second", start=5.0, duration=5.0),
+    ])
+    canvas = TimelineCanvas(project)
+    canvas.selected_item = ("clip", "first")
+
+    canvas._delete_selected_item()
+
+    assert len(project.clips) == 1
+    assert project.clips[0].id == "second"
+    assert project.clips[0].start_time == pytest.approx(0.0)
+    assert project_end_time(project) == pytest.approx(5.0)
 
 
 def test_backspace_removes_selected_marker() -> None:

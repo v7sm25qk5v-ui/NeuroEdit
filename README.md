@@ -4,24 +4,28 @@ NeuroEdit is a standalone desktop video editor for preparing operative video for
 conference, research, and educational use. It runs entirely on your own machine —
 no video, audio, or patient content ever leaves the computer.
 
-Current alpha release: [v0.5.5-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.5-alpha)
+Current alpha release: [v0.5.6-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.6-alpha)
 
-### What's new in v0.5.5-alpha
+### What's new in v0.5.6-alpha
 
-- Project switches now protect unsaved work and keep undo history isolated per
-  case; Save As also carries app-managed masks, stills, and audio with the case.
-- PHI/de-identification attestations and cached project thumbnails are refreshed
-  after content changes, and exported media rejects missing or unsafe sources.
-- VFR source frames are selected by timestamp for export and SAM work; SAM masks
-  use collision-resistant filenames and stale background results are discarded.
+- Split Clip now uses iMovie-familiar Command-B, enforces each segment's source
+  bounds, and ripple-updates downstream clips and the displayed total duration.
+- Arrows and other annotations render on captured stills; the Brush creates
+  editable freehand highlights in preview, saved projects, and exports.
+- The tutorial's Rectangle step now visibly responds to the requested click and
+  includes a hands-on freehand Brush exercise.
+- Muted and zero-duration narration placeholders no longer trigger audio export
+  or privacy-review behavior reserved for active narration.
 
 ## Features
 
-- **Timeline editing** — smooth variable-frame-rate playback, clip trim/cut,
-  drag-to-reorder with snapping, fades,
-  chapter markers, zoom-to-fit, and keyboard delete of selected items.
-- **Annotation tools** — rectangle, ellipse, arrow, text, and brush overlays
-  with per-anatomy label presets and a duplicate-at-playhead shortcut.
+- **Timeline editing** — smooth variable-frame-rate playback, bounded Split
+  Clip with ripple trim/delete, drag-to-reorder with snapping, fades, chapter
+  markers, zoom-to-fit, and iMovie-familiar Command-B, Space, and frame-step
+  shortcuts.
+- **Annotation tools** — rectangle, ellipse, arrow, text, and freehand brush /
+  highlight overlays over video or captured stills, with per-anatomy label
+  presets and a duplicate-at-playhead shortcut.
 - **SAM segmentation (source builds)** — click-to-segment an anatomical structure
   and track it through the video. Runs locally on Apple Silicon (MPS) or CPU;
   weights are downloaded once from Hugging Face.
@@ -45,7 +49,7 @@ Current alpha release: [v0.5.5-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit
 
 ### macOS
 
-Download `NeuroEdit-v0.5.5-alpha-macOS-unsigned.dmg` from the release page.
+Download `NeuroEdit-v0.5.6-alpha-macOS-unsigned.dmg` from the release page.
 Open the DMG, drag `NeuroEdit.app` into Applications, then right-click the app
 and choose `Open` for the first launch.
 
@@ -55,7 +59,7 @@ If macOS blocks launch, open `System Settings` -> `Privacy & Security`, choose
 
 ### Windows
 
-Download `NeuroEdit-v0.5.5-alpha-Windows-Setup.exe` from the release page on a
+Download `NeuroEdit-v0.5.6-alpha-Windows-Setup.exe` from the release page on a
 Windows PC. If SmartScreen warns, choose `More info` -> `Run anyway`, then follow
 the installer.
 

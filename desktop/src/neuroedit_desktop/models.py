@@ -50,6 +50,8 @@ class VideoClip:
     start_time: float = 0.0
     trim_start: float = 0.0
     trim_end: float = 0.0
+    source_in_limit: float | None = None
+    source_out_limit: float | None = None
     width: int = 1920
     height: int = 1080
     thumbnail_path: str | None = None
@@ -61,6 +63,17 @@ class VideoClip:
     @property
     def display_duration(self) -> float:
         return max(0.0, self.trim_end - self.trim_start)
+
+    @property
+    def effective_source_in_limit(self) -> float:
+        return max(0.0, self.source_in_limit or 0.0)
+
+    @property
+    def effective_source_out_limit(self) -> float:
+        limit = self.duration if self.source_out_limit is None else self.source_out_limit
+        if self.duration > 0:
+            limit = min(limit, self.duration)
+        return max(self.effective_source_in_limit, limit)
 
 
 @dataclass
@@ -132,7 +145,9 @@ class Annotation:
     color: str
     visible: bool = True
     opacity: float = 0.6
-    geometry: dict[str, float | list[float] | str] = field(default_factory=dict)
+    geometry: dict[str, float | list[float] | list[list[float]] | str] = field(
+        default_factory=dict
+    )
     mask_path: str | None = None
     mask_frames: list[dict[str, float | str]] = field(default_factory=list)
     score: float | None = None
@@ -257,6 +272,34 @@ class ProjectState:
                 clip.start_time = cursor
             cursor = clip.start_time + clip.display_duration
         self.clips = ordered
+
+    def ripple_after(
+        self,
+        anchor: float,
+        delta: float,
+        *,
+        excluded_clip_id: str | None = None,
+    ) -> None:
+        """Shift timeline items after a primary-track edit without closing
+        unrelated gaps elsewhere in the project."""
+        if abs(delta) < 1e-9:
+            return
+        threshold = anchor - 1e-9
+        for clip in self.clips:
+            if clip.id != excluded_clip_id and clip.start_time >= threshold:
+                clip.start_time = max(0.0, clip.start_time + delta)
+        for slide in self.slides:
+            if slide.start_time >= threshold:
+                slide.start_time = max(0.0, slide.start_time + delta)
+        for track in self.audio_tracks:
+            if track.start_time >= threshold:
+                track.start_time = max(0.0, track.start_time + delta)
+        for marker in self.markers:
+            if marker.time >= threshold:
+                marker.time = max(0.0, marker.time + delta)
+        for annotation in self.annotations:
+            if annotation.frame_time >= threshold:
+                annotation.frame_time = max(0.0, annotation.frame_time + delta)
 
     def _clip_order_with_insert(
         self,

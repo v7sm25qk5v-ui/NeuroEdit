@@ -22,5 +22,4 @@ def project_end_time(project: ProjectState) -> float:
         if track.duration > 0
     )
     ends.extend(slide.start_time + max(0.1, slide.duration) for slide in project.slides)
-    ends.extend(marker.time + 1.0 for marker in project.markers)
     return max(1.0, max(ends, default=1.0))
