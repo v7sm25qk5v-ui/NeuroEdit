@@ -11,6 +11,7 @@ jobs:
   test-and-lint:
     name: Test and lint desktop app
     runs-on: macos-14
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,4 +27,6 @@ jobs:
         working-directory: desktop
         env:
           QT_QPA_PLATFORM: offscreen
+          QT_MEDIA_BACKEND: ffmpeg
+          PYTHONUNBUFFERED: "1"
         run: python -m pytest tests/ -q

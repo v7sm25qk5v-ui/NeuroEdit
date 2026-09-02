@@ -1,10 +1,10 @@
 # NeuroEdit — Session Handoff
 
-## 2026-09-02 — v0.5.8-alpha release
+## 2026-09-02 — v0.5.9-alpha release
 
 - Released the iMovie-style split/ripple workflow, captured-still annotation
   corrections, freehand Brush/highlight implementation, tutorial completion
-  fix, and inactive-audio consistency fixes as `v0.5.8-alpha`.
+  fix, and inactive-audio consistency fixes as `v0.5.9-alpha`.
 - Root download links, Python/package version, macOS bundle fallback, and Windows
   installer version are aligned to the tag. The tagged workflow runs lint and
   the full test suite before publishing unsigned macOS and Windows installers.
@@ -12,6 +12,9 @@
   release gates use the established lint rule set; Ruff 0.16.5 rejected 140
   pre-existing formatting/suppression diagnostics and prevented v0.5.6-alpha
   from reaching the packaging jobs.
+- CI now selects the Qt FFmpeg media backend and bounds the macOS quality job
+  to 15 minutes, preventing a native-backend shutdown hang from blocking a
+  release indefinitely.
 - Release gate: `ruff check src tests scripts`; full suite (`188 passed`);
   `python -m compileall -q src`; `git diff --check`.
 
@@ -44,7 +47,7 @@
 - Verification: focused feature suites and full repository suite (`188 passed`),
   full `ruff check src tests scripts`, `git diff --check`, and current-run visual
   QA of Split Clip, ripple trim, arrow, brush, and the corrected tutorial step.
-  This feature/correctness pass is included in `v0.5.8-alpha`.
+  This feature/correctness pass is included in `v0.5.9-alpha`.
 
 ## 2026-09-01 — Inactive-audio privacy-preflight fix
 

@@ -6,7 +6,7 @@
 
 #define MyAppName "NeuroEdit"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.5.8-alpha"
+  #define MyAppVersion "0.5.9-alpha"
 #endif
 #define MyAppPublisher "NeuroEdit"
 #define MyAppExeName "NeuroEdit.exe"
