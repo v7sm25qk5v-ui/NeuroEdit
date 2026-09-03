@@ -84,6 +84,7 @@ def project_has_active_audio_tracks(project: ProjectState) -> bool:
 class MediaExplorerPanel(QWidget):
     import_videos_requested = Signal()
     import_images_requested = Signal()
+    link_video_folder_requested = Signal()
     file_import_requested = Signal(str)
     clip_selected = Signal(str)
 
@@ -100,20 +101,33 @@ class MediaExplorerPanel(QWidget):
 
         title = QLabel("Media Explorer")
         title.setProperty("role", "title")
-        hint = QLabel("Drag files into the app, double-click files to import, or clips to jump to them.")
+        hint = QLabel(
+            "Video files stay in their current folder. Add files, link a folder, "
+            "drag them here, or double-click browser files; double-click timeline "
+            "clips to jump to them."
+        )
         hint.setProperty("role", "muted")
         hint.setWordWrap(True)
 
-        import_video = QPushButton("Import Videos")
+        import_video = QPushButton("Add Video Files…")
         import_video.setProperty("variant", "primary")
+        import_video.setToolTip("Add videos by reference; the original files are not copied.")
+        link_video_folder = QPushButton("Link Video Folder…")
+        link_video_folder.setToolTip(
+            "Add videos from a folder by reference; the original files stay there."
+        )
         import_image = QPushButton("Import Images")
         import_image.setProperty("variant", "cyan")
         import_video.clicked.connect(lambda _checked=False: self.import_videos_requested.emit())
+        link_video_folder.clicked.connect(
+            lambda _checked=False: self.link_video_folder_requested.emit()
+        )
         import_image.clicked.connect(lambda _checked=False: self.import_images_requested.emit())
 
         import_row = QVBoxLayout()
         import_row.setSpacing(6)
         import_row.addWidget(import_video)
+        import_row.addWidget(link_video_folder)
         import_row.addWidget(import_image)
 
         self.clip_list = QListWidget()
@@ -212,8 +226,11 @@ class MediaExplorerPanel(QWidget):
         if not path.exists():
             path = Path.home()
         self._root_path = path
-        self.file_tree.setRootIndex(self.file_model.index(str(path)))
+        self.file_tree.setRootIndex(self.file_model.setRootPath(str(path)))
         self.path_label.setText(str(path))
+
+    def set_root_path(self, path: Path) -> None:
+        self._set_root(path)
 
     def _go_up(self) -> None:
         root = getattr(self, "_root_path", Path.home())

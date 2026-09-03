@@ -7,8 +7,9 @@ UI thread so the app stays responsive while editing operative video.
 - Native shell: PySide6
 - Video playback: Qt Multimedia rendering with a monotonic timeline clock for
   smooth constant- and variable-frame-rate media
-- Media import: file dialogs, Media Explorer double-click, or drag-and-drop from
-  Finder/File Explorer
+- Media linking: individual-file dialogs, an external-drive folder picker,
+  Media Explorer double-click, or Finder/File Explorer drag-and-drop. Video
+  sources stay in place and projects store references instead of copying them.
 - Slides: full-frame slides pause video; transparent overlay slides remain
   composited above continuously playing video
 - Project persistence: project-folder JSON plus external mask/audio/video assets

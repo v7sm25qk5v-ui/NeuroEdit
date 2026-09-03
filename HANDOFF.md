@@ -1,5 +1,25 @@
 # NeuroEdit — Session Handoff
 
+## 2026-09-02 — External-drive video folder linking
+
+- Added **Link Video Folder (Keep Files in Place)…** to File and Media Explorer.
+  It adds supported videos directly from the selected folder by absolute
+  reference and roots the Media Explorer there, so footage on an SSD, flash
+  drive, or separate disk is not copied into NeuroEdit project storage.
+- Renamed the individual-video entry point to **Add Video Files (Keep in
+  Place)…** and added matching in-panel guidance/tooltips so the existing
+  reference-in-place behavior is explicit.
+- Folder linking is deliberately non-recursive: it imports supported videos
+  directly inside the chosen folder without crawling nested folders or an
+  entire drive. Existing missing-media validation continues to warn when a
+  referenced drive is unavailable after reopening a project.
+- Added a headless regression proving supported top-level videos retain their
+  external paths across save/reopen, nested/unsupported files are skipped, and
+  no video files are copied beside `project.json`.
+- Verification: focused headless suite (`34 passed`); `ruff check src tests
+  scripts`; full desktop suite (`196 passed`); `python -m compileall -q src`;
+  and `git diff --check`.
+
 ## 2026-09-02 — Captured-still aspect-ratio fix
 
 - Fixed image-slide rendering in both the canvas preview and exported video.

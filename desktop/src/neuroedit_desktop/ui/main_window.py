@@ -265,8 +265,11 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self.save_action.setShortcut("Ctrl+S")
         self.save_as_action = QAction("Save Project As…", self)
         self.save_as_action.setShortcut("Ctrl+Shift+S")
-        self.import_video_action = QAction("Import Video…", self)
+        self.import_video_action = QAction("Add Video Files (Keep in Place)…", self)
         self.import_video_action.setShortcut("Ctrl+I")
+        self.link_video_folder_action = QAction(
+            "Link Video Folder (Keep Files in Place)…", self
+        )
         self.import_image_action = QAction("Import Image…", self)
         self.import_image_action.setShortcut("Ctrl+Shift+I")
 
@@ -351,6 +354,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self.save_action.triggered.connect(self._save_project)
         self.save_as_action.triggered.connect(self._save_project_as)
         self.import_video_action.triggered.connect(self._import_video)
+        self.link_video_folder_action.triggered.connect(self._link_video_folder)
         self.import_image_action.triggered.connect(self._import_image)
         self.undo_action.triggered.connect(self.undo)
         self.redo_action.triggered.connect(self.redo)
@@ -369,6 +373,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         file_menu.addAction(self.save_as_action)
         file_menu.addSeparator()
         file_menu.addAction(self.import_video_action)
+        file_menu.addAction(self.link_video_folder_action)
         file_menu.addAction(self.import_image_action)
         file_menu.addSeparator()
         file_menu.addAction(self.export_captions_action)
@@ -823,6 +828,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
 
         self.media_panel = MediaExplorerPanel(self.project)
         self.media_panel.import_videos_requested.connect(self._import_video)
+        self.media_panel.link_video_folder_requested.connect(self._link_video_folder)
         self.media_panel.import_images_requested.connect(self._import_image)
         self.media_panel.file_import_requested.connect(self._import_media_file)
         self.media_panel.clip_selected.connect(self._select_media_clip)
@@ -1551,13 +1557,52 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
 
     def _import_video(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Import Video",
+            self, "Add Video Files (Files Stay in Place)",
             str(Path.home() / "Movies"),
             "Video Files (*.mp4 *.mov *.m4v *.avi *.webm);;All Files (*)",
         )
         if not paths:
             return
         self._import_media_files([Path(path) for path in paths])
+
+    def _link_video_folder(self) -> None:
+        start = getattr(self.media_panel, "_root_path", Path.home() / "Movies")
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Link Video Folder (Files Stay in Place)",
+            str(start),
+        )
+        if not folder:
+            return
+        folder_path = Path(folder)
+        self.media_panel.set_root_path(folder_path)
+        try:
+            paths = sorted(
+                (
+                    path
+                    for path in folder_path.iterdir()
+                    if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS
+                ),
+                key=lambda path: path.name.casefold(),
+            )
+        except OSError as exc:
+            QMessageBox.warning(
+                self,
+                "Link Video Folder",
+                f"Could not read the selected folder:\n{exc}",
+            )
+            return
+        if not paths:
+            QMessageBox.information(
+                self,
+                "Link Video Folder",
+                "No supported video files were found directly in that folder.",
+            )
+            return
+        self._import_media_files(paths)
+        self.statusBar().showMessage(
+            f"Linked {len(paths)} video(s) in place from {folder_path}", 6000
+        )
 
     def _import_image(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(

@@ -42,8 +42,10 @@ Current alpha release: [v0.5.11-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdi
 - **Export** — H.264 MP4 with resolution presets (a recommended preset is
   preselected from your source resolution and intended use), advanced CRF/fps/
   bitrate controls, export history, and a written export report next to each MP4.
-- **Media import and project library** — Finder/File Explorer drag-and-drop,
-  recent projects with thumbnails, durations, missing-media warnings, and search/sort.
+- **Media linking and project library** — add individual files or link a video
+  folder on an external drive while keeping the source files in place. Finder/
+  File Explorer drag-and-drop, recent-project thumbnails, durations,
+  missing-media warnings, and search/sort are also supported.
 - **Appearance** — Light, Dark, or System theme, chosen on first launch and
   switchable any time from View → Appearance.
 

@@ -315,6 +315,42 @@ def test_import_video_delegates_to_batch_import(window, tmp_path, monkeypatch):
     assert imported == [paths]
 
 
+def test_link_video_folder_keeps_external_paths_across_save(
+    window, tmp_path, monkeypatch
+):
+    media_folder = tmp_path / "External SSD" / "Case Videos"
+    media_folder.mkdir(parents=True)
+    first = media_folder / "A recording.mov"
+    second = media_folder / "b recording.mp4"
+    ignored_image = media_folder / "still.jpg"
+    nested = media_folder / "Archive" / "nested.mov"
+    nested.parent.mkdir()
+    for path in (first, second, ignored_image, nested):
+        path.touch()
+    monkeypatch.setattr(
+        main_window_module.QFileDialog,
+        "getExistingDirectory",
+        lambda *_args, **_kwargs: str(media_folder),
+    )
+    monkeypatch.setattr(
+        window,
+        "_add_video_clip",
+        lambda path: window.project.add_clip(
+            path, duration=1.0, width=1920, height=1080
+        ),
+    )
+    monkeypatch.setattr(window, "_load_active_clip", lambda: None)
+
+    window._link_video_folder()
+    window.store.save(window.project)
+    _store, reopened = ProjectStore.open(window.store.project_path)
+
+    assert [Path(clip.path) for clip in reopened.clips] == [first, second]
+    assert window.media_panel.path_label.text() == str(media_folder)
+    assert not list(window.store.project_path.parent.glob("*.mov"))
+    assert not list(window.store.project_path.parent.glob("*.mp4"))
+
+
 def test_import_image_delegates_to_batch_import(window, tmp_path, monkeypatch):
     paths = [tmp_path / "first.png", tmp_path / "second.jpg"]
     imported: list[list[Path]] = []

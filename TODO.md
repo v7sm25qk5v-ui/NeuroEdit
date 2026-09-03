@@ -23,6 +23,13 @@ _(automation-maintained — new findings appended below, checked off when implem
   Fixed 2026-09-02: image slides now preserve their source aspect ratio in both
   preview and export, with the slide background filling any letterbox or
   pillarbox area.
+- [x] **External-drive video folders were not an explicit import workflow.**
+  Fixed 2026-09-02: File and Media Explorer now expose **Link Video Folder
+  (Keep Files in Place)**. NeuroEdit adds supported videos directly from the
+  selected folder by reference, roots the file browser there, and keeps those
+  external paths through project save/reopen without copying the videos into
+  project storage. Folder linking intentionally scans only the selected
+  folder, not nested directories or an entire drive tree.
 
 The primary open code-health/runtime work lives in **P4.5** (modularize the
 `main_window.py` dialog/MainWindow split, reduce undo-snapshot serialize cost,
