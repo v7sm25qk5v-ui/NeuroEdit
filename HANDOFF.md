@@ -1,5 +1,15 @@
 # NeuroEdit — Session Handoff
 
+## 2026-09-02 — Captured-still aspect-ratio fix
+
+- Fixed image-slide rendering in both the canvas preview and exported video.
+  Still and imported-image sources now fit within the project canvas without
+  distortion; the configured slide background fills resulting letterbox or
+  pillarbox space.
+- Added a portrait-still regression that checks the matching preview and export
+  paths. This correction is committed only after the normal lint, focused, and
+  full test gates pass; no new release tag is created unless requested.
+
 ## 2026-09-02 — v0.5.11-alpha release
 
 - Released the bounded timeline, clickable Labels lane, and untitled captured

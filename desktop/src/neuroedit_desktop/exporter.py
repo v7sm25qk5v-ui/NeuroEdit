@@ -693,7 +693,14 @@ class ProjectExporter:
                 if not image.isNull():
                     self._qt_image_cache[image_path] = image
             if image is not None and not image.isNull():
-                painter.drawImage(QRectF(0, 0, w, h), image)
+                source_w, source_h = image.width(), image.height()
+                scale = min(w / source_w, h / source_h)
+                target_w = source_w * scale
+                target_h = source_h * scale
+                painter.drawImage(
+                    QRectF((w - target_w) / 2, (h - target_h) / 2, target_w, target_h),
+                    image,
+                )
 
         family = slide.font_family or painter.font().family()
         title_rect = QRectF(slide.title_x * w, slide.title_y * h, slide.title_w * w, slide.title_h * h)

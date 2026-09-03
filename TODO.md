@@ -19,6 +19,10 @@ _(automation-maintained — new findings appended below, checked off when implem
   instead of reserving trailing edit space; labels/annotations appear as
   duration-aware blocks in their own clickable timeline lane; and Take Still
   creates an image slide without centered default title text.
+- [x] **Captured stills distorted when their source frame was not the project aspect ratio.**
+  Fixed 2026-09-02: image slides now preserve their source aspect ratio in both
+  preview and export, with the slide background filling any letterbox or
+  pillarbox area.
 
 The primary open code-health/runtime work lives in **P4.5** (modularize the
 `main_window.py` dialog/MainWindow split, reduce undo-snapshot serialize cost,

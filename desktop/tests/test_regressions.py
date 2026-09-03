@@ -190,6 +190,39 @@ def test_full_frame_still_export_paints_visible_annotations(monkeypatch):
     assert fades == []
 
 
+def test_image_slides_preserve_aspect_ratio_in_preview_and_export(app, tmp_path):
+    source = tmp_path / "portrait-still.png"
+    image = QImage(100, 200, QImage.Format.Format_RGB32)
+    image.fill(Qt.GlobalColor.red)
+    assert image.save(str(source))
+
+    slide = Slide(id="still", title="", image_path=str(source), background="#000000")
+
+    preview = QImage(320, 180, QImage.Format.Format_RGB32)
+    preview.fill(Qt.GlobalColor.black)
+    preview_painter = QPainter(preview)
+    item = AnnotationGraphicsItem(ProjectState(), QGraphicsVideoItem())
+    item._paint_slide(preview_painter, slide, 320, 180)
+    preview_painter.end()
+
+    exporter = ProjectExporter(
+        ProjectState(),
+        ExportSettings(
+            output_path=tmp_path / "export.mp4", width=320, height=180,
+            fps=30, crf=20, label="test",
+        ),
+    )
+    exported = QImage(320, 180, QImage.Format.Format_RGB32)
+    exported.fill(Qt.GlobalColor.black)
+    export_painter = QPainter(exported)
+    exporter._paint_slide(export_painter, slide, 320, 180)
+    export_painter.end()
+
+    for rendered in (preview, exported):
+        assert rendered.pixelColor(160, 90) == Qt.GlobalColor.red
+        assert rendered.pixelColor(0, 90) == Qt.GlobalColor.black
+
+
 def test_arrow_tool_wins_over_slide_text_drag(app, monkeypatch):
     project = ProjectState(current_time=1.0, active_panel="slides", active_tool="arrow")
     project.slides.append(Slide(id="still", title="Still", start_time=0.0, duration=2.0))

@@ -607,7 +607,15 @@ class AnnotationGraphicsItem(QGraphicsObject):
                 if not pix.isNull():
                     self._slide_image_cache[image_path] = pix
             if pix is not None and not pix.isNull():
-                painter.drawPixmap(rect, pix, QRectF(pix.rect()))
+                source_w, source_h = pix.width(), pix.height()
+                scale = min(w / source_w, h / source_h)
+                target_w = source_w * scale
+                target_h = source_h * scale
+                painter.drawPixmap(
+                    QRectF((w - target_w) / 2, (h - target_h) / 2, target_w, target_h),
+                    pix,
+                    QRectF(pix.rect()),
+                )
 
         family = getattr(slide, "font_family", "") or painter.font().family()
         bold = getattr(slide, "bold", True)
