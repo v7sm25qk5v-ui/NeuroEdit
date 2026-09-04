@@ -30,6 +30,11 @@ _(automation-maintained — new findings appended below, checked off when implem
   external paths through project save/reopen without copying the videos into
   project storage. Folder linking intentionally scans only the selected
   folder, not nested directories or an entire drive tree.
+- [x] **Media Explorer import buttons did not match the keep-in-place wording.**
+  Fixed 2026-09-04: the Media Explorer's video file and folder-link buttons now
+  use the same explicit **Keep in Place** wording as the File menu and docs, so
+  external-drive imports consistently communicate that source videos are linked
+  by reference rather than copied.
 
 The primary open code-health/runtime work lives in **P4.5** (modularize the
 `main_window.py` dialog/MainWindow split, reduce undo-snapshot serialize cost,

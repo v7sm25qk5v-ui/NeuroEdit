@@ -109,10 +109,10 @@ class MediaExplorerPanel(QWidget):
         hint.setProperty("role", "muted")
         hint.setWordWrap(True)
 
-        import_video = QPushButton("Add Video Files…")
+        import_video = QPushButton("Add Video Files (Keep in Place)…")
         import_video.setProperty("variant", "primary")
         import_video.setToolTip("Add videos by reference; the original files are not copied.")
-        link_video_folder = QPushButton("Link Video Folder…")
+        link_video_folder = QPushButton("Link Video Folder (Keep Files in Place)…")
         link_video_folder.setToolTip(
             "Add videos from a folder by reference; the original files stay there."
         )

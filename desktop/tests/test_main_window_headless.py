@@ -12,7 +12,7 @@ import pytest
 from PySide6.QtCore import QMimeData, QSettings, QUrl
 from PySide6.QtGui import QKeySequence
 from PySide6.QtMultimedia import QMediaPlayer
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QPushButton
 
 from neuroedit_desktop.models import Annotation, ProjectState, VideoClip, new_id
 from neuroedit_desktop.project_store import ProjectStore
@@ -313,6 +313,16 @@ def test_import_video_delegates_to_batch_import(window, tmp_path, monkeypatch):
     window._import_video()
 
     assert imported == [paths]
+
+
+def test_media_explorer_buttons_advertise_reference_import(window):
+    button_texts = {
+        button.text()
+        for button in window.media_panel.findChildren(QPushButton)
+    }
+
+    assert "Add Video Files (Keep in Place)…" in button_texts
+    assert "Link Video Folder (Keep Files in Place)…" in button_texts
 
 
 def test_link_video_folder_keeps_external_paths_across_save(

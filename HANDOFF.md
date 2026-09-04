@@ -1,5 +1,23 @@
 # NeuroEdit — Session Handoff
 
+## 2026-09-04 — Media Explorer keep-in-place wording
+
+- Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,
+  `desktop/README.md`, `desktop/CLAUDE.md`, and recently updated project
+  markdown. Remaining release, signing/privacy, Windows smoke, Intel Mac, and
+  Stryker/DICOM work is still owner, hardware, or sample-data gated; no release
+  tag is indicated.
+- Used the fallback review path and fixed a UI-copy consistency gap in the
+  newest external-drive workflow: the Media Explorer's video-file and
+  folder-link buttons now use the same explicit **Keep in Place** wording as the
+  File menu and roadmap notes.
+- This is intentionally behavior-preserving. It only keeps the panel's primary
+  import buttons aligned with the reference-in-place workflow already covered by
+  the save/reopen regression.
+- Verification: focused `tests/test_main_window_headless.py` (`35 passed`);
+  `ruff check src tests scripts`; full desktop suite (`197 passed`);
+  `python -m compileall -q src`; and `git diff --check`.
+
 ## 2026-09-02 — External-drive video folder linking
 
 - Added **Link Video Folder (Keep Files in Place)…** to File and Media Explorer.
