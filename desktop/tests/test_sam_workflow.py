@@ -295,3 +295,200 @@ def test_propagation_window_math() -> None:
     assert propagation_window_s(30.0, False, 5.0) == 5.0
     assert propagation_window_s(3.0, False, 5.0) == 3.0  # clamped to clip end
     assert propagation_window_s(0.5, False, 5.0) == 1.0
+
+
+@pytest.fixture
+def workflow(app, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from PySide6.QtWidgets import QWidget
+
+    from neuroedit_desktop.models import VideoClip
+    from neuroedit_desktop.ui import sam_workflow
+    from neuroedit_desktop.ui.main_window import MainWindow
+
+    class Workflow(sam_workflow.SamWorkflowMixin, QWidget):
+        _clip_at_time = MainWindow._clip_at_time
+        _slide_at_time = MainWindow._slide_at_time
+
+        def _find_annotation(self, annotation_id):
+            return next((a for a in self.project.annotations if a.id == annotation_id), None)
+
+    # Exercise real worker construction without running the optional SAM stack.
+    monkeypatch.setattr(sam_workflow.QThread, "start", lambda _self: None)
+    monkeypatch.setattr(sam_workflow.QMessageBox, "information", Mock())
+    window = Workflow()
+    window.project = ProjectState()
+    clip = VideoClip(
+        id="trimmed", name="Trimmed", path="/tmp/trimmed.mp4", duration=20.0,
+        start_time=10.0, trim_start=4.0, trim_end=8.0,
+    )
+    window.project.clips = [clip]
+    window.project.active_clip_id = clip.id
+    window.project.current_time = 12.0
+    window.project.sam_points = [SamPoint(0.5, 0.5)]
+    window.sam_backend = SamBackend()
+    window.sam_panel = Mock()
+    window.sam_panel.track_to_end_check.isChecked.return_value = True
+    window.sam_panel.track_window_spin.value.return_value = 5.0
+    window.statusBar = Mock(return_value=Mock())
+    window.store = SimpleNamespace(project_path=tmp_path / "project.json")
+    window.video_view = Mock()
+    window._mark_dirty = Mock()
+    yield window
+    window.close()
+
+
+def test_segmentation_decodes_source_time_but_keeps_timeline_time(workflow):
+    from neuroedit_desktop.sam_backend import SamSegmentResult
+
+    workflow._run_segmentation()
+    assert workflow._sam_segment_worker.time_s == pytest.approx(6.0)
+    workflow.project.current_time = 13.0
+    workflow._on_segment_finished(SamSegmentResult("/tmp/mask.png", 0.9, "test"), None)
+    assert workflow.project.annotations[0].frame_time == pytest.approx(12.0)
+
+
+def test_propagation_translates_source_samples_and_stops_at_clip_end(workflow):
+    from neuroedit_desktop.sam_backend import SamPropagationResult
+
+    workflow.project.current_time = 13.8
+    workflow._run_propagation()
+    assert workflow._sam_propagation_worker.start_time_s == pytest.approx(7.8)
+    assert workflow._sam_propagation_worker.duration_s == pytest.approx(0.2)
+    result = SamPropagationResult(
+        mask_frames=[
+            {"time": 7.8, "mask_path": "/tmp/seed.png"},
+            {"time": 8.0, "mask_path": "/tmp/outside.png"},
+        ],
+        score=0.9, sample_rate=2.0, backend="test",
+    )
+    workflow._on_propagation_finished(result, None)
+    annotation = workflow.project.annotations[0]
+    assert annotation.frame_time == pytest.approx(13.8)
+    assert annotation.ann_duration == pytest.approx(0.2)
+    assert [frame["time"] for frame in annotation.mask_frames] == pytest.approx([13.8])
+    assert annotation.mask_path_at(13.9) == "/tmp/seed.png"
+
+
+def test_retrack_uses_annotation_clip_and_clamps_window(workflow):
+    from neuroedit_desktop.models import VideoClip
+
+    unrelated = VideoClip(
+        id="other", name="Other", path="/tmp/other.mp4", duration=10.0,
+        start_time=20.0, trim_end=10.0,
+    )
+    workflow.project.clips.append(unrelated)
+    workflow.project.active_clip_id = unrelated.id
+    annotation = _mask_annotation("tracked", type_="tracked-mask")
+    annotation.frame_time = 13.8
+    annotation.ann_duration = 5.0
+    annotation.prompt_points = [{"x": 0.5, "y": 0.5, "type": "positive"}]
+    workflow.project.annotations = [annotation]
+    workflow._retrack_mask(annotation.id)
+    worker = workflow._sam_propagation_worker
+    assert str(worker.video_path) == "/tmp/trimmed.mp4"
+    assert worker.start_time_s == pytest.approx(7.8)
+    assert worker.duration_s == pytest.approx(0.2)
+
+
+def test_propagation_keeps_vfr_seed_frame_visible_at_requested_start(workflow):
+    from neuroedit_desktop.sam_backend import SamPropagationResult
+
+    workflow.project.current_time = 12.123456
+    workflow._run_propagation()
+    seed = str(workflow.store.project_path.parent / "seed.png")
+    # Seeking to 6.123456 can return the frame presented since source time 6.1.
+    result = SamPropagationResult(
+        mask_frames=[{"time": 6.1, "mask_path": seed}],
+        score=0.9, sample_rate=2.0, backend="test",
+    )
+    workflow._on_propagation_finished(result, None)
+    annotation = workflow.project.annotations[0]
+    assert annotation.frame_time == pytest.approx(12.123456)
+    assert annotation.mask_path_at(12.123456) == seed
+
+
+@pytest.mark.parametrize("time_s", [9.0, 14.0])
+def test_sam_cannot_decode_selected_clip_outside_its_timeline_span(workflow, time_s):
+    workflow.project.current_time = time_s
+    workflow._run_segmentation()
+    workflow._run_propagation()
+    assert getattr(workflow, "_sam_segment_worker", None) is None
+    assert getattr(workflow, "_sam_propagation_worker", None) is None
+
+
+@pytest.mark.parametrize("overlay", [False, True])
+def test_sam_seed_requires_visible_underlying_clip(workflow, overlay):
+    from neuroedit_desktop.models import Slide
+
+    workflow.project.slides = [
+        Slide(id="title", title="Title", start_time=10.0, duration=4.0, overlay=overlay)
+    ]
+    workflow._run_segmentation()
+    assert (getattr(workflow, "_sam_segment_worker", None) is not None) is overlay
+    # These jobs normally cannot overlap; isolate the two entry-point checks.
+    workflow._sam_segment_thread = None
+    workflow._run_propagation()
+    assert (getattr(workflow, "_sam_propagation_worker", None) is not None) is overlay
+
+
+def test_sam3_frame_window_preserves_sub_tenth_second_bounds(monkeypatch, tmp_path):
+    cv2 = pytest.importorskip("cv2")
+    np = pytest.importorskip("numpy")
+    from unittest.mock import Mock
+
+    cap = Mock()
+    cap.isOpened.return_value = True
+    cap.get.side_effect = lambda prop: 20.0 if prop == cv2.CAP_PROP_FPS else cap.timestamp * 1000.0
+    frames = iter([0.0, 0.05, 0.1, 0.15])
+
+    def read():
+        cap.timestamp = next(frames)
+        return True, np.zeros((2, 2, 3), dtype=np.uint8)
+
+    cap.read.side_effect = read
+    monkeypatch.setattr(cv2, "VideoCapture", lambda _path: cap)
+    _frames, times, _rate = SamBackend()._load_video_window(tmp_path / "clip.mp4", 0.0, 0.02)
+    assert times == [0.0]
+    cap.release.assert_called_once()
+
+
+def test_sam1_keeps_exact_seed_time_and_sub_tenth_second_bounds(monkeypatch, tmp_path):
+    cv2 = pytest.importorskip("cv2")
+    np = pytest.importorskip("numpy")
+    from unittest.mock import Mock
+
+    backend = SamBackend()
+    cap = Mock()
+    cap.isOpened.return_value = True
+    monkeypatch.setattr(cv2, "VideoCapture", lambda _path: cap)
+    monkeypatch.setattr(backend, "_ensure_sam1_model", lambda: None)
+    monkeypatch.setattr(backend, "_video_duration", lambda _cap: 20.0)
+    frame = np.zeros((8, 8, 3), dtype=np.uint8)
+    monkeypatch.setattr(backend, "_read_frame_from_capture", lambda *_args: frame)
+    monkeypatch.setattr(backend, "_run_sam1_on_frame", lambda *_args: (np.ones((8, 8)), 0.9))
+    monkeypatch.setattr(backend, "_save_mask_rgba", lambda *_args, **_kwargs: None)
+    start = 6.123456
+    result = backend._propagate_video_sam1(
+        tmp_path / "clip.mp4", start, 0.02, [SamPoint(0.5, 0.5)], tmp_path,
+        sample_rate=20.0,
+    )
+    assert [frame["time"] for frame in result.mask_frames] == [start]
+    cap.release.assert_called_once()
+
+
+def test_empty_bounded_propagation_records_failure(workflow):
+    from neuroedit_desktop.sam_backend import SamPropagationResult
+
+    workflow._run_propagation()
+    workflow.project.sam_last_run = {"result": "success"}
+    result = SamPropagationResult(
+        mask_frames=[{"time": 8.0, "mask_path": str(workflow.store.project_path.parent / "outside.png")}],
+        score=0.9, sample_rate=2.0, backend="test",
+    )
+    workflow._on_propagation_finished(result, None)
+    assert workflow.project.annotations == []
+    assert workflow.project.sam_last_run["result"] == "error"
+    assert workflow.project.sam_last_run["frames"] == 0

@@ -50,6 +50,10 @@ SAM features simply no-op until the `[sam]` extra is installed.
 
 ## Quality checks
 
+The [2026-09-05 codebase review](docs/CODEBASE_REVIEW_2026-09-05.md) records
+stability and export-timing fixes, their regression coverage, and remaining
+runtime verification work.
+
 ```bash
 cd desktop
 ruff check src tests scripts

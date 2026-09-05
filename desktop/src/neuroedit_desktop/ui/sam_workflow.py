@@ -223,9 +223,10 @@ class SamWorkflowMixin:
         self.statusBar().showMessage("SAM3 weights deleted", 4000)
 
     def _run_segmentation(self) -> None:
-        clip = self.project.active_clip
-        if not clip:
-            QMessageBox.information(self, "No video", "Import a video before running SAM.")
+        clip = self._clip_at_time(self.project.current_time)
+        slide = self._slide_at_time(self.project.current_time)
+        if not clip or (slide is not None and not slide.overlay):
+            QMessageBox.information(self, "No video", "Move the playhead onto a clip before running SAM.")
             return
         if not self.project.sam_points:
             QMessageBox.information(
@@ -259,7 +260,7 @@ class SamWorkflowMixin:
         self._sam_segment_worker = SamSegmentWorker(
             self.sam_backend,
             Path(clip.path),
-            self.project.current_time,
+            clip.trim_start + self.project.current_time - clip.start_time,
             list(self.project.sam_points),
             mask_dir,
             mask_color=hex_to_rgb(self._pending_mask_color),
@@ -355,9 +356,10 @@ class SamWorkflowMixin:
         ]
 
     def _run_propagation(self) -> None:
-        clip = self.project.active_clip
-        if not clip:
-            QMessageBox.information(self, "No video", "Import a video before running propagation.")
+        clip = self._clip_at_time(self.project.current_time)
+        slide = self._slide_at_time(self.project.current_time)
+        if not clip or (slide is not None and not slide.overlay):
+            QMessageBox.information(self, "No video", "Move the playhead onto a clip before running propagation.")
             return
         if not self.project.sam_points:
             QMessageBox.information(
@@ -369,19 +371,20 @@ class SamWorkflowMixin:
             return
 
         remaining = clip.start_time + clip.display_duration - self.project.current_time
-        duration_s = propagation_window_s(
+        duration_s = min(remaining, propagation_window_s(
             remaining,
             self.sam_panel.track_to_end_check.isChecked(),
             float(self.sam_panel.track_window_spin.value()),
-        )
+        ))
         self._retrack_target_id = None
         self._pending_prompt_points = self._current_prompt_points()
         self._start_propagation(
             Path(clip.path),
-            self.project.current_time,
+            clip.trim_start + self.project.current_time - clip.start_time,
             duration_s,
             list(self.project.sam_points),
             self._next_mask_color(),
+            timeline_start_s=self.project.current_time,
         )
 
     def _retrack_mask(self, annotation_id: str) -> None:
@@ -398,9 +401,9 @@ class SamWorkflowMixin:
                 "Video Propagation instead.",
             )
             return
-        clip = self.project.active_clip
+        clip = self._clip_at_time(ann.frame_time)
         if not clip:
-            QMessageBox.information(self, "No video", "Import a video before re-tracking.")
+            QMessageBox.information(self, "No video", "The mask's start time is no longer on a clip.")
             return
         if getattr(self, "_sam_propagation_thread", None) is not None:
             return
@@ -416,10 +419,12 @@ class SamWorkflowMixin:
         self._pending_prompt_points = list(ann.prompt_points)
         self._start_propagation(
             Path(clip.path),
-            ann.frame_time,
-            max(1.0, ann.ann_duration or 5.0),
+            clip.trim_start + ann.frame_time - clip.start_time,
+            min(clip.start_time + clip.display_duration - ann.frame_time,
+                ann.ann_duration or 5.0),
             points,
             ann.color,
+            timeline_start_s=ann.frame_time,
         )
 
     def _start_propagation(
@@ -429,6 +434,8 @@ class SamWorkflowMixin:
         duration_s: float,
         points: list[SamPoint],
         mask_color_hex: str,
+        *,
+        timeline_start_s: float,
     ) -> None:
         self._pending_mask_color = mask_color_hex
         self._sam_job_context = {
@@ -436,11 +443,14 @@ class SamWorkflowMixin:
             "retrack_id": getattr(self, "_retrack_target_id", None),
             "prompt_points": list(getattr(self, "_pending_prompt_points", [])),
             "mask_color": mask_color_hex,
+            "time_offset_s": timeline_start_s - start_time_s,
+            "start_time_s": timeline_start_s,
+            "end_time_s": timeline_start_s + duration_s,
         }
         self._sam_run_started_iso = datetime.datetime.now().isoformat(timespec="seconds")
         self._sam_run_start_monotonic = time.monotonic()
         self.sam_panel.set_status(
-            f"Tracking {format_time(start_time_s)} → {format_time(start_time_s + duration_s)}…"
+            f"Tracking {format_time(timeline_start_s)} → {format_time(timeline_start_s + duration_s)}…"
         )
         self.sam_panel.set_busy(True)
         self.statusBar().showMessage("SAM: running video propagation…")
@@ -516,18 +526,39 @@ class SamWorkflowMixin:
             self._mark_dirty(history=False)
             return
 
-        first_time = float(result.mask_frames[0]["time"])
-        last_time = float(result.mask_frames[-1]["time"])
+        # Backends operate on source timestamps; persisted masks use timeline time.
+        offset = float(context.get("time_offset_s", 0.0))
+        start_time = float(context.get("start_time_s", "-inf"))
+        end_time = float(context.get("end_time_s", "inf"))
+        mask_frames = []
+        for index, frame in enumerate(result.mask_frames):
+            frame_time = float(frame["time"]) + offset
+            if index == 0:
+                # A VFR seek can return the frame already visible at the seed
+                # time. Keep that mask, but do not extend it before the request.
+                frame_time = max(start_time, frame_time)
+            if start_time <= frame_time < end_time:
+                mask_frames.append({**frame, "time": frame_time})
+        if not mask_frames:
+            self._discard_sam_result(result)
+            message = "No tracked frames fell within the clip window."
+            self.project.sam_last_run = self._sam_run_record("error", 0, result.backend, message)
+            self.sam_panel.set_status(message)
+            self._mark_dirty(history=False)
+            return
+        first_time = float(mask_frames[0]["time"])
+        last_time = float(mask_frames[-1]["time"])
         frame_step = 1.0 / result.sample_rate
         ann_duration = max(frame_step, last_time - first_time + frame_step)
+        ann_duration = min(ann_duration, end_time - first_time)
         target = self._find_annotation(retrack_id) if retrack_id else None
         if target is not None:
             # Re-track: regenerate the existing annotation's frames in place,
             # keeping its id, label, and color.
             target.frame_time = first_time
             target.ann_duration = ann_duration
-            target.mask_path = str(result.mask_frames[0]["mask_path"])
-            target.mask_frames = result.mask_frames
+            target.mask_path = str(mask_frames[0]["mask_path"])
+            target.mask_frames = mask_frames
             target.score = float(result.score)
             target.sample_rate = float(result.sample_rate)
         else:
@@ -541,8 +572,8 @@ class SamWorkflowMixin:
                 visible=True,
                 opacity=0.55,
                 geometry={},
-                mask_path=str(result.mask_frames[0]["mask_path"]),
-                mask_frames=result.mask_frames,
+                mask_path=str(mask_frames[0]["mask_path"]),
+                mask_frames=mask_frames,
                 score=float(result.score),
                 sample_rate=float(result.sample_rate),
                 prompt_points=list(context.get("prompt_points", [])),
@@ -551,15 +582,15 @@ class SamWorkflowMixin:
             self.project.sam_points.clear()
             self.project.active_panel = "labels"
         self.project.sam_last_run = self._sam_run_record(
-            "success", len(result.mask_frames), result.backend, ""
+            "success", len(mask_frames), result.backend, ""
         )
         self.video_view.annotation_item.invalidate_mask_cache()
         self.sam_panel.set_status(
-            f"{result.backend} propagation saved {len(result.mask_frames)} frames "
+            f"{result.backend} propagation saved {len(mask_frames)} frames "
             f"(score {result.score:.2f})"
         )
         self.statusBar().showMessage(
-            f"SAM: {result.backend} propagation saved {len(result.mask_frames)} frames",
+            f"SAM: {result.backend} propagation saved {len(mask_frames)} frames",
             4000,
         )
         self._mark_dirty(review_relevant=True)

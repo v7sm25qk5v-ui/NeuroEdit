@@ -291,15 +291,31 @@ class ProjectState:
         for slide in self.slides:
             if slide.start_time >= threshold:
                 slide.start_time = max(0.0, slide.start_time + delta)
+        audio_shifts = {}
         for track in self.audio_tracks:
+            old_start = track.start_time
             if track.start_time >= threshold:
                 track.start_time = max(0.0, track.start_time + delta)
+            audio_shifts[track.id] = track.start_time - old_start
+        for segment in self.transcript_segments:
+            # Linked captions follow their narration, including an unmoved
+            # track spanning the edit. Independent captions follow the timeline.
+            shift = audio_shifts.get(
+                segment.audio_track_id,
+                delta if segment.start_time >= threshold else 0.0,
+            )
+            new_start = max(0.0, segment.start_time + shift)
+            segment.end_time += new_start - segment.start_time
+            segment.start_time = new_start
         for marker in self.markers:
             if marker.time >= threshold:
                 marker.time = max(0.0, marker.time + delta)
         for annotation in self.annotations:
             if annotation.frame_time >= threshold:
+                old_start = annotation.frame_time
                 annotation.frame_time = max(0.0, annotation.frame_time + delta)
+                for frame in annotation.mask_frames:
+                    frame["time"] = float(frame["time"]) + annotation.frame_time - old_start
 
     def _clip_order_with_insert(
         self,

@@ -182,7 +182,20 @@ class ProjectExporter:
         tmp_dir: Path,
         duration: float,
     ) -> None:
-        segments = self._build_segments(duration)
+        # Every segment must use the same output-frame clock. Rounding each
+        # segment's duration up independently adds a frame at many cuts and
+        # progressively shifts the visuals away from narration timestamps.
+        segments = []
+        for segment in self._build_segments(duration):
+            first = self._frame_number(segment.start)
+            stop = self._frame_number(segment.end)
+            if stop > first:
+                segments.append(TimelineSegment(
+                    first / self.settings.fps,
+                    stop / self.settings.fps,
+                    segment.kind,
+                    segment.clip,
+                ))
         if not segments:
             self._encode_render_segment_with_ffmpeg(
                 TimelineSegment(0.0, duration, "render"),
@@ -224,6 +237,11 @@ class ProjectExporter:
             return
         self.progress(89, "Joining timeline segments...")
         self._concat_video_segments(segment_paths, path, ffmpeg, tmp_dir)
+
+    def _frame_number(self, time_s: float) -> int:
+        # Decimal timeline arithmetic can put an exact frame boundary a tiny
+        # fraction above its integer frame number (e.g. 2.2 * 30).
+        return math.ceil(round(time_s * self.settings.fps, 9))
 
     def _build_segments(self, duration: float) -> list[TimelineSegment]:
         boundaries = self._timeline_boundaries(duration)
@@ -354,9 +372,9 @@ class ProjectExporter:
             "-loglevel",
             "error",
             "-ss",
-            f"{source_start:.3f}",
+            f"{source_start:.9f}",
             "-t",
-            f"{segment.duration:.3f}",
+            f"{segment.duration:.9f}",
             "-i",
             segment.clip.path,
             "-map_metadata",
@@ -412,13 +430,14 @@ class ProjectExporter:
         ]
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
         assert proc.stdin is not None
-        frame_count = max(1, int(math.ceil(segment.duration * self.settings.fps)))
+        first_frame = self._frame_number(segment.start)
+        frame_count = max(1, self._frame_number(segment.end) - first_frame)
         encoder_died = False
         try:
             for index in range(frame_count):
                 if self.cancelled():
                     raise ExportCancelled()
-                time_s = min(segment.end - 0.000001, segment.start + index / self.settings.fps)
+                time_s = min(segment.end - 0.000001, (first_frame + index) / self.settings.fps)
                 frame = np.ascontiguousarray(self._render_frame(time_s), dtype=np.uint8)
                 try:
                     proc.stdin.write(frame.tobytes())
@@ -437,10 +456,22 @@ class ProjectExporter:
                 encoder_died = True
             stderr = proc.stderr.read().decode("utf-8", errors="replace") if proc.stderr else ""
             ret = proc.wait()
-        except ExportCancelled:
-            proc.terminate()
-            proc.wait()
-            raise
+        finally:
+            # A decoder/painter failure must reap ffmpeg too: otherwise the
+            # child remains alive waiting for more raw frames on its open pipe.
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
+            for pipe in (proc.stdin, proc.stderr):
+                if pipe is not None:
+                    try:
+                        pipe.close()
+                    except OSError:
+                        pass
         if ret != 0 or encoder_died:
             raise RuntimeError(f"FFmpeg video export failed: {stderr.strip() or 'unknown error'}")
 

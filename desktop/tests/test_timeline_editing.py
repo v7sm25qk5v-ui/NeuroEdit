@@ -18,6 +18,7 @@ from neuroedit_desktop.models import (  # noqa: E402
     ProjectState,
     Slide,
     TimelineMarker,
+    TranscriptSegment,
     VideoClip,
 )
 from neuroedit_desktop.ui import editor_panels  # noqa: E402
@@ -32,6 +33,40 @@ from neuroedit_desktop.ui.editor_panels import (  # noqa: E402
 @pytest.fixture(scope="module", autouse=True)
 def app() -> QApplication:
     return QApplication.instance() or QApplication([])
+
+
+@pytest.mark.parametrize("delta, expected_start", [(-2.0, 8.0), (2.0, 12.0), (-20.0, 0.0)])
+def test_ripple_keeps_mask_samples_and_captions_with_their_owner(delta, expected_start):
+    project = ProjectState(
+        audio_tracks=[
+            AudioTrack(id="later", path="voice.wav", name="Later", start_time=10, duration=2),
+            AudioTrack(id="early", path="other.wav", name="Earlier", start_time=0, duration=20),
+        ],
+        transcript_segments=[
+            TranscriptSegment("linked", "later", 10, 11, "Linked caption"),
+            TranscriptSegment("unlinked", None, 10, 11, "Independent caption"),
+            TranscriptSegment("unmoved", "early", 10, 11, "Unmoved narration"),
+        ],
+        annotations=[Annotation(
+            id="tracked", frame_time=10, ann_duration=2, type="tracked-mask",
+            label="Tracked", color="#fff", mask_frames=[
+                {"time": 10, "mask_path": "first.png"},
+                {"time": 11, "mask_path": "second.png"},
+            ],
+        )],
+    )
+
+    project.ripple_after(5, delta)
+
+    assert project.audio_tracks[0].start_time == expected_start
+    for segment in project.transcript_segments[:2]:
+        assert segment.start_time == expected_start
+        assert segment.end_time == expected_start + 1
+    assert project.transcript_segments[2].start_time == 10
+    annotation = project.annotations[0]
+    assert annotation.frame_time == expected_start
+    assert annotation.mask_path_at(expected_start + 1) == "second.png"
+    assert [frame["time"] for frame in annotation.mask_frames] == [expected_start, expected_start + 1]
 
 
 def _clip(clip_id: str = "clip-1", start: float = 0.0, duration: float = 10.0) -> VideoClip:

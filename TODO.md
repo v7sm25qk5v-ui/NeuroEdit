@@ -14,6 +14,17 @@ bet and stays parked until sample data and a design pass exist.
 ## Optimization Backlog
 _(automation-maintained — new findings appended below, checked off when implemented)_
 
+- [x] **2026-09-05 multi-agent stability and efficiency review.** Fixed saved-mask
+  cleanup, failed-close autosave recovery, Save As errors/same-file copies,
+  export cancellation and encoder cleanup, fractional-cut export timing,
+  SAM source/timeline mapping, ripple caption/mask synchronization, and the
+  deferred exporter import boundary, and native-preference isolation in tests. See
+  [review evidence and follow-ups](desktop/docs/CODEBASE_REVIEW_2026-09-05.md).
+- [ ] Reproduce stale SAM completion after edits to the same project during
+  inference; define result invalidation or cancellation for that case.
+- [ ] Reproduce paused-preview synchronization after undoing a trim on the same
+  source file before modifying history/player synchronization.
+
 - [x] **Timeline end, label navigation, and captured-still defaults.** Fixed
   2026-09-02: the timeline canvas now ends at the final playable project item
   instead of reserving trailing edit space; labels/annotations appear as

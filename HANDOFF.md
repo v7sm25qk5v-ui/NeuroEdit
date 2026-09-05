@@ -1,5 +1,43 @@
 # NeuroEdit — Session Handoff
 
+## 2026-09-05 — Multi-agent stability and efficiency review
+
+- Three focused sub-agents reviewed persistence/lifecycle, rendering/export,
+  and editing/SAM. The main agent reviewed each patch, added adversarial
+  regressions, completed integration, and verified the combined changes.
+- Fixed saved-autosave mask deletion, failed-close timer recovery, Save As
+  destination/same-file errors, busy-worker export cancellation, leaked FFmpeg
+  children, fractional-cut export drift, SAM source/timeline mapping and clip
+  bounds, ripple caption/mask synchronization, and eager exporter importing.
+- The real 20-cut export fixture now produces the expected 66 frames instead
+  of 80. Mixed fast/render export tests check decoded redaction pixels at the
+  boundary; VFR SAM tests preserve the frame visible at the requested seed time.
+- Verification: baseline `197 passed`; final full suite `228 passed in 69.36s`;
+  `ruff check src tests scripts`; `python -m compileall -q src`; and
+  `git diff --check`. Real FFmpeg and offscreen Qt were exercised. SAM inference
+  was stubbed, and packaged macOS/Windows runtime checks were not performed.
+- The first full run exposed deferred widget cleanup in the new cancellation
+  test. Fixed teardown and verified the cancellation/main-window sequence
+  (`37 passed`) before the successful full run. Added temporary INI settings
+  isolation for tests so future crashes cannot alter native NeuroEdit preferences.
+- **Environment follow-up pending:** the earlier crash interrupted fixture
+  restoration and left the native autosave-location preference pointing at a
+  temporary test folder. Asked the user which folder to restore; an existing
+  saved project is present at `~/Documents/NeuroEdit/Autosave`. Do not infer a
+  different custom location. Project files have not been migrated.
+- [Full findings, evidence, and follow-ups](desktop/docs/CODEBASE_REVIEW_2026-09-05.md).
+  Same-project edits during SAM and paused-preview synchronization after undo
+  remain bounded follow-up investigations. Changes are local; no commit, push,
+  tag, or release. Existing untracked `desktop/qa/` artifacts were preserved.
+
+## 2026-09-05 — v0.5.12-alpha release
+
+- Released the verified stability and export-timing sweep as `v0.5.12-alpha`.
+  Root installer links, package metadata, the in-app version, macOS bundle
+  fallback, and Windows installer fallback now match the tag.
+- The tagged workflow runs the desktop quality gate before building the unsigned
+  macOS DMG/ZIP and Windows installer, then attaches all three to the prerelease.
+
 ## 2026-09-05 — Import chooser keep-in-place wording
 
 - Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,

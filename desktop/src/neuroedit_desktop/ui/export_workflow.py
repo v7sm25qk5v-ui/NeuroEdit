@@ -4,13 +4,13 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QThread, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox, QProgressDialog
 
 from neuroedit_desktop import diagnostics
-from neuroedit_desktop.exporter import ExportSettings
 from neuroedit_desktop.models import ProjectState
 from neuroedit_desktop.ui.dialogs import (
     ExportChecklistDialog,
@@ -24,6 +24,9 @@ from neuroedit_desktop.ui.editor_panels import (
 )
 from neuroedit_desktop.ui.export_worker import ExportWorker
 from neuroedit_desktop.ui.main_window_utils import format_time
+
+if TYPE_CHECKING:
+    from neuroedit_desktop.exporter import ExportSettings
 
 
 def project_export_includes_audio(project: ProjectState, *, keeps_source_audio: bool) -> bool:
@@ -166,7 +169,9 @@ class ExportWorkflowMixin:
         worker.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
         thread.finished.connect(lambda: setattr(self, "_export_thread", None))
-        progress.canceled.connect(worker.cancel)
+        # run() occupies the worker event loop; queueing cancel behind it would
+        # only set the flag after export finishes. cancel() only sets a flag.
+        progress.canceled.connect(worker.cancel, Qt.ConnectionType.DirectConnection)
 
         self._export_progress_dialog = progress
         self._export_thread = thread

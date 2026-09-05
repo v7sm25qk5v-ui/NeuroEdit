@@ -1428,8 +1428,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         old_root = old_store.project_path.parent
         staged_project = copy.deepcopy(self.project)
         staged_project.project_name = name
-        staged_store = ProjectStore.create(project_folder)
         try:
+            staged_store = ProjectStore.create(project_folder)
             self._migrate_managed_assets(staged_project, old_root, project_folder)
             staged_store.save(staged_project)
         except Exception as exc:
@@ -1461,7 +1461,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
                 return path_str
             destination = new_root / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, destination)
+            if not destination.exists() or not source.samefile(destination):
+                shutil.copy2(source, destination)
             return str(destination)
 
         for annotation in project.annotations:
@@ -2419,14 +2420,19 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self.labels_panel.label_edit.selectAll()
 
     def _cleanup_orphan_masks(self) -> None:
-        """Delete mask PNGs no longer referenced by the project or any undo/redo
-        snapshot. Runs only at close so deleting a mask annotation stays undoable
+        """Delete mask PNGs no longer referenced by the saved/live project or any
+        undo/redo snapshot. Runs only at close so deleting a mask annotation stays undoable
         for the whole session."""
         masks_dir = self.store.project_path.parent / "masks"
         history_snapshots = [
             json.loads(snapshot) for snapshot in (*self._undo_stack, *self._redo_stack)
         ]
         snapshots = [self.project.to_dict(), *history_snapshots]
+        if self.store.project_path.exists():
+            # A clean New project can share the prior autosave folder without
+            # replacing its project.json. Keep that saved document recoverable.
+            with self.store.project_path.open("r", encoding="utf-8") as handle:
+                snapshots.append(json.load(handle))
         delete_orphan_masks(masks_dir, referenced_mask_paths(snapshots))
 
     def _shutdown_threads(self) -> bool:
@@ -2469,10 +2475,6 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         return force_terminated
 
     def closeEvent(self, event) -> None:  # noqa: N802
-        for timer_attr in ("autosave_timer", "_sam_heartbeat_timer"):
-            timer = getattr(self, timer_attr, None)
-            if timer is not None:
-                timer.stop()
         # Save BEFORE touching threads, while the heap is known-good — if a worker
         # later has to be force-terminated mid-allocation, the project is already
         # safely on disk. Never close silently after a failed dirty save.
@@ -2485,6 +2487,10 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
                 QMessageBox.critical(self, "Save failed", str(exc))
                 event.ignore()
                 return
+        for timer_attr in ("autosave_timer", "_sam_heartbeat_timer"):
+            timer = getattr(self, timer_attr, None)
+            if timer is not None:
+                timer.stop()
         force_terminated = self._shutdown_threads()
         if force_terminated:
             # A thread was killed at an arbitrary instruction (possibly inside the

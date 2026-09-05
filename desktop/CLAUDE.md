@@ -92,8 +92,10 @@ python -c "import py_compile; py_compile.compile('src/neuroedit_desktop/<file>.p
 hf auth login
 ```
 
-The suite under `tests/` collects **188 tests** (`python -m pytest tests/ -q`).
+The suite under `tests/` collects **228 tests** (`python -m pytest tests/ -q`).
 Keep it and `ruff check src tests scripts` green before every release tag.
+`tests/conftest.py` redirects NeuroEdit's application preferences to a temporary
+INI file; tests must not read or write the user's native QSettings store.
 
 ### venv-location note (current setup is intentional)
 

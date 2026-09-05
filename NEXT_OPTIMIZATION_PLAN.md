@@ -10,6 +10,12 @@ available.
 
 ## Current baseline to protect
 
+- **2026-09-05 review:** fractional-cut exports now share one frame clock
+  (the 20-cut fixture produces 66 frames instead of 80); exporter loading is
+  deferred again. Stability fixes cover cancellation, encoder cleanup, saved
+  masks, Save As, SAM timestamps, and ripple caption/mask synchronization.
+  [Review evidence and bounded follow-ups](desktop/docs/CODEBASE_REVIEW_2026-09-05.md)
+  separate verified fixes from remaining SAM edit-race and paused-undo candidates.
 - The roadmap has shipped the core editing workflow: timeline selection/snapping,
   the mask workflow, PHI review, captions, export history, and advanced export
   settings.

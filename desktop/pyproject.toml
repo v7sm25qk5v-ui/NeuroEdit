@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "neuroedit-desktop"
-version = "0.5.11a0"
+version = "0.5.12a0"
 description = "Native macOS-first NeuroEdit desktop application."
 readme = "README.md"
 requires-python = ">=3.12,<3.14"

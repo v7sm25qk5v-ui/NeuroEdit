@@ -384,12 +384,12 @@ class SamBackend:
             raise RuntimeError(f"Could not open video: {video_path}")
         try:
             video_duration = self._video_duration(cap)
-            end_time = min(start_time_s + max(0.1, duration_s), video_duration or start_time_s + duration_s)
+            end_time = min(start_time_s + max(0.0, duration_s), video_duration or start_time_s + duration_s)
             step = 1.0 / max(0.5, sample_rate)
             times = []
             t = start_time_s
             while t <= end_time + 1e-6:
-                times.append(round(t, 4))
+                times.append(t)
                 t += step
             first_frame = self._read_frame_from_capture(cap, times[0])
             if first_frame is None:
@@ -448,7 +448,7 @@ class SamBackend:
         try:
             fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
             max_frames = max(1, int(os.environ.get(self.SAM3_MAX_FRAMES_ENV, "240")))
-            end_time_s = start_time_s + max(0.1, duration_s)
+            end_time_s = start_time_s + max(0.0, duration_s)
             target_interval = max(1.0 / fps, (end_time_s - start_time_s) / max_frames)
             # Preserve actual presentation timestamps for VFR media. Average-FPS
             # frame indices drift from the source timeline and misalign masks.
