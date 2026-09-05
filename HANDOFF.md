@@ -36,7 +36,9 @@
   Root installer links, package metadata, the in-app version, macOS bundle
   fallback, and Windows installer fallback now match the tag.
 - The tagged workflow runs the desktop quality gate before building the unsigned
-  macOS DMG/ZIP and Windows installer, then attaches all three to the prerelease.
+  macOS DMG/ZIP and Windows installer, then attaches all three to the release.
+- The published release is a standard GitHub release rather than a prerelease.
+  Future version tags use the same publication state.
 
 ## 2026-09-05 — Import chooser keep-in-place wording
 
