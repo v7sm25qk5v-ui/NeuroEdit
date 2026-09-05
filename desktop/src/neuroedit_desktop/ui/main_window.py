@@ -1557,7 +1557,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
 
     def _import_video(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Add Video Files (Files Stay in Place)",
+            self, "Add Video Files (Keep in Place)",
             str(Path.home() / "Movies"),
             "Video Files (*.mp4 *.mov *.m4v *.avi *.webm);;All Files (*)",
         )
@@ -1569,7 +1569,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         start = getattr(self.media_panel, "_root_path", Path.home() / "Movies")
         folder = QFileDialog.getExistingDirectory(
             self,
-            "Link Video Folder (Files Stay in Place)",
+            "Link Video Folder (Keep Files in Place)",
             str(start),
         )
         if not folder:

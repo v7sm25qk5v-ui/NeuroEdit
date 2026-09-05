@@ -35,6 +35,10 @@ _(automation-maintained — new findings appended below, checked off when implem
   use the same explicit **Keep in Place** wording as the File menu and docs, so
   external-drive imports consistently communicate that source videos are linked
   by reference rather than copied.
+- [x] **Native file/folder chooser titles still used older stay-in-place wording.**
+  Fixed 2026-09-05: the Add Video Files and Link Video Folder dialogs now use
+  the same **Keep in Place** wording as the menu actions, Media Explorer
+  buttons, and reference-import documentation.
 
 The primary open code-health/runtime work lives in **P4.5** (modularize the
 `main_window.py` dialog/MainWindow split, reduce undo-snapshot serialize cost,

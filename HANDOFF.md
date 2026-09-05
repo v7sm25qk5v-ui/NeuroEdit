@@ -1,5 +1,20 @@
 # NeuroEdit — Session Handoff
 
+## 2026-09-05 — Import chooser keep-in-place wording
+
+- Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,
+  `desktop/README.md`, `desktop/CLAUDE.md`, and automation memory. Remaining
+  release, signing/privacy, Windows smoke, Intel Mac, and Stryker/DICOM work is
+  still owner, hardware, or sample-data gated; no release tag is indicated.
+- Used the fallback review path and completed the remaining UI-copy consistency
+  gap in the external-drive import workflow: the native Add Video Files and Link
+  Video Folder chooser titles now use the same explicit **Keep in Place**
+  wording as the menu actions, Media Explorer buttons, and docs.
+- Verification: focused `tests/test_main_window_headless.py` (`35 passed`);
+  `/Library/Frameworks/Python.framework/Versions/3.13/bin/ruff check src tests
+  scripts`; full desktop suite (`197 passed`); `python -m compileall -q src`;
+  and `git diff --check`.
+
 ## 2026-09-04 — Media Explorer keep-in-place wording
 
 - Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,

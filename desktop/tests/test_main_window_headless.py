@@ -303,10 +303,15 @@ def test_multi_file_import_loads_preview_and_marks_dirty_once(window, tmp_path, 
 def test_import_video_delegates_to_batch_import(window, tmp_path, monkeypatch):
     paths = [tmp_path / "first.mov", tmp_path / "second.mp4"]
     imported: list[list[Path]] = []
+
+    def fake_get_open_file_names(_parent, title, *_args, **_kwargs):
+        assert title == "Add Video Files (Keep in Place)"
+        return [str(path) for path in paths], ""
+
     monkeypatch.setattr(
         main_window_module.QFileDialog,
         "getOpenFileNames",
-        lambda *_args, **_kwargs: ([str(path) for path in paths], ""),
+        fake_get_open_file_names,
     )
     monkeypatch.setattr(window, "_import_media_files", imported.append)
 
@@ -340,7 +345,11 @@ def test_link_video_folder_keeps_external_paths_across_save(
     monkeypatch.setattr(
         main_window_module.QFileDialog,
         "getExistingDirectory",
-        lambda *_args, **_kwargs: str(media_folder),
+        lambda _parent, title, *_args, **_kwargs: (
+            str(media_folder)
+            if title == "Link Video Folder (Keep Files in Place)"
+            else ""
+        ),
     )
     monkeypatch.setattr(
         window,
