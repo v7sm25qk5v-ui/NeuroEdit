@@ -63,11 +63,11 @@ or performed.
 
 ## Follow-ups
 
-- **SAM results during document edits (code-inspection finding):** job completion
-  rejects a replacement project object, but an edit to the same project while
-  inference is running can still make the captured result stale. Reproduce with
-  a delayed worker plus trim/delete, then define cancellation or a document
-  revision check without broad mutation bookkeeping.
+- **SAM results during document edits (fixed 2026-09-06):** job completion now
+  rejects same-project content edits as well as replacement project objects.
+  Segmentation and propagation capture a document-content hash at start, ignore
+  transient UI state such as playhead movement, and discard/unlink stale masks
+  if the timeline changes before completion.
 - **Paused preview after undo (candidate, not reproduced):** history restore only
   reloads media when the active source path changes. A same-source trim undo may
   leave the displayed source frame stale. Reproduce with actual paused media

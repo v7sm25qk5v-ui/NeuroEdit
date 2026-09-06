@@ -1,5 +1,27 @@
 # NeuroEdit — Session Handoff
 
+## 2026-09-06 — SAM edit-race invalidation
+
+- Reviewed automation memory plus `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`,
+  `HANDOFF.md`, `README.md`, `desktop/README.md`, `desktop/CLAUDE.md`, and the
+  2026-09-05 codebase review. Owner/hardware/sample-data gates remain open for
+  packaged smoke, signing/privacy, Intel Mac, and Stryker/DICOM sample work; no
+  release tag is indicated by the roadmap.
+- Fixed the bounded SAM follow-up from the 2026-09-05 review: in-flight
+  segmentation and propagation now capture a content hash of the project when
+  the job starts. If the same project is trimmed or otherwise edited before the
+  worker finishes, the result is discarded and generated mask files are removed
+  instead of attaching stale masks to the changed timeline.
+- The hash intentionally ignores transient UI state and `sam_last_run`, so
+  moving the playhead while SAM runs still preserves the captured seed/window
+  behavior verified in the prior review.
+- Verification: focused `tests/test_sam_workflow.py` (`25 passed`) and
+  `/Library/Frameworks/Python.framework/Versions/3.13/bin/ruff check src tests
+  scripts`; compatibility rerun for `test_single_frame_segmentation_stamps_sam_last_run`
+  plus the SAM suite (`26 passed`); full desktop suite (`230 passed`); and
+  `python -m compileall -q src`. Existing untracked `desktop/qa/` artifacts were
+  preserved.
+
 ## 2026-09-05 — Multi-agent stability and efficiency review
 
 - Three focused sub-agents reviewed persistence/lifecycle, rendering/export,

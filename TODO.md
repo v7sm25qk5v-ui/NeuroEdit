@@ -20,8 +20,11 @@ _(automation-maintained — new findings appended below, checked off when implem
   SAM source/timeline mapping, ripple caption/mask synchronization, and the
   deferred exporter import boundary, and native-preference isolation in tests. See
   [review evidence and follow-ups](desktop/docs/CODEBASE_REVIEW_2026-09-05.md).
-- [ ] Reproduce stale SAM completion after edits to the same project during
-  inference; define result invalidation or cancellation for that case.
+- [x] **Stale SAM completion after same-project edits during inference.** Fixed
+  2026-09-06: segmentation and propagation now capture a document-content hash
+  when a job starts and discard generated masks if the project content changes
+  before completion. Playhead-only movement still stays allowed, and stale mask
+  files are unlinked instead of being attached to the edited timeline.
 - [ ] Reproduce paused-preview synchronization after undoing a trim on the same
   source file before modifying history/player synchronization.
 

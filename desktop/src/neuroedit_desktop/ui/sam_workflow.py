@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
+import json
 import sys
 import time
 from pathlib import Path
@@ -26,6 +28,34 @@ from neuroedit_desktop.ui.sam_workers import (
 
 
 class SamWorkflowMixin:
+    _SAM_TRANSIENT_PROJECT_KEYS = (
+        "active_panel",
+        "active_tool",
+        "current_time",
+        "scroll_left",
+        "selected_annotation_id",
+        "zoom",
+        "draw_color",
+        "draw_width",
+        "draw_opacity",
+        "draw_label",
+        "sam_last_run",
+    )
+
+    def _sam_document_hash(self) -> str:
+        data = dict(self.project.to_dict())
+        for key in self._SAM_TRANSIENT_PROJECT_KEYS:
+            data.pop(key, None)
+        payload = json.dumps(data, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.blake2b(payload, digest_size=16).hexdigest()
+
+    def _sam_context_is_current(self, context: dict) -> bool:
+        if context.get("project", self.project) is not self.project:
+            return False
+        if "document_hash" not in context:
+            return True
+        return context.get("document_hash") == self._sam_document_hash()
+
     def _clear_sam_points(self) -> None:
         self.project.sam_points.clear()
         self._mark_dirty()
@@ -252,6 +282,7 @@ class SamWorkflowMixin:
         self._pending_prompt_points = self._current_prompt_points()
         self._sam_job_context = {
             "project": self.project,
+            "document_hash": self._sam_document_hash(),
             "time_s": self.project.current_time,
             "mask_color": self._pending_mask_color,
             "prompt_points": list(self._pending_prompt_points),
@@ -284,7 +315,7 @@ class SamWorkflowMixin:
         self._sam_segment_worker = None
         self.sam_panel.set_busy(False)
         context = getattr(self, "_sam_job_context", None) or {}
-        if context.get("project", self.project) is not self.project:
+        if not self._sam_context_is_current(context):
             self._discard_sam_result(result)
             self.sam_panel.set_status("Segmentation result discarded after project changed.")
             return
@@ -440,6 +471,7 @@ class SamWorkflowMixin:
         self._pending_mask_color = mask_color_hex
         self._sam_job_context = {
             "project": self.project,
+            "document_hash": self._sam_document_hash(),
             "retrack_id": getattr(self, "_retrack_target_id", None),
             "prompt_points": list(getattr(self, "_pending_prompt_points", [])),
             "mask_color": mask_color_hex,
@@ -501,7 +533,7 @@ class SamWorkflowMixin:
         self._sam_propagation_worker = None
         self.sam_panel.set_busy(False)
         context = getattr(self, "_sam_job_context", None) or {}
-        if context.get("project", self.project) is not self.project:
+        if not self._sam_context_is_current(context):
             self._discard_sam_result(result)
             self.sam_panel.set_status("Propagation result discarded after project changed.")
             return

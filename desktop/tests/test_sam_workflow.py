@@ -350,6 +350,23 @@ def test_segmentation_decodes_source_time_but_keeps_timeline_time(workflow):
     assert workflow.project.annotations[0].frame_time == pytest.approx(12.0)
 
 
+def test_segmentation_discards_result_after_same_project_edit(workflow):
+    from neuroedit_desktop.sam_backend import SamSegmentResult
+
+    workflow._run_segmentation()
+    mask_path = workflow.store.project_path.parent / "stale-mask.png"
+    mask_path.write_bytes(b"stale")
+    workflow.project.clips[0].trim_end = 6.0
+
+    workflow._on_segment_finished(SamSegmentResult(mask_path, 0.9, "test"), None)
+
+    assert workflow.project.annotations == []
+    assert not mask_path.exists()
+    workflow.sam_panel.set_status.assert_called_with(
+        "Segmentation result discarded after project changed."
+    )
+
+
 def test_propagation_translates_source_samples_and_stops_at_clip_end(workflow):
     from neuroedit_desktop.sam_backend import SamPropagationResult
 
@@ -370,6 +387,27 @@ def test_propagation_translates_source_samples_and_stops_at_clip_end(workflow):
     assert annotation.ann_duration == pytest.approx(0.2)
     assert [frame["time"] for frame in annotation.mask_frames] == pytest.approx([13.8])
     assert annotation.mask_path_at(13.9) == "/tmp/seed.png"
+
+
+def test_propagation_discards_result_after_same_project_edit(workflow):
+    from neuroedit_desktop.sam_backend import SamPropagationResult
+
+    workflow._run_propagation()
+    mask_path = workflow.store.project_path.parent / "stale-frame.png"
+    mask_path.write_bytes(b"stale")
+    workflow.project.clips[0].trim_start = 5.0
+    result = SamPropagationResult(
+        mask_frames=[{"time": 6.0, "mask_path": str(mask_path)}],
+        score=0.9, sample_rate=2.0, backend="test",
+    )
+
+    workflow._on_propagation_finished(result, None)
+
+    assert workflow.project.annotations == []
+    assert not mask_path.exists()
+    workflow.sam_panel.set_status.assert_called_with(
+        "Propagation result discarded after project changed."
+    )
 
 
 def test_retrack_uses_annotation_clip_and_clamps_window(workflow):
