@@ -1,4 +1,4 @@
-# Unsigned alpha build for PyInstaller (cross-platform).
+# Unsigned build for PyInstaller (cross-platform).
 #   macOS:   pyinstaller --clean --noconfirm NeuroEdit.spec  -> dist/NeuroEdit.app
 #   Windows: pyinstaller --clean --noconfirm NeuroEdit.spec  -> dist/NeuroEdit/NeuroEdit.exe
 # The app source is identical on every platform; only the packaging step below
@@ -10,8 +10,8 @@ from pathlib import Path
 
 IS_MACOS = sys.platform == "darwin"
 IS_WINDOWS = sys.platform == "win32"
-APP_VERSION = os.environ.get("NEUROEDIT_VERSION", "0.5.12-alpha").removeprefix("v")
-APP_BUILD_VERSION = APP_VERSION.removesuffix("-alpha")
+APP_VERSION = os.environ.get("NEUROEDIT_VERSION", "0.5.12").removeprefix("v")
+APP_BUILD_VERSION = APP_VERSION
 
 ROOT = Path.cwd()
 SRC = ROOT / "src"
@@ -61,7 +61,7 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        # Keep the unsigned alpha small and avoid bundling optional SAM/ML stacks.
+        # Keep the unsigned build small and avoid bundling optional SAM/ML stacks.
         "torch",
         "torchvision",
         "transformers",
@@ -111,7 +111,7 @@ if IS_MACOS:
         coll,
         name="NeuroEdit.app",
         icon=APP_ICON,
-        bundle_identifier="org.neuroedit.alpha",
+        bundle_identifier="org.neuroedit",
         info_plist={
             "CFBundleName": "NeuroEdit",
             "CFBundleDisplayName": "NeuroEdit",

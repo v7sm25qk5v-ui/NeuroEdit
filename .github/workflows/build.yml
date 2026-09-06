@@ -1,9 +1,9 @@
-name: Build alpha installers
+name: Build installers
 
 # Build the macOS .dmg and the Windows Setup.exe from the SAME commit, so every
 # change to the shared desktop/src code ships to both platforms at once.
 #
-#   - Push a version tag (e.g. `git tag v0.2.0-alpha && git push --tags`) to build
+#   - Push a version tag (e.g. `git tag v0.2.0 && git push --tags`) to build
 #     both installers AND publish them to a GitHub Release.
 #   - Or trigger manually (Actions tab -> Run workflow) to build test artifacts
 #     without cutting a release.
@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version label for the build (e.g. alpha-002)"
+        description: "Version label for the build (e.g. v0.2.0)"
         default: "dev"
 
 jobs:
@@ -51,7 +51,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Build unsigned macOS alpha
+      - name: Build unsigned macOS installer
         working-directory: desktop
         run: |
           VERSION="${{ github.event.inputs.version || github.ref_name }}"
@@ -77,7 +77,7 @@ jobs:
           python-version: "3.12"
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
-      - name: Build unsigned Windows alpha
+      - name: Build unsigned Windows installer
         working-directory: desktop
         shell: pwsh
         run: |
@@ -109,7 +109,7 @@ jobs:
           files: artifacts/**/*
           fail_on_unmatched_files: true
           body: |
-            Unsigned alpha build of NeuroEdit.
+            Unsigned NeuroEdit build.
 
             - **macOS**: download the `.dmg`. First launch: right-click the app -> Open.
             - **Windows**: download the `-Windows-Setup.exe`. First launch: if SmartScreen

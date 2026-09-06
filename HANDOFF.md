@@ -40,6 +40,16 @@
 - The published release is a standard GitHub release rather than a prerelease.
   Future version tags use the same publication state.
 
+## 2026-09-05 — v0.5.12 stable release
+
+- GitHub’s sidebar does not treat a tag with the `-alpha` SemVer suffix as the
+  latest release, even if its prerelease flag is false. Reissued the verified
+  review sweep as stable `v0.5.12` so it is shown in the repository’s Releases
+  panel and becomes the normal current release.
+- Version metadata, installer names, root download documentation, and the
+  release workflow now use the stable version. Builds remain unsigned; this
+  changes release visibility and versioning, not signing/notarization status.
+
 ## 2026-09-05 — Import chooser keep-in-place wording
 
 - Reviewed `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`, `HANDOFF.md`, `README.md`,

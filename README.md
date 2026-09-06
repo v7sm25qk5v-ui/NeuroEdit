@@ -4,9 +4,9 @@ NeuroEdit is a standalone desktop video editor for preparing operative video for
 conference, research, and educational use. It runs entirely on your own machine —
 no video, audio, or patient content ever leaves the computer.
 
-Current alpha release: [v0.5.12-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.12-alpha)
+Current release: [v0.5.12](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.12)
 
-### What's new in v0.5.12-alpha
+### What's new in v0.5.12
 
 - Export handles fractional cuts on one output-frame clock, keeping short
   multi-cut timelines aligned with narration and redactions.
@@ -48,21 +48,21 @@ Current alpha release: [v0.5.12-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdi
 - **Appearance** — Light, Dark, or System theme, chosen on first launch and
   switchable any time from View → Appearance.
 
-## Install The Alpha
+## Install
 
 ### macOS
 
-Download `NeuroEdit-v0.5.12-alpha-macOS-unsigned.dmg` from the release page.
+Download `NeuroEdit-v0.5.12-macOS-unsigned.dmg` from the release page.
 Open the DMG, drag `NeuroEdit.app` into Applications, then right-click the app
 and choose `Open` for the first launch.
 
-This alpha is unsigned and not notarized, so macOS may show a developer warning.
+This build is unsigned and not notarized, so macOS may show a developer warning.
 If macOS blocks launch, open `System Settings` -> `Privacy & Security`, choose
 `Open Anyway`, then right-click `NeuroEdit.app` -> `Open` again.
 
 ### Windows
 
-Download `NeuroEdit-v0.5.12-alpha-Windows-Setup.exe` from the release page on a
+Download `NeuroEdit-v0.5.12-Windows-Setup.exe` from the release page on a
 Windows PC. If SmartScreen warns, choose `More info` -> `Run anyway`, then follow
 the installer.
 
@@ -70,7 +70,7 @@ The Windows installer is built by CI from the same source as macOS. Runtime UI
 verification on Windows is still pending; testers should capture toolbar
 screenshots at 100%, 125%, and 150% display scaling.
 
-The downloadable alpha installers are editor-only and do not include the optional
+The downloadable installers are editor-only and do not include the optional
 SAM/PyTorch runtime. Use a source build with the `[sam]` extra for segmentation.
 
 ## Clinical Disclaimer

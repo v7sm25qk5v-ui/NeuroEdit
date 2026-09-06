@@ -1,4 +1,4 @@
-; Inno Setup script for the NeuroEdit Windows alpha installer.
+; Inno Setup script for the NeuroEdit Windows installer.
 ; Compile with: ISCC.exe /DMyAppVersion=alpha-001 installer\NeuroEdit.iss
 ; Produces a friendly double-click Setup.exe wizard for non-technical testers:
 ; installs per-user (no admin / UAC prompt), adds a Start-menu shortcut, and
@@ -6,7 +6,7 @@
 
 #define MyAppName "NeuroEdit"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.5.12-alpha"
+  #define MyAppVersion "0.5.12"
 #endif
 #define MyAppPublisher "NeuroEdit"
 #define MyAppExeName "NeuroEdit.exe"

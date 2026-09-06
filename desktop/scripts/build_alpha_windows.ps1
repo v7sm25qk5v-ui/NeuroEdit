@@ -1,5 +1,5 @@
 <#
-Unsigned Windows alpha build for NeuroEdit.
+Unsigned Windows build for NeuroEdit.
 
 Mirrors scripts/build_alpha_macos.sh: creates a build venv, installs the app
 with its packaging extra, runs PyInstaller against the shared NeuroEdit.spec,
@@ -12,7 +12,7 @@ Requires: Python 3.12 on PATH, and Inno Setup 6 (ISCC.exe) installed or on PATH.
 Produces: release\NeuroEdit-<version>-Windows-Setup.exe
 #>
 param(
-    [string]$Version = "alpha"
+    [string]$Version = "0.5.12"
 )
 
 $ErrorActionPreference = "Stop"
@@ -71,7 +71,7 @@ if ($LASTEXITCODE -ne 0) {
 
 $Setup = Join-Path $ReleaseDir "NeuroEdit-$Version-Windows-Setup.exe"
 Write-Host ""
-Write-Host "Unsigned Windows alpha build complete."
+Write-Host "Unsigned Windows build complete."
 Write-Host "Installer: $Setup"
 Write-Host ""
 Write-Host "Because this build is unsigned, Windows SmartScreen may warn testers."

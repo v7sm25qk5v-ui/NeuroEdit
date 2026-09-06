@@ -57,7 +57,7 @@ if command -v hdiutil >/dev/null 2>&1; then
 fi
 
 cat <<EOF
-Unsigned alpha build complete.
+Unsigned build complete.
 
 App: $APP_PATH
 Zip: $ZIP_PATH
