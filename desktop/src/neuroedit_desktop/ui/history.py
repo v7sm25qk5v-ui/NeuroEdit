@@ -5,7 +5,7 @@ import json
 
 from PySide6.QtCore import QTimer
 
-from neuroedit_desktop.models import ProjectState
+from neuroedit_desktop.models import ProjectState, VideoClip
 
 
 class HistoryMixin:
@@ -177,7 +177,7 @@ class HistoryMixin:
                 key: getattr(self.project, key) for key in self._TRANSIENT_SNAPSHOT_KEYS
             }
             old_clip = self.project.active_clip
-            old_path = old_clip.path if old_clip else None
+            old_signature = self._active_clip_playback_signature(old_clip)
             self.project = ProjectState.from_dict(json.loads(snapshot))
             self._autosave_snapshot = None
             self._project_end_time_cache = None
@@ -189,12 +189,26 @@ class HistoryMixin:
                 setattr(self.project, key, value)
             self.dirty = True
             new_clip = self.project.active_clip
-            new_path = new_clip.path if new_clip else None
-            if old_path != new_path:
+            new_signature = self._active_clip_playback_signature(new_clip)
+            if old_signature != new_signature:
                 self._load_active_clip()
             self.refresh()
         finally:
             self._restoring = False
+
+    def _active_clip_playback_signature(self, clip: VideoClip | None):
+        if clip is None:
+            return None
+        return (
+            clip.id,
+            clip.path,
+            clip.media_type,
+            clip.start_time,
+            clip.trim_start,
+            clip.trim_end,
+            clip.source_in_limit,
+            clip.source_out_limit,
+        )
 
     def _autosave(self) -> None:
         if not self.dirty:

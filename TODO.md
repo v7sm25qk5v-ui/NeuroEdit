@@ -25,8 +25,10 @@ _(automation-maintained — new findings appended below, checked off when implem
   when a job starts and discard generated masks if the project content changes
   before completion. Playhead-only movement still stays allowed, and stale mask
   files are unlinked instead of being attached to the edited timeline.
-- [ ] Reproduce paused-preview synchronization after undoing a trim on the same
-  source file before modifying history/player synchronization.
+- [x] **Paused-preview synchronization after undoing a trim on the same source file.**
+  Fixed 2026-09-07: undo/redo snapshot restore now compares the active clip's
+  playback window, not only its source path, so same-source trim restores reload
+  and seek the paused preview to the restored source offset.
 
 - [x] **Timeline end, label navigation, and captured-still defaults.** Fixed
   2026-09-02: the timeline canvas now ends at the final playable project item

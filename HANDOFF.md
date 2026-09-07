@@ -1,5 +1,25 @@
 # NeuroEdit — Session Handoff
 
+## 2026-09-07 — Same-source trim undo preview refresh
+
+- Reviewed automation memory plus `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`,
+  `HANDOFF.md`, and the 2026-09-05 codebase review. Owner/hardware/sample-data
+  gates remain open for Windows packaged smoke, signing/privacy, Intel Mac, and
+  Stryker/DICOM sample work; no release tag is indicated by the roadmap.
+- Fixed the remaining 2026-09-05 paused-preview follow-up: undo/redo snapshot
+  restore now compares the active clip's playback window, not only its source
+  path. If a same-source trim/source-bound restore changes what frame should be
+  shown, NeuroEdit reloads and seeks the active preview through the existing
+  active-clip path.
+- Added a focused undo-history regression proving a same-source trim restore
+  reloads the preview path. The existing project-end-time restore test was
+  adjusted to stub preview reload because that trim restore now intentionally
+  triggers it.
+- Verification: focused `tests/test_undo_history.py` (`23 passed`);
+  `/Library/Frameworks/Python.framework/Versions/3.13/bin/ruff check src tests
+  scripts`; full desktop suite (`231 passed`); `.venv/bin/python -m compileall
+  -q src`; and `git diff --check`.
+
 ## 2026-09-06 — SAM edit-race invalidation
 
 - Reviewed automation memory plus `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`,

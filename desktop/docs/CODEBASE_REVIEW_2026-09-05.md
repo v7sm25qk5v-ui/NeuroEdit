@@ -68,10 +68,10 @@ or performed.
   Segmentation and propagation capture a document-content hash at start, ignore
   transient UI state such as playhead movement, and discard/unlink stale masks
   if the timeline changes before completion.
-- **Paused preview after undo (candidate, not reproduced):** history restore only
-  reloads media when the active source path changes. A same-source trim undo may
-  leave the displayed source frame stale. Reproduce with actual paused media
-  before changing player synchronization.
+- **Paused preview after undo (fixed 2026-09-07):** history restore now compares
+  the active clip's playback window, not only the source path. Same-source trim
+  undo/redo restores reload and seek the paused preview to the restored source
+  offset, with focused undo-history coverage.
 - **Performance measurement:** retain diagnostics-based measurement of large
   projects, external-drive probing, undo serialization, and optional SAM memory
   usage. The restored lazy import boundary is verified structurally; this pass

@@ -455,12 +455,37 @@ def test_apply_snapshot_invalidates_project_end_time_cache() -> None:
     window = _window(project)
     restored = window._snapshot_payload(window._snapshot())
     project.clips[0].trim_end = 5.0
+    window._load_active_clip = lambda: None
 
     assert window._project_end_time() == 5.0
 
     window._apply_snapshot(restored)
 
     assert window._project_end_time() == 10.0
+
+
+def test_apply_snapshot_reloads_same_source_clip_when_trim_changes() -> None:
+    project = ProjectState(current_time=1.0)
+    project.clips.append(
+        VideoClip(
+            id="clip-1",
+            path="clip.mp4",
+            name="Clip",
+            duration=10.0,
+            trim_start=2.0,
+            trim_end=8.0,
+        )
+    )
+    project.active_clip_id = "clip-1"
+    window = _window(project)
+    restored = window._snapshot_payload(window._snapshot())
+    project.clips[0].trim_start = 4.0
+    loads: list[float] = []
+    window._load_active_clip = lambda: loads.append(window.project.clips[0].trim_start)
+
+    window._apply_snapshot(restored)
+
+    assert loads == [2.0]
 
 
 def test_open_recent_project_invalidates_end_time_before_loading(
