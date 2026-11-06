@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 # Auto-assigned SAM mask colors: cyan, magenta, yellow, green, orange, blue,
@@ -50,19 +51,35 @@ def referenced_mask_paths(project_dicts: list[dict]) -> set[str]:
 
 def delete_orphan_masks(masks_dir: Path, referenced: set[str]) -> int:
     """Delete unreferenced files directly inside masks_dir."""
-    if not masks_dir.is_dir():
+    # Keep a descriptor for the actual project directory and open its masks
+    # child without following a link. Skip cleanup on platforms lacking these
+    # operations rather than deleting through an unverified path.
+    if not hasattr(os, "O_NOFOLLOW") or os.open not in os.supports_dir_fd:
         return 0
-    masks_dir = masks_dir.resolve()
+    root_fd = masks_fd = None
     removed = 0
-    for path in masks_dir.iterdir():
-        resolved = path.resolve()
-        if not resolved.is_file() or resolved.parent != masks_dir:
-            continue
-        if str(resolved) in referenced:
-            continue
-        try:
-            resolved.unlink()
-            removed += 1
-        except OSError:
-            pass
+    try:
+        root_fd = os.open(masks_dir.parent, os.O_RDONLY | os.O_DIRECTORY)
+        masks_fd = os.open(
+            masks_dir.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_fd
+        )
+        canonical_dir = masks_dir.parent.resolve() / masks_dir.name
+        with os.scandir(masks_fd) as entries:
+            for entry in entries:
+                if not entry.is_file(follow_symlinks=False):
+                    continue
+                if str(canonical_dir / entry.name) in referenced:
+                    continue
+                try:
+                    os.unlink(entry.name, dir_fd=masks_fd)
+                    removed += 1
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    finally:
+        if masks_fd is not None:
+            os.close(masks_fd)
+        if root_fd is not None:
+            os.close(root_fd)
     return removed

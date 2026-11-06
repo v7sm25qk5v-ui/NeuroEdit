@@ -3,9 +3,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
-import sys
-import types
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -18,7 +15,6 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from neuroedit_desktop.ui.main_window import ProjectLibraryDialog  # noqa: E402
 from neuroedit_desktop.ui.project_library import (  # noqa: E402
-    ThumbnailWorker,
     _read_project_meta,
     _thumbnail_path,
 )
@@ -48,9 +44,6 @@ def library(app, tmp_path, monkeypatch):
             }
         ),
         encoding="utf-8",
-    )
-    monkeypatch.setattr(
-        ProjectLibraryDialog, "_start_thumb_thread", lambda self, tasks: None
     )
     settings = QSettings("NeuroEdit", "Desktop")
     original = settings.value("recentProjects", []) or []
@@ -127,13 +120,6 @@ def test_project_meta_uses_timeline_duration_and_trimmed_thumbnail_offset(
         ),
         encoding="utf-8",
     )
-    captured_tasks = []
-    monkeypatch.setattr(
-        ProjectLibraryDialog,
-        "_start_thumb_thread",
-        lambda self, tasks: captured_tasks.extend(tasks),
-    )
-
     meta = _read_project_meta(project)
     assert meta["total_duration"] == pytest.approx(20.0)
     assert meta["first_clip_duration"] == pytest.approx(41.5)
@@ -145,37 +131,28 @@ def test_project_meta_uses_timeline_duration_and_trimmed_thumbnail_offset(
     try:
         row_text = dialog.list_widget.item(0).text()
         assert "0:20" in row_text
-        assert captured_tasks == [(str(project), str(source), pytest.approx(41.5))]
+        assert meta["thumbnail_allowed"] is False
     finally:
         dialog.close()
         settings.setValue("recentProjects", original)
 
 
-def test_thumbnail_worker_does_not_emit_stale_thumbnail_after_failed_refresh(
-    app, tmp_path, monkeypatch
-):
-    project = tmp_path / "Case" / "project.json"
-    project.parent.mkdir()
+def test_project_thumbnail_symlink_is_removed_without_touching_target(app, tmp_path):
+    from PySide6.QtCore import QSettings
+
+    project = tmp_path / "project.json"
     project.write_text(json.dumps({"project_name": "Case"}), encoding="utf-8")
+    target = tmp_path / "private.jpg"
+    target.write_bytes(b"private original")
     thumb = _thumbnail_path(project)
-    thumb.write_bytes(b"old preview")
-    os.utime(thumb, (project.stat().st_mtime - 10, project.stat().st_mtime - 10))
-
-    monkeypatch.setitem(
-        sys.modules,
-        "imageio_ffmpeg",
-        types.SimpleNamespace(get_ffmpeg_exe=lambda: "/usr/bin/false"),
-    )
-
-    def fail_ffmpeg(cmd, capture_output, timeout):
-        return subprocess.CompletedProcess(cmd, returncode=1)
-
-    monkeypatch.setattr(subprocess, "run", fail_ffmpeg)
-    emitted = []
-    worker = ThumbnailWorker([(str(project), str(tmp_path / "source.mp4"), 10.0)])
-    worker.thumbnail_ready.connect(lambda project_path, thumb_path: emitted.append(thumb_path))
-
-    worker.run()
-
-    assert emitted == []
-    assert not thumb.exists()
+    thumb.symlink_to(target)
+    settings = QSettings("NeuroEdit", "Desktop")
+    original = settings.value("recentProjects", []) or []
+    settings.setValue("recentProjects", [str(project)])
+    dialog = ProjectLibraryDialog()
+    try:
+        assert not thumb.is_symlink()
+        assert target.read_bytes() == b"private original"
+    finally:
+        dialog.close()
+        settings.setValue("recentProjects", original)

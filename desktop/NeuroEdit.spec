@@ -10,7 +10,8 @@ from pathlib import Path
 
 IS_MACOS = sys.platform == "darwin"
 IS_WINDOWS = sys.platform == "win32"
-APP_VERSION = os.environ.get("NEUROEDIT_VERSION", "0.5.12").removeprefix("v")
+# Keep alpha labels in artifact names; platform bundle versions stay numeric.
+APP_VERSION = os.environ.get("NEUROEDIT_VERSION", "0.5.13").removeprefix("v").split("-")[0]
 APP_BUILD_VERSION = APP_VERSION
 
 ROOT = Path.cwd()

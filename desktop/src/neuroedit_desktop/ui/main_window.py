@@ -1457,11 +1457,30 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
                 return path_str
             if not relative.parts or relative.parts[0] not in {"masks", "audio", "stills"}:
                 return path_str
+            if ".." in relative.parts:
+                raise ValueError(f"Invalid managed asset path: {source}")
+            destination = new_root / relative
+            # Project roots may themselves be aliases, but managed assets must
+            # not traverse links within either selected root.
+            for root in (old_root, new_root):
+                current = root
+                for part in relative.parts:
+                    current = current / part
+                    if current.is_symlink() or current.is_junction():
+                        raise ValueError(f"Link in managed asset path: {current}")
+            source_root = (old_root / relative.parts[0]).resolve()
+            destination_root = (new_root / relative.parts[0]).resolve()
+            if (not source.resolve().is_relative_to(source_root)
+                    or not destination.resolve().is_relative_to(destination_root)):
+                raise ValueError(f"Managed asset escapes its directory: {source}")
             if not source.is_file():
                 return path_str
-            destination = new_root / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             if not destination.exists() or not source.samefile(destination):
+                if source.stat().st_nlink > 1:
+                    raise ValueError(f"Hard-linked managed source: {source}")
+                if destination.exists() and destination.stat().st_nlink > 1:
+                    raise ValueError(f"Hard-linked managed destination: {destination}")
                 shutil.copy2(source, destination)
             return str(destination)
 
@@ -1836,10 +1855,14 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             if ann.frame_time >= time_s:
                 ann.frame_time += duration
             elif ann.is_visible_at(time_s):
-                # Cap annotation so it doesn't bleed through the inserted gap
-                ann.ann_duration = time_s - ann.frame_time
-        self.project.arrange_clips_without_overlap()
-
+                if ann.type == "redact":
+                    # Keep the same source footage covered after insertion.
+                    # Unlimited redactions must remain unlimited.
+                    if ann.ann_duration > 0:
+                        ann.ann_duration += duration
+                else:
+                    # Cap normal labels so they don't bleed through the gap.
+                    ann.ann_duration = time_s - ann.frame_time
     def _split_clip_for_gap(self, clip: VideoClip, time_s: float, gap_duration: float) -> None:
         left_duration = time_s - clip.start_time
         split_trim = clip.trim_start + left_duration
@@ -1952,7 +1975,6 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             self.video_view.set_image(clip.path)
         else:
             self.video_view.set_image(None)
-            self.player.setSource(QUrl.fromLocalFile(clip.path))
             self.player.setPlaybackRate(self.project.playback_rate)
             self.audio.setMuted(self.project.is_muted)
             self.audio.setVolume(self.project.volume)
@@ -2161,6 +2183,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         slide = self._slide_at_time(self.project.current_time)
         clip = self._clip_at_time(self.project.current_time)
         if clip is None:
+            self._pending_seek_ms = None
+            self._pending_play = False
             # Nothing under the playhead (e.g. the clip there was deleted): stop
             # the player, drop its source, and clear the preview to black so the
             # deleted clip's last frame can't linger. A full-frame slide, if any,
@@ -2197,21 +2221,31 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             self.video_view.update_annotations()
             return
 
-        new_source = clip_changed or not self.video_view.video_item.isVisible()
-        if new_source:
-            self.video_view.set_image(None)
-            self.player.setSource(QUrl.fromLocalFile(clip.path))
-            self.player.setPlaybackRate(self.project.playback_rate)
-
+        source = QUrl.fromLocalFile(clip.path)
+        new_source = self.player.source() != source
         local_s = clip.trim_start + max(0.0, self.project.current_time - clip.start_time)
-        target_ms = int(local_s * 1000)
+        target_ms = round(local_s * 1000)
         if new_source:
-            # The fresh source can't be sought until it reports loaded; seeking
-            # or playing now makes a trimmed clip start at 0. Defer both to
-            # _media_status_changed so the clip enters at its trim_start.
+            if play and self.video_view.video_item.isVisible():
+                self.video_view.begin_video_transition(target_ms)
+            else:
+                self.video_view.set_image(None)
+            # setSource can emit the OLD source's LoadedMedia while stopping
+            # it. Arm afterwards, then also handle an already-loaded new source.
+            self._pending_seek_ms = None
+            self._pending_play = False
+            self.player.pause()
+            self.player.setSource(source)
+            self.player.setPlaybackRate(self.project.playback_rate)
             self._pending_seek_ms = target_ms
             self._pending_play = play
-            self.player.pause()
+            self._media_status_changed(self.player.mediaStatus())
+            return
+        if not self.video_view.video_item.isVisible():
+            self.video_view.set_image(None)
+        if self._pending_seek_ms is not None:
+            self._pending_seek_ms = target_ms
+            self._pending_play = play
             return
         self._pending_seek_ms = None
         if abs(self.player.position() - target_ms) > 80:
@@ -2228,12 +2262,14 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         ):
             self._pending_seek_ms = None
             self._pending_play = False
+            self.video_view.clear_video_transition()
             return
         if status not in (
             QMediaPlayer.MediaStatus.LoadedMedia,
             QMediaPlayer.MediaStatus.BufferedMedia,
         ):
             return
+        self.video_view.finish_transition_seek()
         self.player.setPosition(self._pending_seek_ms)
         self._pending_seek_ms = None
         if self._pending_play and self._timeline_playing:
@@ -2260,7 +2296,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
                 or clip.trim_end > source_end
             ):
                 clip.trim_end = source_end
-                self.project.arrange_clips_without_overlap(clip.id)
+                self.project.arrange_clips_without_overlap()
             self.project.duration = max(self.project.duration, clip.start_time + clip.display_duration)
             self._mark_dirty()
 

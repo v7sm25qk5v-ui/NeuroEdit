@@ -21,6 +21,29 @@ UI thread so the app stays responsive while editing operative video.
 The full module map and architecture notes (rendering pipeline, undo/redo,
 threading, PHI/redaction safeguards) are in [CLAUDE.md](CLAUDE.md).
 
+## Timeline controls
+
+- Drag a video clip left or right to preview a new sequence position;
+  neighboring clips close together during this explicit reorder. Opening or
+  refreshing a saved project preserves its existing clip positions and gaps.
+  Release commits the visible order, Escape cancels,
+  and Undo restores the entire move. Hold near either timeline edge to scroll
+  while dragging.
+- Full-frame slides, including frames made with **Take Still**, occupy timeline
+  time and keep their interval between video clips. Explicit reordering only
+  removes time in which no video or full-frame slide is visible. Video clips
+  remain a magnetic storyline when Snap is off; Snap controls nearby-edge,
+  playhead, and marker alignment for other dragged blocks.
+- Mouse-wheel and trackpad scrolling pan through time. Hold Shift while
+  scrolling to move vertically through stacked label rows.
+- Overlapping labels occupy separate rows. Disabled labels say **Hidden**;
+  hover a label for its full name and time range.
+- Split pieces retain their source name. Splitting older continuation pieces
+  also removes the accumulated `(cont.)` suffixes.
+- Playback reuses the decoder across same-file cuts and holds the last frame
+  while another video loads. Different files can still have a brief loading
+  pause; the preview no longer deliberately clears between them.
+
 ## Run
 
 Use Python 3.12 or 3.13. For SAM3 work, Python 3.12 is the safer target because

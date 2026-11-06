@@ -41,6 +41,9 @@ def window(app, tmp_path, monkeypatch):
         "probe",
         lambda self: SamBackendInfo("missing", "none", "stubbed for tests"),
     )
+    # A bound single-shot callback can outlive this fixture and run after its
+    # settings are restored, opening an offscreen modal in a later UI test.
+    monkeypatch.setattr(MainWindow, "_maybe_show_first_run_tutorial", lambda self: None)
     settings = QSettings("NeuroEdit", "Desktop")
     original_root = settings.value("storage/projectRoot", "")
     original_prompt = settings.value("storage/promptShown", False, type=bool)
@@ -645,3 +648,155 @@ def test_export_settings_defaults_have_no_audio(tmp_path):
     # An empty project (and any project without readable audio) yields no
     # audio sources, so the muxer is skipped and the MP4 has no audio stream.
     assert exporter._audio_sources("ffmpeg") == []
+
+
+@pytest.mark.parametrize('trim_start, position, expected_seek', [(5, 5010, []), (20, 5000, [20010])])
+def test_same_source_cut_does_not_reload_player(window, monkeypatch, trim_start, position, expected_seek):
+    window.project.clips = [
+        VideoClip(id='a', path='/tmp/source.mp4', name='Source', duration=30,
+                  start_time=0, trim_start=0, trim_end=5),
+        VideoClip(id='b', path='/tmp/source.mp4', name='Source', duration=30,
+                  start_time=5, trim_start=trim_start, trim_end=trim_start + 5),
+    ]
+    window.project.active_clip_id = 'a'
+    window.project.current_time = 5.01
+    monkeypatch.setattr(window, '_cached_clip_media_problem', lambda c: None)
+    monkeypatch.setattr(window.player, 'source', lambda: QUrl.fromLocalFile('/tmp/source.mp4'))
+    monkeypatch.setattr(window.player, 'position', lambda: position)
+    loads, seeks = [], []
+    monkeypatch.setattr(window.player, 'setSource', loads.append)
+    monkeypatch.setattr(window.player, 'setPosition', seeks.append)
+    monkeypatch.setattr(window.player, 'play', lambda: None)
+    window._sync_player_to_timeline(play=True)
+    assert loads == []
+    assert seeks == expected_seek
+    assert window.project.active_clip_id == 'b'
+    assert window._pending_seek_ms is None
+
+
+def test_video_transition_holds_frame_until_target_and_clears_in_gap(window):
+    from PySide6.QtGui import QColor, QImage
+    from PySide6.QtMultimedia import QVideoFrame
+    view = window.video_view
+    image = QImage(64, 36, QImage.Format.Format_RGB32)
+    image.fill(QColor('red'))
+    frame = QVideoFrame(image)
+    frame.setStartTime(0)
+    frame.setEndTime(33333)
+    view.video_item.videoSink().setVideoFrame(frame)
+    view.begin_video_transition(2000)
+    view.video_item.videoSink().setVideoFrame(QVideoFrame())
+    assert view.transition_item.isVisible()
+    assert view.transition_item.pixmap().toImage().pixelColor(1, 1) == QColor('red')
+    view.finish_transition_seek()
+    view.video_item.videoSink().setVideoFrame(frame)  # source's unwanted first frame
+    assert view.transition_item.isVisible()
+    frame = QVideoFrame(image)
+    frame.setStartTime(2000000)
+    frame.setEndTime(2033333)
+    view.video_item.videoSink().setVideoFrame(frame)
+    assert not view.transition_item.isVisible()
+    view.begin_video_transition(0)
+    view.show_black()
+    assert not view.transition_item.isVisible()
+
+
+def test_different_source_transition_seeks_even_if_load_is_synchronous(window, monkeypatch):
+    clip = VideoClip(id='new', path='/tmp/new.mp4', name='New', duration=10,
+                     start_time=0, trim_start=2, trim_end=10)
+    window.project.clips = [clip]
+    window.project.current_time = 0.5
+    window._timeline_playing = True
+    monkeypatch.setattr(window, '_cached_clip_media_problem', lambda c: None)
+    seeks, plays = [], []
+    monkeypatch.setattr(window.player, 'setPosition', seeks.append)
+    monkeypatch.setattr(window.player, 'play', lambda: plays.append(True))
+    monkeypatch.setattr(window.player, 'setSource', lambda source:
+                        window._media_status_changed(QMediaPlayer.MediaStatus.LoadedMedia))
+    monkeypatch.setattr(window.player, 'mediaStatus', lambda: QMediaPlayer.MediaStatus.LoadedMedia)
+    window._sync_player_to_timeline(play=True)
+    assert seeks == [2500]
+    assert plays == [True]
+    assert window._pending_seek_ms is None
+
+
+def test_real_video_cuts_do_not_render_black_between_sources(window, tmp_path):
+    import shutil
+    import subprocess
+    import time
+
+    from PySide6.QtTest import QTest
+
+    ffmpeg = shutil.which('ffmpeg')
+    if not ffmpeg:
+        pytest.skip('Real decoder smoke test requires ffmpeg')
+    paths = [tmp_path / 'red.mp4', tmp_path / 'blue.mp4']
+    for path, color in zip(paths, ['red', 'blue']):
+        subprocess.run([ffmpeg, '-v', 'error', '-f', 'lavfi', '-i',
+                        f'color=c={color}:s=160x90:r=30:d=1', '-c:v', 'libx264',
+                        '-pix_fmt', 'yuv420p', str(path)], check=True, timeout=20)
+    window.project.clips = [
+        VideoClip(id='a', path=str(paths[0]), name='Red', duration=1,
+                  start_time=0, trim_start=0, trim_end=0.5),
+        VideoClip(id='b', path=str(paths[0]), name='Red', duration=1,
+                  start_time=0.5, trim_start=0.5, trim_end=1),
+        VideoClip(id='c', path=str(paths[1]), name='Blue', duration=1,
+                  start_time=1, trim_start=0.2, trim_end=1),
+    ]
+    window._invalidate_project_end_time()
+    window.project.current_time = 0
+    window.video_view.set_image(None)
+    window.video_view.set_project(window.project)
+    window._toggle_play()
+    samples = []
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline and window._timeline_playing:
+        QTest.qWait(10)
+        image = window.video_view.viewport().grab().toImage()
+        color = image.pixelColor(image.width() // 2, image.height() // 2)
+        samples.append((color.red(), color.green(), color.blue()))
+    assert not window._timeline_playing, 'Playback stalled at a cut'
+    first_red = next(i for i, (r, g, b) in enumerate(samples) if r > 180 and b < 40)
+    first_blue = next(i for i, (r, g, b) in enumerate(samples) if b > 180 and r < 40)
+    assert first_blue > first_red
+    assert all(max(rgb) > 80 for rgb in samples[first_red:first_blue + 1])
+
+
+def test_magnetic_clip_reorder_is_one_undoable_edit(window, monkeypatch):
+    from PySide6.QtCore import QEvent, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+
+    window.project = ProjectState(zoom=100, active_clip_id='a')
+    window.project.clips = [
+        VideoClip(id=clip_id, path='/tmp/example.mp4', name=clip_id, duration=5,
+                  start_time=i * 5, trim_start=0, trim_end=5)
+        for i, clip_id in enumerate(['a', 'b', 'c'])
+    ]
+    window.timeline.set_project(window.project)
+    monkeypatch.setattr(window, '_sync_player_to_timeline', lambda **kwargs: None)
+    monkeypatch.setattr(window, '_load_active_clip', lambda: None)
+    window._seed_history()
+    canvas = window.timeline.canvas
+    y = canvas._track_y(0) + 20
+
+    def mouse(kind, x, buttons):
+        button = Qt.MouseButton.NoButton if kind == QEvent.Type.MouseMove else Qt.MouseButton.LeftButton
+        event = QMouseEvent(kind, QPointF(x, y), QPointF(x, y), button, buttons,
+                            Qt.KeyboardModifier.NoModifier)
+        QApplication.sendEvent(canvas, event)
+
+    mouse(QEvent.Type.MouseButtonPress, canvas.LABEL_W + 100, Qt.MouseButton.LeftButton)
+    for t in [8, 12, 14, 9]:
+        mouse(QEvent.Type.MouseMove, canvas.LABEL_W + t * 100, Qt.MouseButton.LeftButton)
+    assert len(window._undo_stack) == 1
+    mouse(QEvent.Type.MouseButtonRelease, canvas.LABEL_W + 900, Qt.MouseButton.NoButton)
+    assert [(c.id, c.start_time) for c in window.project.clips] == [
+        ('b', 0), ('a', 5), ('c', 10),
+    ]
+    assert len(window._undo_stack) == 2
+    window.undo()
+    assert [(c.id, c.start_time) for c in window.project.clips] == [('a', 0), ('b', 5), ('c', 10)]
+    window.redo()
+    assert [(c.id, c.start_time) for c in window.project.clips] == [
+        ('b', 0), ('a', 5), ('c', 10),
+    ]

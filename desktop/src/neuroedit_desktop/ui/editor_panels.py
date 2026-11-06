@@ -5,10 +5,11 @@ import time
 from pathlib import Path
 from typing import Literal
 
-from PySide6.QtCore import QDir, QPoint, QPointF, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QDir, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QKeySequence, QPainter, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
+    QApplication,
     QCheckBox,
     QColorDialog,
     QComboBox,
@@ -265,7 +266,7 @@ class TimelineCanvas(QWidget):
 
     HANDLE_PX = 6
     MARKER_HIT_PX = 12
-    SNAP_PX = 10.0
+    SNAP_PX = 8.0
 
     # Cache the static layer (ruler, lanes, blocks, markers) only while the
     # canvas stays a sane size; a long timeline at high zoom can be hundreds of
@@ -276,6 +277,16 @@ class TimelineCanvas(QWidget):
         super().__init__(parent)
         self.project = project
         self._drag: tuple[str, str, float, float] | None = None
+        self._clip_preview_start: float | None = None
+        self._clip_preview_positions: dict[str, float] = {}
+        self._clip_press_position: QPointF | None = None
+        self._clip_pointer_global = QPoint()
+        self.scroll_area: QScrollArea | None = None
+        self._clip_scroll_timer = QTimer(self)
+        self._clip_scroll_timer.setInterval(30)
+        self._clip_scroll_timer.timeout.connect(self._autoscroll_clip_drag)
+        self._annotation_lanes_key: tuple | None = None
+        self._annotation_lanes_value: dict[str, int] = {}
         self._trim_drag_origin: tuple[str, float, float] | None = None
         self._slide_lanes_key: tuple | None = None
         self._slide_lanes_value: dict[str, int] = {}
@@ -303,6 +314,9 @@ class TimelineCanvas(QWidget):
         self.selection_changed.emit(value is not None)
 
     def set_project(self, project: ProjectState) -> None:
+        if project is not self.project:
+            self._drag = None
+            self._clear_clip_move()
         self.project = project
         self._prune_selection()
         self._static_cache_key = None
@@ -311,7 +325,14 @@ class TimelineCanvas(QWidget):
 
     def refresh_geometry(self) -> None:
         self._prune_selection()
-        width = int(self.LABEL_W + project_end_time(self.project) * self.project.zoom + 1)
+        end_time = project_end_time(self.project)
+        if self._clip_preview_positions:
+            end_time = max(end_time, max(self._clip_preview_positions[c.id] + c.display_duration
+                                         for c in self.project.clips))
+        # Qt cannot represent larger widgets. Keep the document's times intact
+        # while bounding display geometry, including finite values that overflow
+        # when multiplied by the zoom.
+        width = int(min(16777215, self.LABEL_W + end_time * max(1.0, self.project.zoom) + 1))
         height = self.RULER_H + sum(self._track_heights())
         self.setMinimumSize(max(width, self.LABEL_W + 1), height)
         self.resize(max(width, self.LABEL_W + 1), height)
@@ -330,9 +351,10 @@ class TimelineCanvas(QWidget):
         if not any(item.id == item_id for item in pools.get(kind, [])):
             self._set_selection(None)
 
-    def paintEvent(self, _event) -> None:  # noqa: N802
+    def paintEvent(self, event) -> None:  # noqa: N802
         paint_start = time.perf_counter()
         painter = QPainter(self)
+        painter.setClipRegion(event.region())
         # Floor must match the hit-test floor (1.0) or paint and clicks disagree
         # once zoom-to-fit drops below the old 10 px/s minimum.
         zoom = max(1.0, self.project.zoom)
@@ -368,6 +390,7 @@ class TimelineCanvas(QWidget):
             self.selected_item,
             self._hover_item,
             self._drag[0:2] if self._drag else None,
+            tuple(self._clip_preview_positions.items()),
             # Over-guidance outlines depend on the goal/talk-length settings.
             p.video_goal, round(p.target_presentation_minutes, 1),
             tuple(
@@ -426,7 +449,12 @@ class TimelineCanvas(QWidget):
     def _paint_ruler(self, painter: QPainter, zoom: float, end_time: float) -> None:
         step = 1 if zoom >= 150 else 5 if zoom >= 60 else 10 if zoom >= 30 else 30
         painter.setFont(self.font())
-        for tick in range(0, int(math.ceil(end_time + step)), step):
+        # Paint only exposed ticks. The unclipped case is the bounded static
+        # pixmap cache, whose complete ruler must be available when scrolling.
+        bounds = painter.clipBoundingRect() if painter.hasClipping() else QRectF(self.rect())
+        first = max(0, math.floor((bounds.left() - self.LABEL_W - 22) / zoom / step) * step)
+        last = min(end_time, (bounds.right() - self.LABEL_W + 22) / zoom)
+        for tick in range(first, max(first, math.ceil(last / step) * step) + step, step):
             x = self.LABEL_W + tick * zoom
             painter.setPen(QPen(QColor(BORDER_BRIGHT), 1))
             painter.drawLine(QPointF(x, 0), QPointF(x, 12))
@@ -456,11 +484,14 @@ class TimelineCanvas(QWidget):
     def _block_rect(self, start: float, duration: float, track_idx: int, zoom: float) -> QRectF:
         x = self.LABEL_W + start * zoom
         y = self._track_y(track_idx) + 6
-        return QRectF(x, y, max(28.0, duration * zoom), self.TRACK_H - 12)
+        # A short video must not cover its neighbor's body/trim hit targets.
+        minimum_width = 1.0 if track_idx == 0 else 28.0
+        return QRectF(x, y, max(minimum_width, duration * zoom), self.TRACK_H - 12)
 
     def _track_heights(self) -> list[int]:
         heights = [self.TRACK_H for _track in self.TRACKS]
         heights[2] = max(self.TRACK_H, self.TRACK_H * self._slide_lane_count())
+        heights[3] = self.TRACK_H * (max(self._annotation_lanes().values(), default=0) + 1)
         return heights
 
     def _track_y(self, track_idx: int, heights: list[int] | None = None) -> int:
@@ -532,7 +563,9 @@ class TimelineCanvas(QWidget):
             painter.drawRoundedRect(rect, 8, 8)
         painter.setPen(QColor(TEXT_PRIMARY))
         text_rect = rect.adjusted(8, 0, -8, 0)
-        painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter, label)
+        if text_rect.width() > 0:
+            text = painter.fontMetrics().elidedText(label, Qt.TextElideMode.ElideRight, int(text_rect.width()))
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter, text)
 
     def _paint_video_blocks(self, painter: QPainter, zoom: float) -> None:
         dragged_id = (
@@ -547,7 +580,9 @@ class TimelineCanvas(QWidget):
                 continue
             self._paint_video_clip(painter, clip, zoom, dragging=False)
         if dragged_clip is not None:
-            self._paint_video_clip(painter, dragged_clip, zoom, dragging=True)
+            self._paint_video_clip(painter, dragged_clip, zoom, dragging=(
+                self._clip_preview_start is not None or self._drag[0] != "clip"
+            ))
 
     def _paint_video_clip(
         self,
@@ -557,7 +592,8 @@ class TimelineCanvas(QWidget):
         *,
         dragging: bool,
     ) -> None:
-        rect = self._block_rect(clip.start_time, clip.display_duration, 0, zoom)
+        start = self._clip_preview_positions.get(clip.id, clip.start_time)
+        rect = self._block_rect(start, clip.display_duration, 0, zoom)
         active = clip.id == self.project.active_clip_id
         if dragging:
             glow = rect.adjusted(-7, -7, 7, 7)
@@ -566,7 +602,6 @@ class TimelineCanvas(QWidget):
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(glow_color)
             painter.drawRoundedRect(glow, 11, 11)
-            rect = rect.adjusted(-4, -4, 4, 4)
         color = ACCENT_CYAN if dragging else TIMELINE_VIDEO
         fill_alpha = 110 if dragging else 70 if active else 46
         selected = self.selected_item == ("clip", clip.id)
@@ -592,8 +627,9 @@ class TimelineCanvas(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(handle_color)
         h = self.HANDLE_PX + (2 if dragging else 0)
-        painter.drawRect(QRectF(rect.left(), rect.top() + 4, h, rect.height() - 8))
-        painter.drawRect(QRectF(rect.right() - h, rect.top() + 4, h, rect.height() - 8))
+        if rect.width() > h * 3:
+            painter.drawRect(QRectF(rect.left(), rect.top() + 4, h, rect.height() - 8))
+            painter.drawRect(QRectF(rect.right() - h, rect.top() + 4, h, rect.height() - 8))
         if active or dragging:
             painter.setPen(QPen(QColor("#ffffff"), 2 if dragging else 1))
             painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -634,16 +670,45 @@ class TimelineCanvas(QWidget):
             return remaining
         return min(annotation.ann_duration, remaining)
 
+    def _annotation_lanes(self) -> dict[str, int]:
+        zoom = max(1.0, self.project.zoom)
+        key = (zoom, project_end_time(self.project), tuple(
+            (a.id, a.frame_time, a.ann_duration) for a in self.project.annotations
+        ))
+        if key == self._annotation_lanes_key:
+            return self._annotation_lanes_value
+        ends: list[float] = []
+        assigned = {}
+        for annotation in sorted(self.project.annotations, key=lambda a: (a.frame_time, a.id)):
+            start = annotation.frame_time
+            end = start + max(28 / zoom, self._annotation_timeline_duration(annotation))
+            lane = next((i for i, lane_end in enumerate(ends) if start > lane_end), len(ends))
+            if lane == len(ends):
+                ends.append(end)
+            else:
+                ends[lane] = end
+            assigned[annotation.id] = lane
+        self._annotation_lanes_key = key
+        self._annotation_lanes_value = assigned
+        return assigned
+
+    def _annotation_block_rect(self, annotation, zoom: float) -> QRectF:
+        rect = self._block_rect(annotation.frame_time, self._annotation_timeline_duration(annotation), 3, zoom)
+        rect.translate(0, self._annotation_lanes()[annotation.id] * self.TRACK_H)
+        return rect
+
     def _paint_annotation_blocks(self, painter: QPainter, zoom: float) -> None:
         for annotation in self.project.annotations:
-            duration = self._annotation_timeline_duration(annotation)
-            rect = self._block_rect(annotation.frame_time, duration, 3, zoom)
+            rect = self._annotation_block_rect(annotation, zoom)
             selected = self.selected_item == ("annotation", annotation.id)
             hovered = self._hover_item == ("annotation", annotation.id)
             name = annotation.label or annotation.type.replace("-", " ")
+            if not annotation.visible:
+                name = f"Hidden · {name}"
             suffix = "to end" if annotation.ann_duration <= 0 else f"{annotation.ann_duration:g}s"
             self._paint_block(
-                painter, rect, f"{name} · {suffix}", ACCENT_EMERALD, 36,
+                painter, rect, f"{name} · {suffix}",
+                ACCENT_EMERALD if annotation.visible else TEXT_MUTED, 36,
                 selected=selected, hovered=hovered,
             )
 
@@ -696,6 +761,8 @@ class TimelineCanvas(QWidget):
                 return
             origin_start = self._item_start_time(kind, item_id)
             self._drag = (kind, item_id, offset, origin_start)
+            if kind == "clip":
+                self._clip_press_position = QPointF(pos)
             if kind == "clip-trim-start":
                 clip = next((c for c in self.project.clips if c.id == item_id), None)
                 if clip is not None:
@@ -726,7 +793,6 @@ class TimelineCanvas(QWidget):
         kind, item_id, offset, origin_start = self._drag
         zoom = max(1.0, self.project.zoom)
         time_at = max(0.0, (event.position().x() - self.LABEL_W) / zoom)
-        insert_direction = None
         # Shift bypasses snapping for the duration of the drag.
         snap = not (event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
         base_kind = "clip" if kind.startswith("clip") else kind
@@ -734,17 +800,17 @@ class TimelineCanvas(QWidget):
         self._snap_indicator_time = None
 
         if kind == "clip":
-            new_start = max(0.0, time_at - offset)
-            if snap:
-                new_start = self._snap_time(new_start, base_kind, item_id)
-            if new_start < origin_start - 0.05:
-                insert_direction = "left"
-            elif new_start > origin_start + 0.05:
-                insert_direction = "right"
-            for clip in self.project.clips:
-                if clip.id == item_id:
-                    clip.start_time = new_start
-                    break
+            self._clip_pointer_global = event.globalPosition().toPoint()
+            press = self._clip_press_position
+            if self._clip_preview_start is not None or (
+                press is not None
+                and (event.position() - press).manhattanLength() >= QApplication.startDragDistance()
+            ):
+                self._update_clip_drag(event.position())
+                self._clip_scroll_timer.start()
+            self.update()
+            self._update_trash_arm(self._clip_pointer_global)
+            return
         elif kind == "clip-trim-start":
             if snap:
                 time_at = self._snap_time(time_at, base_kind, item_id)
@@ -777,16 +843,69 @@ class TimelineCanvas(QWidget):
                     break
 
         if kind.startswith("clip"):
-            self.project.arrange_clips_without_overlap(
-                item_id,
-                insert_anchor=time_at if kind == "clip" else None,
-                insert_direction=insert_direction,
-            )
+            self.project.arrange_clips_without_overlap()
         self.project.duration = project_end_time(self.project)
         self.edit_preview_changed.emit()
         self.refresh_geometry()
         self.update()
         self._update_trash_arm(event.globalPosition().toPoint())
+
+    def _update_clip_drag(self, pos: QPointF) -> None:
+        _kind, item_id, _offset, _origin = self._drag
+        pointer_time = (pos.x() - self.LABEL_W) / max(1.0, self.project.zoom)
+        self._preview_clip_move(item_id, pointer_time)
+        self.refresh_geometry()
+
+    def _preview_clip_move(self, item_id: str, pointer_time: float) -> None:
+        moving = next(c for c in self.project.clips if c.id == item_id)
+        others = [c for c in self.project.clips if c.id != item_id]
+        insert_at = sum(
+            pointer_time >= clip.start_time + clip.display_duration / 2
+            for clip in others
+        )
+        ordered = list(others)
+        ordered.insert(insert_at, moving)
+        positions = self.project.compact_clip_positions(ordered)
+        self._clip_preview_positions = positions
+        self._clip_preview_start = positions[item_id]
+        self._snap_indicator_time = positions[item_id]
+
+    def _commit_clip_move(self) -> None:
+        if not self._clip_preview_positions:
+            return
+        for clip in self.project.clips:
+            clip.start_time = self._clip_preview_positions[clip.id]
+        self.project.clips.sort(key=lambda c: c.start_time)
+        self.project.arrange_clips_without_overlap()
+        self.project.duration = project_end_time(self.project)
+
+    def _autoscroll_clip_drag(self) -> None:
+        if self._drag is None or self._clip_preview_start is None or self.scroll_area is None:
+            return
+        viewport = self.scroll_area.viewport()
+        pointer = viewport.mapFromGlobal(self._clip_pointer_global)
+        if self._over_trash or not 0 <= pointer.y() <= viewport.height():
+            return
+        margin = 36
+        if pointer.x() < margin:
+            delta = -min(24, max(1, (margin - pointer.x()) // 2))
+        elif pointer.x() > viewport.width() - margin:
+            delta = min(24, max(1, (pointer.x() - viewport.width() + margin) // 2))
+        else:
+            return
+        bar = self.scroll_area.horizontalScrollBar()
+        before = bar.value()
+        bar.setValue(before + delta)
+        if bar.value() != before:
+            self._update_clip_drag(QPointF(self.mapFromGlobal(self._clip_pointer_global)))
+            self.update()
+
+    def _clear_clip_move(self) -> None:
+        self._clip_scroll_timer.stop()
+        self._clip_preview_start = None
+        self._clip_preview_positions = {}
+        self._clip_press_position = None
+        self.refresh_geometry()
 
     def _point_over_trash(self, global_pt: QPoint) -> bool:
         target = self.trash_target
@@ -819,11 +938,25 @@ class TimelineCanvas(QWidget):
             self._set_selection((base_kind, drag[1]))
             self._delete_selected_item()
         elif drag is not None:
+            if drag[0] == "clip":
+                self._commit_clip_move()
             self.update()
             self.project_changed.emit()
+        self._clear_clip_move()
         super().mouseReleaseEvent(event)
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
+        if event.key() == Qt.Key.Key_Escape and self._drag is not None and self._drag[0] == "clip":
+            self._drag = None
+            self._clear_clip_move()
+            self._snap_indicator_time = None
+            self._over_trash = False
+            if self.trash_target is not None:
+                self.trash_target.set_armed(False)
+            self.unsetCursor()
+            self.update()
+            event.accept()
+            return
         # Delete/Backspace removes the selected timeline item. Only fires when
         # the canvas itself has focus (click-to-focus), so text fields are safe.
         if (
@@ -836,6 +969,9 @@ class TimelineCanvas(QWidget):
         super().keyPressEvent(event)
 
     def _delete_selected_item(self) -> None:
+        if self._drag is not None and self._drag[0] == "clip":
+            self._drag = None
+            self._clear_clip_move()
         if self.selected_item is None:
             return
         kind, item_id = self.selected_item
@@ -988,8 +1124,8 @@ class TimelineCanvas(QWidget):
         self.update()
         self.project_changed.emit()
 
-    def _snap_time(self, t: float, exclude_kind: str, exclude_id: str) -> float:
-        """Snap `t` to the nearest target within SNAP_PX screen pixels.
+    def _snap_time(self, t: float, exclude_kind: str, exclude_id: str, *, duration: float = 0.0) -> float:
+        """Snap a block's start or end to a target within SNAP_PX pixels.
 
         Targets: t=0, the playhead, clip/slide/audio edges, and marker times —
         excluding the dragged item itself. Pixel-space threshold so snapping
@@ -1015,10 +1151,12 @@ class TimelineCanvas(QWidget):
             targets.append(slide.start_time)
             targets.append(slide.start_time + max(0.25, slide.duration))
         targets.extend(marker.time for marker in self.project.markers)
-        best = min(targets, key=lambda target: abs(target - t))
+        candidates = [(target - edge, target) for target in targets for edge in (0.0, duration)
+                      if target - edge >= 0]
+        best, guide = min(candidates, key=lambda candidate: abs(candidate[0] - t))
         if abs(best - t) <= threshold:
-            # Remember the engaged target so paint can draw the snap guide line.
-            self._snap_indicator_time = best
+            # Either edge can snap; the guide marks the edge that engaged.
+            self._snap_indicator_time = guide
             return best
         return t
 
@@ -1037,6 +1175,16 @@ class TimelineCanvas(QWidget):
             if marker is not None:
                 hover = ("marker", marker.id)
         if hover != self._hover_item:
+            tooltip = ""
+            if hover is not None and hover[0] == "clip":
+                clip = next(c for c in self.project.clips if c.id == hover[1])
+                tooltip = f"{clip.name} · {clip.display_duration:g}s"
+            if hover is not None and hover[0] == "annotation":
+                annotation = next(a for a in self.project.annotations if a.id == hover[1])
+                end = annotation.frame_time + self._annotation_timeline_duration(annotation)
+                state = "Visible" if annotation.visible else "Hidden"
+                tooltip = f"{annotation.label or annotation.type} · {state}\n{fmt_time(annotation.frame_time)} – {fmt_time(end)}"
+            self.setToolTip(tooltip)
             self._hover_item = hover
             self.update()
 
@@ -1119,12 +1267,7 @@ class TimelineCanvas(QWidget):
             if rect.contains(x, y):
                 return "slide", slide.id, (x - rect.left()) / zoom
         for annotation in self.project.annotations:
-            rect = self._block_rect(
-                annotation.frame_time,
-                self._annotation_timeline_duration(annotation),
-                3,
-                zoom,
-            )
+            rect = self._annotation_block_rect(annotation, zoom)
             if rect.contains(x, y):
                 return "annotation", annotation.id, (x - rect.left()) / zoom
         return None
@@ -1178,6 +1321,21 @@ class TrashDropTarget(QPushButton):
             f" border-radius: {radius}px; color: #ffffff; font-size: 20px; }}"
             f"QPushButton:hover {{ background: {ACCENT_RED}; border-color: #ffffff; }}"
         )
+
+
+class TimelineScrollArea(QScrollArea):
+    def wheelEvent(self, event) -> None:  # noqa: N802
+        # Wheel and two-finger gestures pan time; Shift reaches stacked lanes.
+        vertical = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+        bar = self.verticalScrollBar() if vertical else self.horizontalScrollBar()
+        pixels = event.pixelDelta()
+        angle = event.angleDelta()
+        delta = pixels.y() if vertical else (pixels.x() or pixels.y())
+        if pixels.isNull():
+            steps = angle.y() if vertical else (angle.x() or angle.y())
+            delta = steps / 120 * bar.singleStep() * QApplication.wheelScrollLines()
+        bar.setValue(bar.value() - round(delta))
+        event.accept()
 
 
 class RichTimelineWidget(QWidget):
@@ -1298,7 +1456,9 @@ class RichTimelineWidget(QWidget):
         self.canvas.edit_preview_changed.connect(self._refresh_edit_preview)
         self.canvas.item_activated.connect(self.item_activated)
 
-        self.scroll = QScrollArea()
+        self.scroll = TimelineScrollArea()
+        self.canvas.scroll_area = self.scroll
+        self.scroll.setToolTip("Scroll to move through time. Shift-scroll to reach stacked label rows.")
         self.scroll.setWidget(self.canvas)
         self.scroll.setWidgetResizable(False)
         self.scroll.setFixedHeight(self._timeline_scroll_height())
@@ -1482,12 +1642,15 @@ class RichTimelineWidget(QWidget):
         right_fade_out = target.fade_out
         target.fade_out = 0.0
 
+        while target.name.endswith(" (cont.)"):
+            target.name = target.name.removesuffix(" (cont.)")
+
         # Build the second piece, referencing the same source media. media_type
         # must carry over or a cut image clip turns into an unloadable "video".
         right = VideoClip(
             id=new_id(),
             path=target.path,
-            name=f"{target.name} (cont.)",
+            name=target.name,
             duration=target.duration,
             start_time=playhead,
             trim_start=split_trim,

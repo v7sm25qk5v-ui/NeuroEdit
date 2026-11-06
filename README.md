@@ -4,19 +4,24 @@ NeuroEdit is a standalone desktop video editor for preparing operative video for
 conference, research, and educational use. It runs entirely on your own machine —
 no video, audio, or patient content ever leaves the computer.
 
-Current release: [v0.5.12](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.12)
+Current alpha: [v0.5.13-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.13-alpha)
 
-### What's new in v0.5.12
+### What's new in v0.5.13-alpha
 
-- Export handles fractional cuts on one output-frame clock, keeping short
-  multi-cut timelines aligned with narration and redactions.
-- Export cancellation reaches a running worker promptly, and failed rendering
-  cleans up its FFmpeg process.
-- SAM correctly maps between trimmed/moved timeline clips and source media;
-  propagation stays within the selected clip.
-- Ripple edits keep captions and tracked-mask samples synchronized with their
-  narration and annotations. Project recovery and Save As failure paths are
-  also more resilient.
+- Redactions follow letterboxed footage correctly, cover their final frame,
+  and survive **Take Still** insertion over resumed video. Export also strips
+  source stream metadata and keeps fast segments on the output-frame clock.
+- Project saving and mask cleanup reject unsafe managed paths and planted
+  links. Project Library uses neutral previews instead of raw source thumbnails.
+- Opening projects preserves saved timeline positions and review state;
+  extreme durations no longer cause unbounded ruler drawing.
+- Timeline reordering previews the new sequence before release, supports edge
+  scrolling and Escape cancellation, and preserves full-frame still intervals.
+  Wheel navigation, overlapping label rows, split names, and playback holds
+  across source changes are improved.
+
+The retained security findings are tracked in [SECURITY_FIXES.md](SECURITY_FIXES.md).
+The original scan had partial coverage; these fixes do not constitute a completed audit.
 
 ## Features
 
@@ -43,7 +48,7 @@ Current release: [v0.5.12](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/t
   bitrate controls, export history, and a written export report next to each MP4.
 - **Media linking and project library** — add individual files or link a video
   folder on an external drive while keeping the source files in place. Finder/
-  File Explorer drag-and-drop, recent-project thumbnails, durations,
+  File Explorer drag-and-drop, a recent-project library with neutral previews, durations,
   missing-media warnings, and search/sort are also supported.
 - **Appearance** — Light, Dark, or System theme, chosen on first launch and
   switchable any time from View → Appearance.
@@ -52,7 +57,7 @@ Current release: [v0.5.12](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/t
 
 ### macOS
 
-Download `NeuroEdit-v0.5.12-macOS-unsigned.dmg` from the release page.
+Download `NeuroEdit-v0.5.13-alpha-macOS-unsigned.dmg` from the release page.
 Open the DMG, drag `NeuroEdit.app` into Applications, then right-click the app
 and choose `Open` for the first launch.
 
@@ -62,7 +67,7 @@ If macOS blocks launch, open `System Settings` -> `Privacy & Security`, choose
 
 ### Windows
 
-Download `NeuroEdit-v0.5.12-Windows-Setup.exe` from the release page on a
+Download `NeuroEdit-v0.5.13-alpha-Windows-Setup.exe` from the release page on a
 Windows PC. If SmartScreen warns, choose `More info` -> `Run anyway`, then follow
 the installer.
 

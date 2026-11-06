@@ -281,6 +281,10 @@ class ProjectExporter:
             add(ann.frame_time)
             ann_end = duration if ann.ann_duration == 0 else ann.frame_time + ann.ann_duration
             add(ann_end)
+            if ann.type == "redact" and ann.visible and ann.ann_duration != 0:
+                # Visibility includes the endpoint. Isolate its output frame so
+                # later unredacted footage can still use the fast path.
+                add(ann_end + 1 / self.settings.fps)
 
         for cue in self._caption_cues:
             add(cue.start)
@@ -327,7 +331,7 @@ class ProjectExporter:
                 continue
             r_start = ann.frame_time
             r_end = math.inf if ann.ann_duration == 0 else ann.frame_time + ann.ann_duration
-            if r_start < end and start < r_end:
+            if r_start < end and start <= r_end:
                 return True
         return False
 
@@ -373,16 +377,20 @@ class ProjectExporter:
             "error",
             "-ss",
             f"{source_start:.9f}",
-            "-t",
-            f"{segment.duration:.9f}",
             "-i",
             segment.clip.path,
             "-map_metadata",
+            "-1",
+            "-map_metadata:s",
             "-1",
             "-map_chapters",
             "-1",
             "-vf",
             vf,
+            "-r",
+            str(self.settings.fps),
+            "-frames:v",
+            str(self._frame_number(segment.end) - self._frame_number(segment.start)),
             "-an",
             *self._encoder_args(ffmpeg),
             "-pix_fmt",
@@ -502,6 +510,8 @@ class ProjectExporter:
             str(list_path),
             "-map_metadata",
             "-1",
+            "-map_metadata:s",
+            "-1",
             "-map_chapters",
             "-1",
             "-c",
@@ -606,10 +616,12 @@ class ProjectExporter:
             )
 
         clip = self._clip_at_time(time_s)
+        source_rect = None
         if clip is not None:
             clip_frame = self._frame_for_clip(clip, time_s)
             if clip_frame is None:
                 raise RuntimeError(f"Could not render source media for clip: {clip.name}")
+            source_rect = self._fitted_source_rect(clip_frame.shape[1], clip_frame.shape[0])
             frame = self._fit_frame(clip_frame)
 
         return self._paint_qt(
@@ -618,6 +630,7 @@ class ProjectExporter:
             slide=slide,
             include_annotations=True,
             include_fade=True,
+            source_rect=source_rect,
         )
 
     def _frame_for_clip(self, clip: VideoClip, time_s: float) -> np.ndarray | None:
@@ -658,19 +671,23 @@ class ProjectExporter:
         state["last_frame"] = rgb
         return rgb
 
+    def _fitted_source_rect(self, src_w: int, src_h: int) -> QRectF:
+        scale = min(self.settings.width / src_w, self.settings.height / src_h)
+        out_w = max(1, int(round(src_w * scale)))
+        out_h = max(1, int(round(src_h * scale)))
+        return QRectF((self.settings.width - out_w) // 2, (self.settings.height - out_h) // 2,
+                      out_w, out_h)
+
     def _fit_frame(self, frame: np.ndarray) -> np.ndarray:
         import cv2  # noqa: PLC0415
 
         src_h, src_w = frame.shape[:2]
         if src_w <= 0 or src_h <= 0:
             return np.zeros((self.settings.height, self.settings.width, 3), dtype=np.uint8)
-        scale = min(self.settings.width / src_w, self.settings.height / src_h)
-        out_w = max(1, int(round(src_w * scale)))
-        out_h = max(1, int(round(src_h * scale)))
+        rect = self._fitted_source_rect(src_w, src_h)
+        x, y, out_w, out_h = int(rect.x()), int(rect.y()), int(rect.width()), int(rect.height())
         resized = cv2.resize(frame, (out_w, out_h), interpolation=cv2.INTER_AREA)
         canvas = np.zeros((self.settings.height, self.settings.width, 3), dtype=np.uint8)
-        x = (self.settings.width - out_w) // 2
-        y = (self.settings.height - out_h) // 2
         canvas[y:y + out_h, x:x + out_w] = resized
         return canvas
 
@@ -682,6 +699,7 @@ class ProjectExporter:
         slide: Slide | None,
         include_annotations: bool,
         include_fade: bool,
+        source_rect: QRectF | None = None,
     ) -> np.ndarray:
         height, width = frame.shape[:2]
         qimage = QImage(
@@ -705,7 +723,7 @@ class ProjectExporter:
         self._paint_captions(painter, time_s, width, height)
         # Redactions burn last and unconditionally — even behind a full-frame slide —
         # so a redaction placed over slide/still content is never skipped.
-        self._paint_redactions(painter, time_s, width, height)
+        self._paint_redactions(painter, time_s, width, height, source_rect)
 
         painter.end()
         bits = qimage.bits()
@@ -967,17 +985,25 @@ class ProjectExporter:
             background=self.project.caption_background,
         )
 
-    def _paint_redactions(self, painter: QPainter, time_s: float, w: int, h: int) -> None:
+    def _paint_redactions(
+        self, painter: QPainter, time_s: float, w: int, h: int, source_rect: QRectF | None,
+    ) -> None:
         """Burn every visible redaction as a fully opaque black box, last and on
         top, so the underlying PHI is irrecoverable in the exported file."""
         painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         painter.setOpacity(1.0)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(QColor("#000000")))
         for ann in self.project.annotations:
             if ann.type != "redact" or not ann.is_visible_at(time_s):
                 continue
-            painter.drawRect(self._annotation_rect(ann, w, h))
+            bounds = source_rect if source_rect is not None else QRectF(0, 0, w, h)
+            rect = self._annotation_rect(ann, bounds.width(), bounds.height())
+            rect.translate(bounds.x(), bounds.y())
+            left, top = math.floor(rect.left()), math.floor(rect.top())
+            right, bottom = math.ceil(rect.right()), math.ceil(rect.bottom())
+            painter.drawRect(QRectF(left, top, right - left, bottom - top))
         painter.restore()
 
     def _paint_fade(self, painter: QPainter, time_s: float, w: int, h: int) -> None:
@@ -1117,6 +1143,8 @@ class ProjectExporter:
                 "-map",
                 "[mix]",
                 "-map_metadata",
+                "-1",
+                "-map_metadata:s",
                 "-1",
                 "-map_chapters",
                 "-1",

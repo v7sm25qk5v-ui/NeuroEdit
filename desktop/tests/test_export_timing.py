@@ -130,7 +130,7 @@ def test_fractional_redaction_between_fast_video_segments(qt_app, tmp_path, monk
             frames.append(frame)
         assert len(frames) == 10
         for index, frame in enumerate(frames):
-            if index in (4, 5):
+            if index in (4, 5, 6):
                 assert frame.max() <= 5
             else:
                 assert frame.min() >= 245
@@ -173,3 +173,65 @@ def test_render_encoder_reaped_and_pipes_closed(qt_app, tmp_path, monkeypatch, f
             if process.poll() is None:
                 process.kill()
                 process.communicate(timeout=5)
+
+@pytest.mark.parametrize("with_audio", [False, True])
+def test_export_does_not_copy_source_stream_metadata(qt_app, tmp_path, monkeypatch, ffmpeg, with_audio):
+    source = tmp_path / "source.mp4"
+    subprocess.run([
+        ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i",
+        "color=c=white:s=64x64:r=30:d=1", "-f", "lavfi", "-i",
+        "sine=frequency=440:duration=1", "-c:v", "libx264", "-c:a", "aac",
+        "-metadata:s:v:0", "handler_name=PRIVATE_PATIENT_NAME", "-shortest", str(source),
+    ], check=True, timeout=15)
+    probe = subprocess.run([ffmpeg, "-hide_banner", "-i", str(source)],
+                           capture_output=True, text=True, timeout=15)
+    assert "PRIVATE_PATIENT_NAME" in probe.stderr
+    project = ProjectState()
+    project.add_clip(source, 1, 64, 64)
+    exporter = _exporter(project, tmp_path, monkeypatch)
+    monkeypatch.setattr(exporter, "_find_ffmpeg", lambda: ffmpeg)
+    if not with_audio:
+        monkeypatch.setattr(exporter, "_audio_sources", lambda _: [])
+    exporter.export()
+    result = subprocess.run([ffmpeg, "-hide_banner", "-i", str(exporter.settings.output_path)],
+                            capture_output=True, text=True, timeout=15)
+    assert "PRIVATE_PATIENT_NAME" not in result.stderr
+
+
+def test_concat_does_not_copy_source_stream_metadata(tmp_path, monkeypatch, ffmpeg):
+    source = tmp_path / "source.mp4"
+    subprocess.run([
+        ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i",
+        "color=c=white:s=64x64:r=30:d=1", "-c:v", "libx264",
+        "-metadata:s:v:0", "handler_name=PRIVATE_PATIENT_NAME", str(source),
+    ], check=True, timeout=15)
+    probe = subprocess.run([ffmpeg, "-hide_banner", "-i", str(source)],
+                           capture_output=True, text=True, timeout=15)
+    assert "PRIVATE_PATIENT_NAME" in probe.stderr
+    exporter = _exporter(ProjectState(), tmp_path, monkeypatch)
+    output = tmp_path / "joined.mp4"
+    exporter._concat_video_segments([source, source], output, ffmpeg, tmp_path)
+    result = subprocess.run([ffmpeg, "-hide_banner", "-i", str(output)],
+                            capture_output=True, text=True, timeout=15)
+    assert "PRIVATE_PATIENT_NAME" not in result.stderr
+
+
+def test_audio_mux_does_not_copy_video_stream_metadata(tmp_path, monkeypatch, ffmpeg):
+    from neuroedit_desktop.exporter import AudioSource
+
+    source = tmp_path / "source.mp4"
+    subprocess.run([
+        ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i",
+        "color=c=white:s=64x64:r=30:d=1", "-f", "lavfi", "-i",
+        "sine=frequency=440:duration=1", "-c:v", "libx264", "-c:a", "aac",
+        "-metadata:s:v:0", "handler_name=PRIVATE_PATIENT_NAME", "-shortest", str(source),
+    ], check=True, timeout=15)
+    probe = subprocess.run([ffmpeg, "-hide_banner", "-i", str(source)],
+                           capture_output=True, text=True, timeout=15)
+    assert "PRIVATE_PATIENT_NAME" in probe.stderr
+    exporter = _exporter(ProjectState(), tmp_path, monkeypatch)
+    output = tmp_path / "muxed-result.mp4"
+    exporter._mux_audio(source, output, [AudioSource(source, 0, 0, 1, 1)], ffmpeg, 1)
+    result = subprocess.run([ffmpeg, "-hide_banner", "-i", str(output)],
+                            capture_output=True, text=True, timeout=15)
+    assert "PRIVATE_PATIENT_NAME" not in result.stderr

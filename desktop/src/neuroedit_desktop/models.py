@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -253,7 +254,12 @@ class ProjectState:
         insert_anchor: float | None = None,
         insert_direction: Literal["left", "right"] | None = None,
     ) -> None:
-        """Keep the primary video track sequential when clips are moved or resized."""
+        """Keep the primary video storyline compact and ordered.
+
+        Empty time between video clips is removed. A gap that is completely
+        occupied by one or more full-frame slides is retained because it is
+        visible project content (Take Still uses this form).
+        """
         if preferred_id is None:
             ordered = sorted(self.clips, key=lambda clip: clip.start_time)
         else:
@@ -266,12 +272,46 @@ class ProjectState:
                     insert_anchor,
                     insert_direction,
                 )
-        cursor = 0.0
+        positions = self.compact_clip_positions(ordered)
         for clip in ordered:
-            if clip.start_time < cursor:
-                clip.start_time = cursor
-            cursor = clip.start_time + clip.display_duration
+            clip.start_time = positions[clip.id]
         self.clips = ordered
+
+    def compact_clip_positions(self, ordered: list[VideoClip] | None = None) -> dict[str, float]:
+        """Return magnetic storyline positions without mutating the project."""
+        original = sorted(self.clips, key=lambda clip: clip.start_time)
+        reserved_gaps: list[tuple[float, float]] = []
+        full_frame_slides = sorted(
+            (slide for slide in self.slides if not slide.overlay),
+            key=lambda slide: slide.start_time,
+        )
+        for left, right in zip(original, original[1:]):
+            gap_start = left.start_time + left.display_duration
+            gap_end = right.start_time
+            if gap_end <= gap_start + 1e-9:
+                continue
+            covered_until = gap_start
+            for slide in full_frame_slides:
+                slide_start = slide.start_time
+                slide_end = slide.start_time + max(0.1, slide.duration)
+                if slide_end <= covered_until + 1e-9:
+                    continue
+                if slide_start > covered_until + 1e-9:
+                    break
+                covered_until = max(covered_until, slide_end)
+                if covered_until >= gap_end - 1e-9:
+                    reserved_gaps.append((gap_start, gap_end))
+                    break
+        ordered = original if ordered is None else ordered
+        cursor = 0.0
+        positions: dict[str, float] = {}
+        for clip in ordered:
+            for gap_start, gap_end in reserved_gaps:
+                if gap_start - 1e-9 <= cursor < gap_end - 1e-9:
+                    cursor = gap_end
+            positions[clip.id] = cursor
+            cursor += clip.display_duration
+        return positions
 
     def ripple_after(
         self,
@@ -478,4 +518,22 @@ class ProjectState:
         project.sam_points = [
             _from_dict_tolerant(SamPoint, point) for point in data.get("sam_points", [])
         ]
+        # JSON accepts NaN/Infinity, but timeline geometry and frame arithmetic
+        # require finite times. Reject invalid documents instead of normalizing
+        # their timing and potentially detaching privacy coverage.
+        values = [project.duration, project.current_time, project.zoom, project.scroll_left]
+        for clip in project.clips:
+            values.extend((clip.duration, clip.start_time, clip.trim_start, clip.trim_end,
+                           clip.start_time + clip.display_duration))
+        for track in project.audio_tracks:
+            values.extend((track.start_time, track.duration, track.start_time + track.duration))
+        for slide in project.slides:
+            values.extend((slide.start_time, slide.duration, slide.start_time + slide.duration))
+        for ann in project.annotations:
+            values.extend((ann.frame_time, ann.ann_duration, ann.frame_time + ann.ann_duration))
+        values.extend(marker.time for marker in project.markers)
+        for segment in project.transcript_segments:
+            values.extend((segment.start_time, segment.end_time))
+        if any(not isinstance(value, (int, float)) or not math.isfinite(value) for value in values):
+            raise ValueError("Project timeline values must be finite numbers.")
         return project

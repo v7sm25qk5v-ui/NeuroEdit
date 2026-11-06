@@ -602,8 +602,13 @@ def build_default_steps(window) -> list[TutorialStep]:
         TutorialStep(
             title="Read the Timeline",
             body=(
-                "The timeline shows video, audio, slides, and markers in separate rows. "
-                "Use the vertical splitter above the timeline to give this area more room."
+                "Drag video clips to preview a new storyline order; release to commit or "
+                "Escape to cancel. Empty gaps close during reordering, while full-frame stills "
+                "keep their time. Video clips remain magnetic even when Snap is off. "
+                "For other blocks, hold Shift or turn off Snap to bypass nearby-edge alignment. "
+                "Hold near an edge to scroll while dragging. "
+                "Scroll to move through time; Shift-scroll moves through stacked label rows. "
+                "Overlapping labels get separate rows, and disabled labels say Hidden."
             ),
             target_resolver=lambda: getattr(window, "timeline", None),
             placement="above",

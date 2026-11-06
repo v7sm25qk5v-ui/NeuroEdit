@@ -14,6 +14,19 @@ bet and stays parked until sample data and a design pass exist.
 ## Optimization Backlog
 _(automation-maintained — new findings appended below, checked off when implemented)_
 
+- [x] **Timeline reordering, wheel navigation, overlapping labels, split names,
+  and playback flashes.** Fixed 2026-09-07, with drag behavior revised after
+  user feedback: explicit reordering compacts the primary video storyline, and
+  clip dragging previews a change in order before release. Saved clip positions
+  and gaps are preserved on load. Full-frame still
+  intervals remain because they are visible content. Release commits one
+  undoable move; edge scrolling reaches offscreen positions, and short clips
+  have accurate hit targets. Wheel scrolling
+  pans time (Shift scrolls label rows); overlapping labels use separate rows
+  with explicit Hidden states; split names retain the source name; and video
+  playback reuses same-file sources and holds the last frame across decoder
+  resets/source changes. See the dated handoff for verification and limits.
+
 - [x] **2026-09-05 multi-agent stability and efficiency review.** Fixed saved-mask
   cleanup, failed-close autosave recovery, Save As errors/same-file copies,
   export cancellation and encoder cleanup, fractional-cut export timing,

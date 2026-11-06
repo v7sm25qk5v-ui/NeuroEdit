@@ -5,6 +5,7 @@ import time
 
 from PySide6.QtCore import QPointF, QRectF, QSizeF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QFontMetricsF, QPainter, QPen, QPixmap, QPolygonF
+from PySide6.QtMultimedia import QVideoFrame
 from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 from PySide6.QtWidgets import QFrame, QGraphicsObject, QGraphicsPixmapItem, QGraphicsScene, QGraphicsView, QWidget
 
@@ -803,6 +804,15 @@ class VideoGraphicsView(QGraphicsView):
         self.video_item.setSize(QSizeF(1920, 1080))
         scene.addItem(self.video_item)
 
+        self.transition_item = QGraphicsPixmapItem()
+        self.transition_item.setZValue(1)
+        self.transition_item.setVisible(False)
+        scene.addItem(self.transition_item)
+        self._last_video_frame = QVideoFrame()
+        self._transition_target_ms: int | None = None
+        self._transition_seek_ready = False
+        self.video_item.videoSink().videoFrameChanged.connect(self._video_frame_changed)
+
         self.image_item = QGraphicsPixmapItem()
         self.image_item.setZValue(5)
         self.image_item.setVisible(False)
@@ -834,7 +844,51 @@ class VideoGraphicsView(QGraphicsView):
             self._rescale_image_item()
             self._fit()
 
+    def _video_frame_changed(self, frame: QVideoFrame) -> None:
+        if not frame.isValid():
+            # EndOfMedia can clear the surface just before the timeline clock
+            # crosses the cut. Keep that last frame through the handoff too.
+            if self.video_item.isVisible() and self._transition_target_ms is None:
+                self.begin_video_transition(0)
+                self.finish_transition_seek()
+            return
+        if self._transition_target_ms is not None:
+            if not self._transition_seek_ready:
+                return
+            # Ignore a decoder's pre-seek frame. VFR frames may begin well
+            # before the target, so also accept a frame spanning that time.
+            target_us = self._transition_target_ms * 1000
+            if frame.startTime() >= 0 and max(frame.startTime(), frame.endTime()) < target_us - 80000:
+                return
+            self.clear_video_transition()
+        self._last_video_frame = QVideoFrame(frame)
+
+    def begin_video_transition(self, target_ms: int) -> None:
+        self._transition_target_ms = target_ms
+        self._transition_seek_ready = False
+        if self._last_video_frame.isValid():
+            pixmap = QPixmap.fromImage(self._last_video_frame.toImage())
+            if not pixmap.isNull():
+                # Rasterize only at a source transition, never on every frame.
+                size = self.video_item.size().toSize()
+                self.transition_item.setPixmap(pixmap.scaled(
+                    size, Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                ))
+                self.transition_item.setVisible(True)
+
+    def finish_transition_seek(self) -> None:
+        self._transition_seek_ready = True
+
+    def clear_video_transition(self) -> None:
+        self.transition_item.setVisible(False)
+        self.transition_item.setPixmap(QPixmap())
+        self._transition_target_ms = None
+        self._transition_seek_ready = False
+
     def set_image(self, path: str | None) -> None:
+        self.clear_video_transition()
+        self._last_video_frame = QVideoFrame()
         if not path:
             self.image_item.setPixmap(QPixmap())
             self.image_item.setVisible(False)
@@ -861,6 +915,8 @@ class VideoGraphicsView(QGraphicsView):
         """Clear the preview to the black background — used when no clip or image
         sits under the playhead (e.g. after deleting the clip there) so a stale
         last decoded frame can't linger."""
+        self.clear_video_transition()
+        self._last_video_frame = QVideoFrame()
         if not self.video_item.isVisible() and not self.image_item.isVisible():
             return
         self.image_item.setPixmap(QPixmap())

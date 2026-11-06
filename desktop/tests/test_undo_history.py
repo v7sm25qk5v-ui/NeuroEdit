@@ -604,6 +604,7 @@ def test_sync_keeps_video_playing_under_overlay_slide() -> None:
     project.slides.append(Slide(id="slide-1", title="Overlay", overlay=True, duration=5.0))
     window = _window(project)
     window.player = _StubPlayer()
+    window.player.source = lambda: QUrl.fromLocalFile(clip.path)
     window._cached_clip_media_problem = lambda _clip: None
 
     window._sync_player_to_timeline(play=True)

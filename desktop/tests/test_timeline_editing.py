@@ -135,12 +135,15 @@ def test_snap_time_does_not_snap_outside_threshold() -> None:
 
 def test_snap_time_excludes_dragged_item() -> None:
     project = _project(current_time=50.0)
-    project.clips.append(_clip("clip-1", start=3.0))
+    project.clips.extend([
+        _clip("preceding", start=0.0, duration=3.0),
+        _clip("clip-1", start=3.0),
+    ])
     canvas = TimelineCanvas(project)
-    # Another item snaps to clip-1's start edge...
-    assert canvas._snap_time(3.05, "clip", "other") == 3.0
-    # ...but clip-1 itself does not snap to its own edges.
-    assert canvas._snap_time(3.05, "clip", "clip-1") == 3.05
+    # Another item snaps to clip-1's unique end edge...
+    assert canvas._snap_time(12.95, "clip", "other") == 13.0
+    # ...but clip-1 itself does not snap to its own edge.
+    assert canvas._snap_time(12.95, "clip", "clip-1") == 12.95
 
 
 def test_snap_time_respects_toggle_off() -> None:
@@ -590,3 +593,235 @@ def test_playhead_move_reuses_static_cache() -> None:
     project.clips[0].start_time = 2.0
     canvas.grab()
     assert canvas._static_cache is not first
+
+
+def _move(canvas, x, y):
+    canvas.mouseMoveEvent(QMouseEvent(
+        QEvent.Type.MouseMove, QPointF(x, y), QPointF(x, y),
+        Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    ))
+
+
+def test_canvas_preserves_existing_dead_space_until_an_explicit_edit():
+    project = _project(clips=[_clip('a', 0, 5), _clip('b', 10, 5), _clip('c', 20, 5)])
+    TimelineCanvas(project)
+
+    assert [(c.id, c.start_time) for c in project.clips] == [
+        ('a', 0), ('b', 10), ('c', 20),
+    ]
+
+
+def test_full_frame_slide_time_is_not_treated_as_dead_space():
+    project = _project(
+        clips=[_clip('left', 0, 4), _clip('right', 9, 4)],
+        slides=[Slide(id='still', title='', start_time=4, duration=5, overlay=False)],
+    )
+
+    TimelineCanvas(project)
+
+    assert [(clip.id, clip.start_time) for clip in project.clips] == [
+        ('left', 0), ('right', 9),
+    ]
+
+
+def test_reorder_preview_preserves_full_frame_slide_time():
+    project = _project(
+        clips=[_clip('left', 0, 4), _clip('right', 9, 4)],
+        slides=[Slide(id='still', title='', start_time=4, duration=5, overlay=False)],
+    )
+    canvas = TimelineCanvas(project)
+
+    canvas._preview_clip_move('right', 0)
+
+    assert canvas._clip_preview_positions == {'right': 0, 'left': 9}
+
+
+@pytest.mark.parametrize('grab_offset', [0.2, 4.8])
+def test_drag_reorders_compact_storyline_from_pointer(grab_offset):
+    project = _project(clips=[_clip('a', 0, 5), _clip('b', 5, 5), _clip('c', 10, 5)])
+    canvas = TimelineCanvas(project)
+    y = canvas._track_y(0) + 20
+    x = canvas.LABEL_W + grab_offset * project.zoom
+    _press(canvas, x, y)
+    drop_x = canvas.LABEL_W + 9 * project.zoom
+    _move(canvas, drop_x, y)
+
+    assert canvas._clip_preview_positions == {'b': 0, 'a': 5, 'c': 10}
+    assert [c.start_time for c in project.clips] == [0, 5, 10]
+
+    _release(canvas, drop_x, y)
+    assert [(c.id, c.start_time) for c in project.clips] == [
+        ('b', 0), ('a', 5), ('c', 10),
+    ]
+
+
+def test_long_clip_uses_pointer_to_choose_storyline_position():
+    project = _project(clips=[_clip('a', 0, 20), _clip('b', 20, 1), _clip('c', 21, 1)])
+    canvas = TimelineCanvas(project)
+    y = canvas._track_y(0) + 20
+    _press(canvas, canvas.LABEL_W + 100, y)
+    _move(canvas, canvas.LABEL_W + 500, y)
+    assert canvas._clip_preview_positions == {'a': 0, 'b': 20, 'c': 21}
+    _release(canvas, canvas.LABEL_W + 500, y)
+    assert [(c.id, c.start_time) for c in project.clips] == [
+        ('a', 0), ('b', 20), ('c', 21),
+    ]
+
+
+def test_drag_can_return_without_an_edit():
+    project = _project(clips=[_clip('a', 0, 5), _clip('b', 5, 5)])
+    canvas = TimelineCanvas(project)
+    y = canvas._track_y(0) + 20
+    x = canvas.LABEL_W + 100
+    _press(canvas, x, y)
+    _move(canvas, x, y - 20)
+    assert canvas._clip_preview_start is not None
+    _move(canvas, x + 800, y)
+    _move(canvas, x, y)
+    _release(canvas, x, y)
+    assert [(c.id, c.start_time) for c in project.clips] == [('a', 0), ('b', 5)]
+
+
+def test_reorder_left_closes_unoccupied_gaps():
+    project = _project(clips=[_clip('a', 0, 5), _clip('b', 5, 3), _clip('c', 20, 2)])
+    canvas = TimelineCanvas(project)
+    y = canvas._track_y(0) + 20
+    x = canvas.LABEL_W + 6 * project.zoom
+    _press(canvas, x, y)
+    _move(canvas, x - 500, y)
+    _release(canvas, x - 500, y)
+    assert [(c.id, c.start_time) for c in project.clips] == [
+        ('b', 0), ('a', 3), ('c', 8),
+    ]
+
+
+def test_overlapping_labels_are_separately_visible_and_clickable():
+    project = _project(clips=[_clip()], annotations=[
+        Annotation(id=str(i), frame_time=1, ann_duration=3, type='rect',
+                   label=f'Label {i}', color='#fff', visible=i != 1)
+        for i in range(3)
+    ])
+    canvas = TimelineCanvas(project)
+    for i in range(3):
+        y = canvas._track_y(3) + i * canvas.TRACK_H + 20
+        _press(canvas, canvas.LABEL_W + 2 * project.zoom, y)
+        assert canvas.selected_item == ('annotation', str(i))
+    assert canvas._track_y(4) >= canvas._track_y(3) + 3 * canvas.TRACK_H
+
+
+def test_repeated_splits_keep_source_name():
+    project = _project(clips=[_clip()])
+    widget = RichTimelineWidget(project)
+    for t in [2, 4, 6]:
+        project.current_time = t
+        widget._cut_active_clip()
+    assert [c.name for c in project.clips] == ['Example'] * 4
+
+
+def test_mouse_wheel_scrolls_timeline_horizontally():
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QWheelEvent
+    project = _project(clips=[_clip(duration=60)])
+    widget = RichTimelineWidget(project)
+    widget.resize(900, 400)
+    widget.show()
+    QApplication.processEvents()
+    event = QWheelEvent(QPointF(200, 100), QPointF(200, 100), QPoint(), QPoint(0, -120),
+                        Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+                        Qt.ScrollPhase.NoScrollPhase, False)
+    QApplication.sendEvent(widget.scroll.viewport(), event)
+    assert widget.scroll.horizontalScrollBar().value() > 0
+    assert project.current_time == 0
+    widget.close()
+
+
+def test_escape_cancels_reorder_without_moving_clips():
+    project = _project(clips=[_clip('a', 0, 5), _clip('b', 5, 5)])
+    canvas = TimelineCanvas(project)
+    y = canvas._track_y(0) + 20
+    x = canvas.LABEL_W + 100
+    _press(canvas, x, y)
+    _move(canvas, x + 600, y)
+    _key(canvas, Qt.Key.Key_Escape)
+    _release(canvas, x + 600, y)
+    assert [(c.id, c.start_time) for c in project.clips] == [('a', 0), ('b', 5)]
+
+
+def test_split_removes_accumulated_legacy_continuation_suffix():
+    clip = _clip()
+    clip.name = 'Example (cont.) (cont.)'
+    project = _project(clips=[clip], current_time=5)
+    RichTimelineWidget(project)._cut_active_clip()
+    assert [c.name for c in project.clips] == ['Example', 'Example']
+
+
+def test_short_split_clips_do_not_overlap_their_click_targets():
+    project = _project(zoom=10, clips=[_clip('a', 0, 1), _clip('b', 1, 1), _clip('c', 2, 1)])
+    canvas = TimelineCanvas(project)
+    y = canvas._track_y(0) + 20
+    for i, clip in enumerate(project.clips):
+        _press(canvas, canvas.LABEL_W + (i + 0.5) * project.zoom, y)
+        assert canvas.selected_item == ('clip', clip.id)
+        assert canvas._drag[0] == 'clip'  # narrow clips are not all trim handles
+        _release(canvas, canvas.LABEL_W + (i + 0.5) * project.zoom, y)
+
+
+def test_clip_drag_scrolls_at_viewport_edge_and_stops_on_cancel():
+    project = _project(clips=[_clip('a', 0, 5), _clip('b', 5, 55)])
+    widget = RichTimelineWidget(project)
+    widget.resize(900, 400)
+    widget.show()
+    QApplication.processEvents()
+    canvas = widget.canvas
+    y = canvas._track_y(0) + 20
+    _press(canvas, canvas.LABEL_W + 100, y)
+    viewport = widget.scroll.viewport()
+    from PySide6.QtCore import QPoint
+    pointer = viewport.mapToGlobal(QPoint(viewport.width() - 4, y))
+    local = canvas.mapFromGlobal(pointer)
+    canvas.mouseMoveEvent(QMouseEvent(
+        QEvent.Type.MouseMove, QPointF(local), QPointF(pointer),
+        Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+    ))
+    before = widget.scroll.horizontalScrollBar().value()
+    canvas._autoscroll_clip_drag()
+    assert widget.scroll.horizontalScrollBar().value() > before
+    assert canvas._clip_scroll_timer.isActive()
+    _key(canvas, Qt.Key.Key_Escape)
+    assert not canvas._clip_scroll_timer.isActive()
+    widget.close()
+
+
+@pytest.mark.parametrize('snap_enabled', [True, False])
+def test_video_storyline_stays_magnetic_when_snap_toggle_changes(snap_enabled):
+    project = _project(clips=[_clip('moving', 0, 2), _clip('next', 2, 2)])
+    canvas = TimelineCanvas(project)
+    canvas.snap_enabled = snap_enabled
+    y = canvas._track_y(0) + 20
+    _press(canvas, canvas.LABEL_W + 100, y)
+    x = canvas.LABEL_W + 350
+    canvas.mouseMoveEvent(QMouseEvent(
+        QEvent.Type.MouseMove, QPointF(x, y), QPointF(x, y),
+        Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    ))
+    assert canvas._clip_preview_positions == {'next': 0, 'moving': 2}
+    _release(canvas, x, y)
+    assert [(clip.id, clip.start_time) for clip in project.clips] == [
+        ('next', 0), ('moving', 2),
+    ]
+
+
+def test_drag_beyond_end_previews_append_then_escape_restores_order():
+    project = _project(clips=[_clip('a', 0, 2)])
+    canvas = TimelineCanvas(project)
+    original_width = canvas.width()
+    y = canvas._track_y(0) + 20
+    _press(canvas, canvas.LABEL_W + 100, y)
+    _move(canvas, canvas.LABEL_W + 500, y)
+    assert canvas.width() == original_width
+    assert canvas._clip_preview_positions == {'a': 0}
+    _key(canvas, Qt.Key.Key_Escape)
+    assert canvas.width() == original_width
+    assert project.clips[0].start_time == 0

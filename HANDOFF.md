@@ -1,5 +1,77 @@
 # NeuroEdit — Session Handoff
 
+## 2026-09-29 — Codex Security scan launch blocked
+
+- Requested a Standard Codex Security scan of the whole repository through
+  `start_codex_security_prompt_only_scan`.
+- The launcher returned `Command failed` for `workbench_db.py
+  start-prompt-only-scan`, without a scan ID or a more specific diagnostic.
+  Capability preflight and source review did not begin; no security conclusions
+  or completed report are available. The plugin workflow prohibits a replacement
+  launch or terminal fallback after this direct-start failure.
+- Separately, `git status --short` failed because the installed Xcode license
+  has not been accepted. Its relationship to the launcher failure is unconfirmed.
+- Only this handoff entry was changed. No application source, fixes, tests,
+  commits, or releases were produced by this attempt.
+
+## 2026-09-07 — Compact primary video storyline
+
+- The user identified dead space as the core interaction problem. The primary
+  video track is now always contiguous: loading a timeline, trimming a clip,
+  deleting a clip, or completing a reorder closes unoccupied gaps.
+- Dragging a video clip previews a change in sequence order. The insertion
+  position follows the pointer as it crosses neighboring clip centers, so the
+  result is independent of where the clip was grabbed. Release commits the
+  visible order as one undoable edit; Escape cancels it.
+- Full-frame slides created by Take Still remain visible project content. A
+  video gap fully occupied by such slides is preserved rather than compacted.
+  Reorder previews and commits preserve that occupied interval as well.
+- Holding near either viewport edge scrolls during a drag. Short video blocks
+  retain their true visual width and only show trim handles when wide enough.
+- The earlier 2026-09-07 free-placement implementation is superseded by this
+  compact storyline behavior. Wheel navigation, stacked label rows, clean split
+  names, and playback transition fixes remain intact.
+- Verification: focused timeline and main-window interaction suites **94
+  passed**; final full desktop suite **255 passed in 97.56s**; `ruff check src
+  tests scripts`; `python -m compileall -q src`; and `git diff --check`.
+- Changes remain local source edits. Existing untracked `desktop/qa/` artifacts
+  were preserved; no commit, push, package, tag, or release was made.
+
+## 2026-09-07 — Timeline interaction and playback transitions
+
+- Addressed the user's active editing reports with focused changes in
+  `editor_panels.py`, `canvas.py`, and `main_window.py`; updated the tutorial and
+  desktop README with the enacted controls.
+- Clip dragging now previews a ghost and insertion guide without mutating the
+  sequence during mouse movement. A neighbor's midpoint must be crossed using
+  the moving clip's edge, independent of grab offset. Release reorders only the
+  affected range, retaining its gaps and all other clip positions; Escape
+  cancels the move. Trim ripple behavior is unchanged.
+- Wheel/trackpad scrolling pans time. Shift-scroll reaches stacked rows.
+  Overlapping annotation blocks have separate clickable rows, hidden annotations
+  are marked Hidden, and hover text exposes the full name and time range.
+- Splits keep the source name and remove legacy repeated `(cont.)` suffixes
+  from the piece being split.
+- Playback compares source URLs instead of clip IDs so same-file cuts reuse
+  the decoder. Different-file loads and EndOfMedia surface resets retain the
+  last valid frame until the next requested frame arrives. Real decoder testing
+  also identified old-source LoadedMedia signals during setSource: deferred
+  seeks now arm after source replacement and check the resulting media status.
+- Verification: new behavioral regressions reproduced the original drag,
+  label, wheel, naming, and source-reload failures. A real FFmpeg/Qt smoke test
+  samples rendered red footage across a same-file split into a trimmed blue
+  file and detects black frames between them. Offscreen timeline screenshots
+  were visually inspected. Final quality checks: **244 passed in 98.28s**;
+  `ruff check src tests scripts`; `python -m compileall -q desktop/src`; and
+  `git diff --check`. Real-video QA used Qt's offscreen FFmpeg backend; packaged
+  macOS/Windows and the user's live footage were not exercised.
+- These are local source changes, not a packaged release. The user's running
+  app was not restarted or modified. Different files may still pause briefly
+  while loading; this change masks that load with the last frame rather than
+  implementing decoder preloading/audio crossfades. Existing untracked
+  `desktop/qa/` artifacts were preserved; test settings use temporary INI files.
+
+
 ## 2026-09-07 — Same-source trim undo preview refresh
 
 - Reviewed automation memory plus `TODO.md`, `NEXT_OPTIMIZATION_PLAN.md`,
@@ -2326,3 +2398,85 @@ analyzed this content as uncommitted work). No code changed; markdown only.
 - Verification target for this docs-only pass remains `ruff check src tests
   scripts`, the full desktop suite, `git diff --check`, and a no-tag push unless
   a release-relevant change appears.
+
+## 64. Deep security scan retained findings (2026-11-06)
+
+- Checked authoritative Codex Security scan `e6bbc1c2-5ecd-4306-a94e-4678895f4498`.
+  It failed on 2026-11-05 after three consecutive unsuccessful discovery workers
+  hit the runtime usage limit. Coverage is partial; this is not a completed audit.
+- The retained artifacts contain 39 finding entries (1 high, 24 medium, 14 low),
+  including repeated underlying issues from independent reviews. Do not treat
+  these counts as distinct vulnerabilities or reconciled severity totals.
+- Highest-rated issue: export letterboxing can displace source-relative privacy
+  boxes and expose identifiers. Other retained issues include destructive mask
+  cleanup through symlinks, Save As path traversal, a save temporary-file symlink,
+  raw library thumbnails, redaction timing/editing gaps, stream metadata copying,
+  project-supplied thumbnail URLs, and unbounded timeline drawing.
+- Existing report and canonical findings were read from
+  `/Users/alangordillo/.codex/state/plugins/codex-security/scans/video-editing-app/152d7197e27d05c6182a73d9e113089facec1071_20261105T211219Z_95eqkpvu/`.
+  No replacement scan, completion retry, vulnerability fix, or runtime test was
+  performed. Only this handoff entry was added to the project.
+
+## 65. Retained security findings remediated (2026-11-06)
+
+- Reconciled all 39 retained occurrences from scan
+  `e6bbc1c2-5ecd-4306-a94e-4678895f4498` into 11 distinct local tickets in
+  `SECURITY_FIXES.md`, preserving original occurrence IDs and severity variance.
+  The failed scan remains partial and unchanged; no new audit, workbench closure,
+  push, or release was performed. Existing user edits were preserved.
+- Export redactions now use the decoded source's exact fitted rectangle, finite
+  redaction endpoints remain covered, and fast segments use the shared output
+  frame count. Fast encoding, concatenation, and audio muxing suppress source
+  stream metadata as well as container metadata.
+- Save uses an exclusive random temporary file. Managed Save As paths reject
+  traversal, symlinks, junctions, and private-source or destination hardlinks
+  while preserving safe same-file aliases and external linked media. Mask cleanup
+  uses no-follow directory descriptors and skips unsafe or unsupported paths.
+- Take Still preserves finite and unlimited redactions over resumed footage.
+  Passive timeline display preserves loaded positions and review approvals.
+  Timeline geometry/tick painting is bounded, nonfinite project times are rejected,
+  and malformed library duration metadata is handled without formatting failures.
+- Project Library now uses neutral placeholders and removes legacy raw thumbnail
+  caches. It no longer extracts original source frames or invokes FFmpeg on
+  project-supplied thumbnail URLs.
+- A fresh independent read-only review found a source-hardlink copy variant,
+  which was reproduced and fixed. No further concrete in-scope bypass was found
+  in that review. Concurrent hostile filesystem mutation remains outside the
+  established supplied-static-project threat and is not guaranteed race-free.
+  Actual Windows execution was not available; junction checks have a simulated
+  regression test, and orphan cleanup fails closed on unsupported platforms.
+- The existing `.venv` contained iCloud dataless dependencies and the system
+  FFmpeg had the wrong CPU architecture. Validation used an isolated runtime at
+  `/private/tmp/neuroedit-security-20261106` and its bundled arm64 FFmpeg exposed
+  through `/private/tmp/neuroedit-security-bin`; repository dependencies were not
+  changed. A delayed first-run tutorial callback caused an offscreen modal during
+  an initial full run; the headless fixture now suppresses that callback before
+  construction, without changing production behavior.
+- Final validation from `desktop/`: `PATH=/private/tmp/neuroedit-security-bin:$PATH
+  QT_QPA_PLATFORM=offscreen PYTHONPATH=src
+  /private/tmp/neuroedit-security-20261106/bin/python -m pytest -q
+  --disable-warnings -o faulthandler_timeout=120` — **301 passed in 89.97 s**.
+  Global `python -m ruff check src tests scripts`, `python -m compileall -q src`,
+  and `git diff --check` also passed using the isolated Python runtime.
+
+## 66. v0.5.13-alpha release preparation (2026-11-06)
+
+- Prepared the current tested security and timeline changes for the user's
+  requested GitHub alpha release. Untracked `desktop/qa/` captures are excluded.
+- Aligned package/version defaults to `0.5.13` and release/download labels to
+  `v0.5.13-alpha`. macOS bundle metadata uses the numeric version while archive
+  names keep the alpha label. Windows installer display/artifact conventions
+  remain unchanged.
+- The release workflow now marks `-alpha` tags as prereleases and preserves
+  stable-tag behavior. Updated release notes, neutral-library-preview wording,
+  and timeline documentation/tutorial text to distinguish explicit magnetic
+  reordering from passive loading that preserves saved gaps.
+- Fresh remote checks confirmed `origin/main` at `152d719` and no existing
+  `v0.5.13-alpha` tag before publication preparation. Publication and both
+  platform installer builds remain pending; this entry does not claim assets
+  have been built or uploaded.
+- Preparation checks passed: global Ruff, source compileall, macOS build-script
+  shell syntax, version/default consistency, alpha artifact labels, numeric
+  bundle-version normalization, and `git diff --check`. The fresh full desktop
+  suite passed **301 tests in 81.04 s** using the isolated runtime and arm64
+  FFmpeg command recorded above, before commit and publication.
