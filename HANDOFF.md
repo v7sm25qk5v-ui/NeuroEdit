@@ -2524,3 +2524,30 @@ analyzed this content as uncommitted work). No code changed; markdown only.
   real executable, matching both workflow copies, runner/alpha-label/version
   consistency, global Ruff, and `git diff --check`. The application remains
   unchanged since its fresh 301-test local pass recorded in entry 66.
+
+## 69. v0.5.13-alpha.2 published (2026-11-06)
+
+- Published [NeuroEdit v0.5.13-alpha.2](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.13-alpha.2)
+  as a public, non-draft GitHub prerelease. The verified tag resolves to
+  `c82abcdd57fed501ea611b8673d75d1ac03e761b`. The earlier unsuccessful
+  `v0.5.13-alpha` and `v0.5.13-alpha.1` tags remain unchanged. GitHub's stable
+  latest release remains `v0.5.12`.
+- [Installer workflow 42298251626](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/42298251626)
+  completed all four jobs successfully: quality, macOS build, Windows build,
+  and release publication. Tagged quality checks passed Ruff and **301 tests
+  in 204.12 s**, with no skips and a clean process exit. The prior main-branch
+  pinned gate passed all 301 tests in 197.70 s.
+- GitHub verified all three assets uploaded and nonempty:
+  - `NeuroEdit-v0.5.13-alpha.2-macOS-unsigned.dmg` — 130,970,144 bytes;
+    SHA-256 `b09da889e63bce700bac866d9aa54487f6b3759ab1b5216225ece612373a6aaa`.
+  - `NeuroEdit-v0.5.13-alpha.2-macOS-unsigned.zip` — 117,540,665 bytes;
+    SHA-256 `a862c924df1898221087cd59509d5ad34f4209578fcb8a5f637d7e02f40ff38a`.
+  - `NeuroEdit-v0.5.13-alpha.2-Windows-Setup.exe` — 100,236,454 bytes;
+    SHA-256 `1f0e8ca5a193b7d4ae1fc6ea76447e90b3e824233e4aa54bf8ef0daa204b4083`.
+- Release notes and the title were updated after publication. These remain
+  unsigned, editor-only installers; SAM requires the optional source-build
+  dependencies. Manual installation, Windows UI, and hardware encoder testing
+  remain pending. No complete security-audit or clinical-validation claim is
+  made; the original failed scan remains partial and unchanged.
+- This final publication record changes only `HANDOFF.md`; `git diff --check`
+  passed, with no redundant application test run or tag movement.
