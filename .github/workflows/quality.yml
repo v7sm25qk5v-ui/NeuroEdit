@@ -19,7 +19,20 @@ jobs:
           python-version: "3.12"
       - name: Install desktop app with dev dependencies
         working-directory: desktop
-        run: python -m pip install -e ".[dev]"
+        run: python -m pip install -c requirements-release.txt -e ".[dev]"
+      - name: Expose bundled FFmpeg for integration tests
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import imageio_ffmpeg
+
+          ffmpeg_dir = Path(os.environ["RUNNER_TEMP"]) / "neuroedit-bin"
+          ffmpeg_dir.mkdir(parents=True, exist_ok=True)
+          (ffmpeg_dir / "ffmpeg").symlink_to(imageio_ffmpeg.get_ffmpeg_exe())
+          with open(os.environ["GITHUB_PATH"], "a", encoding="utf-8") as handle:
+              handle.write(f"{ffmpeg_dir}\n")
+          PY
       - name: Ruff
         working-directory: desktop
         run: ruff check src tests scripts
@@ -29,4 +42,4 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           QT_MEDIA_BACKEND: ffmpeg
           PYTHONUNBUFFERED: "1"
-        run: python -m pytest tests/ -q
+        run: python -m pytest tests/ -q -o faulthandler_timeout=120

@@ -2497,3 +2497,30 @@ analyzed this content as uncommitted work). No code changed; markdown only.
   artifact names, unchanged numeric version metadata, and `git diff --check`
   passed. The prior application validation remains 301 passing tests; these
   workflow/docs changes do not rerun or claim installer/runtime checks locally.
+
+## 68. Match CI quality checks to shipped dependencies (2026-11-06)
+
+- Retry installer run `42296698315` reached the macOS 15 runner, installed
+  dependencies, and passed Ruff. Its quality job reported **289 passed and
+  12 skipped in 169.36 s**, then aborted at Qt process teardown with
+  `QObject: shared QObject was deleted directly`, a pure-virtual-function error,
+  and exit 134. No individual test assertion failed, but the job did not pass
+  and no installers were published. Main-branch quality run `42296698244`
+  likewise reported 289 passed and 12 skipped in 216.87 s before teardown
+  failed with exit 139; the existing workflow was not rerun unchanged.
+- That quality job had installed unconstrained newer dependencies (including
+  PySide6 6.12.0), while packaging and the locally passing runtime use the
+  reviewed `requirements-release.txt` constraints (PySide6 6.11.1). Both quality
+  workflows now install dev extras under the same existing release constraints;
+  no application code or dependency declarations were changed.
+- Both workflows expose the already installed `imageio_ffmpeg` binary through
+  a temporary `ffmpeg` symlink and `GITHUB_PATH`, so the 12 encoded integration
+  cases run instead of skipping for a missing executable. Pytest retains its
+  normal failure exit and gains a 120-second faulthandler diagnostic timeout.
+- Prepared retry label `v0.5.13-alpha.2`; numeric versions stay `0.5.13`, and
+  both prior tags remain immutable. The plan is to pass the main-branch quality
+  gate before creating this tag. Publication/build completion is still pending.
+- Validated the workflow setup snippets with the pinned local runtime and its
+  real executable, matching both workflow copies, runner/alpha-label/version
+  consistency, global Ruff, and `git diff --check`. The application remains
+  unchanged since its fresh 301-test local pass recorded in entry 66.
