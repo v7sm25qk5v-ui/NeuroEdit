@@ -2480,3 +2480,20 @@ analyzed this content as uncommitted work). No code changed; markdown only.
   bundle-version normalization, and `git diff --check`. The fresh full desktop
   suite passed **301 tests in 81.04 s** using the isolated runtime and arm64
   FFmpeg command recorded above, before commit and publication.
+
+## 67. Alpha build runner recovery (2026-11-06)
+
+- Pushed release preparation commit `9e9b8de` and the original
+  `v0.5.13-alpha` tag. Both GitHub workflows were cancelled before steps ran:
+  installer run `42296376122` and quality run `42296376051` reported that
+  `macos-14-arm64-us-default` is unsupported. The macOS 14 hosted image was
+  retired; no installers or GitHub Release were published by those runs.
+- Updated the two installer workflow macOS jobs and the separate quality
+  workflow to `macos-15`, without changing application code or test policy.
+- Prepared retry label `v0.5.13-alpha.1` and its download names. Numeric package
+  and bundle versions remain `0.5.13`. The initial tag is preserved unchanged;
+  the retry will use a new tag rather than moving a published one.
+- Validation: all three runner labels, alpha prerelease behavior, retry
+  artifact names, unchanged numeric version metadata, and `git diff --check`
+  passed. The prior application validation remains 301 passing tests; these
+  workflow/docs changes do not rerun or claim installer/runtime checks locally.

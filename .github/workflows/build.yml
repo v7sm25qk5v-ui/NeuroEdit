@@ -21,7 +21,7 @@ on:
 jobs:
   quality:
     name: Test and lint desktop app
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -45,7 +45,7 @@ jobs:
   macos:
     name: Build macOS (.dmg)
     needs: quality
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

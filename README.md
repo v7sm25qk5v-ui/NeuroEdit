@@ -4,9 +4,9 @@ NeuroEdit is a standalone desktop video editor for preparing operative video for
 conference, research, and educational use. It runs entirely on your own machine —
 no video, audio, or patient content ever leaves the computer.
 
-Current alpha: [v0.5.13-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.13-alpha)
+Current alpha: [v0.5.13-alpha.1](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.13-alpha.1)
 
-### What's new in v0.5.13-alpha
+### What's new in v0.5.13-alpha.1
 
 - Redactions follow letterboxed footage correctly, cover their final frame,
   and survive **Take Still** insertion over resumed video. Export also strips
@@ -57,7 +57,7 @@ The original scan had partial coverage; these fixes do not constitute a complete
 
 ### macOS
 
-Download `NeuroEdit-v0.5.13-alpha-macOS-unsigned.dmg` from the release page.
+Download `NeuroEdit-v0.5.13-alpha.1-macOS-unsigned.dmg` from the release page.
 Open the DMG, drag `NeuroEdit.app` into Applications, then right-click the app
 and choose `Open` for the first launch.
 
@@ -67,7 +67,7 @@ If macOS blocks launch, open `System Settings` -> `Privacy & Security`, choose
 
 ### Windows
 
-Download `NeuroEdit-v0.5.13-alpha-Windows-Setup.exe` from the release page on a
+Download `NeuroEdit-v0.5.13-alpha.1-Windows-Setup.exe` from the release page on a
 Windows PC. If SmartScreen warns, choose `More info` -> `Run anyway`, then follow
 the installer.
 
