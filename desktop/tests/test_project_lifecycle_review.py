@@ -27,6 +27,7 @@ class _Timer:
 def test_failed_close_keeps_autosave_and_heartbeat_running(monkeypatch) -> None:
     window = MainWindow.__new__(MainWindow)
     window.project = ProjectState()
+    window.audio_panel = SimpleNamespace(recording_pending=False)
     window.dirty = True
     window.autosave_timer = _Timer()
     window._sam_heartbeat_timer = _Timer()
@@ -112,6 +113,9 @@ def test_new_project_cleanup_preserves_masks_in_saved_autosave(monkeypatch, tmp_
     window = MainWindow.__new__(MainWindow)
     window.store = store
     window.project = saved
+    window.timeline_clock = _Timer()
+    window.audio_preview = SimpleNamespace(stop=lambda: None)
+    window.play_button = SimpleNamespace(setText=lambda _text: None)
     window.dirty = False
     window._load_active_clip = lambda: None
     window._update_history_actions = lambda: None

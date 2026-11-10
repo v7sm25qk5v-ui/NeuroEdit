@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 import subprocess
 import time
@@ -49,9 +50,14 @@ class AudioPanel(QWidget):
         self._refreshing = False
         self._recording_path: Path | None = None
         self._recording_started = 0.0
+        self._recording_start_time = 0.0
+        self._recording_error = ""
         self.capture_session = QMediaCaptureSession(self)
         self.recorder = QMediaRecorder(self)
         self.capture_session.setRecorder(self.recorder)
+        self.recorder.recorderStateChanged.connect(self._recording_state_changed)
+        self.recorder.errorOccurred.connect(self._recording_failed)
+        self._recording_project: ProjectState | None = None
         self.audio_input: QAudioInput | None = None
 
         title = QLabel("Voice Recorder")
@@ -344,43 +350,72 @@ class AudioPanel(QWidget):
             return
         self.audio_dir.mkdir(parents=True, exist_ok=True)
         self._recording_path = self.audio_dir / f"voice_{int(time.time())}.m4a"
+        self._recording_project = self.project
+        self._recording_start_time = self.project.current_time
+        self._recording_error = ""
         self.audio_input = QAudioInput(default_input, self)
         self.capture_session.setAudioInput(self.audio_input)
         self.recorder.setOutputLocation(QUrl.fromLocalFile(str(self._recording_path)))
-        self.recorder.record()
         self._recording_started = time.monotonic()
         self.clock.start()
         self.record_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         self.status.setText("Recording...")
+        self.recorder.record()
 
     def _stop_recording(self) -> None:
-        self.recorder.stop()
         self.clock.stop()
-        elapsed = max(0.1, time.monotonic() - self._recording_started)
+        self.stop_btn.setEnabled(False)
+        self.status.setText("Finishing recording...")
+        self.recorder.stop()
+
+    @property
+    def recording_pending(self) -> bool:
+        return self._recording_path is not None
+
+    def _recording_failed(self, _error, message: str) -> None:
+        if self._recording_path is not None:
+            self._recording_error = message or "Recorder error"
+            self.status.setText(f"Recording failed: {self._recording_error}. Waiting for recorder to stop.")
+            if self.recorder.recorderState() == QMediaRecorder.RecorderState.StoppedState:
+                self._recording_state_changed(QMediaRecorder.RecorderState.StoppedState)
+
+    def _recording_state_changed(self, state) -> None:
+        if state != QMediaRecorder.RecorderState.StoppedState or self._recording_path is None:
+            return
+        self.clock.stop()
         path = self._recording_path
+        project = self._recording_project
+        error = self._recording_error
+        if not error and self.recorder.error() != QMediaRecorder.Error.NoError:
+            error = self.recorder.errorString() or "Recorder error"
+        duration = 0.0 if error else self._probe_audio_duration(path)
+        if error:
+            self.status.setText(f"Recording failed: {error}. Check the recording file at {path}.")
+        elif duration <= 0:
+            self.status.setText(f"Could not read audio duration for {path.name}. Check the recording file at {path}.")
+        elif project is not self.project:
+            self.status.setText(f"Recording saved at {path}; project changed before it finished.")
+        else:
+            name = self.name_input.text().strip() or f"Voice {time.strftime('%H:%M:%S')}"
+            self.project.audio_tracks.append(
+                AudioTrack(
+                    id=new_id(), path=str(path), name=name,
+                    start_time=self._recording_start_time, duration=duration,
+                    type="voice", volume=1.0,
+                )
+            )
+            self.name_input.clear()
+            self.project.duration = project_end_time(self.project)
+            self.status.setText(f"Saved {name}")
+            self.project_changed.emit()
+            self.refresh()
         self._recording_path = None
+        self._recording_project = None
+        self._recording_start_time = 0.0
+        self._recording_error = ""
         self.record_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
-        if path is None:
-            return
-        name = self.name_input.text().strip() or f"Voice {time.strftime('%H:%M:%S')}"
-        self.project.audio_tracks.append(
-            AudioTrack(
-                id=new_id(),
-                path=str(path),
-                name=name,
-                start_time=self.project.current_time,
-                duration=elapsed,
-                type="voice",
-                volume=1.0,
-            )
-        )
-        self.name_input.clear()
-        self.project.duration = project_end_time(self.project)
-        self.status.setText(f"Saved {name}")
-        self.project_changed.emit()
-        self.refresh()
 
     def _tick_recording(self) -> None:
         elapsed = max(0.0, time.monotonic() - self._recording_started)
@@ -397,6 +432,9 @@ class AudioPanel(QWidget):
             return
         path = Path(path_str)
         duration = self._probe_audio_duration(path)
+        if duration <= 0:
+            self.status.setText(f"Could not read audio duration for {path.name}. Choose a valid audio file and try again.")
+            return
         self.project.audio_tracks.append(
             AudioTrack(
                 id=new_id(),
@@ -416,13 +454,15 @@ class AudioPanel(QWidget):
         if path.suffix.lower() == ".wav":
             try:
                 with wave.open(str(path), "rb") as wav:
-                    return max(0.1, wav.getnframes() / float(wav.getframerate()))
+                    duration = wav.getnframes() / float(wav.getframerate())
+                    if duration > 0 and math.isfinite(duration):
+                        return duration
             except Exception:  # noqa: BLE001
                 pass
         # Non-wav (m4a/mp3/aac): probe with the bundled ffmpeg. Falling back to
         # a guessed 5.0 s silently truncated imported audio in the export mix.
         duration = self._ffmpeg_audio_duration(path)
-        return duration if duration > 0 else 5.0
+        return duration if duration > 0 and math.isfinite(duration) else 0.0
 
     def _ffmpeg_audio_duration(self, path: Path) -> float:
         try:
@@ -436,6 +476,8 @@ class AudioPanel(QWidget):
                 timeout=10,
                 check=False,
             )
+            if not re.search(r"Stream #.*Audio:", proc.stderr):
+                return 0.0
             match = re.search(r"Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)", proc.stderr)
             if match:
                 hours, minutes, seconds = match.groups()

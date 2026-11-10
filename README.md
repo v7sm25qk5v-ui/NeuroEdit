@@ -1,24 +1,26 @@
 # NeuroEdit
 
 NeuroEdit is a standalone desktop video editor for preparing operative video for
-conference, research, and educational use. It runs entirely on your own machine —
-no video, audio, or patient content ever leaves the computer.
+conference, research, and educational use. Editing and export run locally;
+NeuroEdit does not upload video or audio to a cloud editing service.
 
-Current alpha: [v0.5.13-alpha.2](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.13-alpha.2)
+Current alpha: [v0.5.14-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.14-alpha)
 
-### What's new in v0.5.13-alpha.2
+### What's new in v0.5.14-alpha
 
-- Redactions follow letterboxed footage correctly, cover their final frame,
-  and survive **Take Still** insertion over resumed video. Export also strips
-  source stream metadata and keeps fast segments on the output-frame clock.
-- Project saving and mask cleanup reject unsafe managed paths and planted
-  links. Project Library uses neutral previews instead of raw source thumbnails.
-- Opening projects preserves saved timeline positions and review state;
-  extreme durations no longer cause unbounded ruler drawing.
-- Timeline reordering previews the new sequence before release, supports edge
-  scrolling and Escape cancellation, and preserves full-frame still intervals.
-  Wheel navigation, overlapping label rows, split names, and playback holds
-  across source changes are improved.
+- Added narration and music can be heard on the editing timeline, including
+  seeking, overlapping tracks, and still intervals. Recordings retain the
+  timeline position where Record was pressed. Closing is blocked while recording
+  or finalization is pending, so narration can finish before saving and leaving.
+- **File → Relink Unavailable Media** repairs a selected video, image, narration,
+  or slide-image reference while preserving edits and requiring fresh privacy
+  review. Split references are repaired individually.
+- Video metadata imports run in the background, preserve selection order, and
+  reject cancelled or stale results. Failed audio probes no longer create
+  guessed five-second tracks.
+- Single-frame SAM cancellation discards cancelled results. Import/export labels
+  fit their controls, and screenshot tooling isolates preferences and verifies
+  the panel being captured.
 
 The retained security findings are tracked in [SECURITY_FIXES.md](SECURITY_FIXES.md).
 The original scan had partial coverage; these fixes do not constitute a completed audit.
@@ -41,6 +43,8 @@ The original scan had partial coverage; these fixes do not constitute a complete
   (non-cloud-synced) storage location.
 - **Slides and stills** — title/body slides, image overlays, and "Take Still"
   frame capture that inherits redactions.
+- **Narration and audio** — record or import tracks, preview them on the timeline,
+  and mix them into exports with per-track timing and volume.
 - **Captions** — generated from transcript segments, previewed on the canvas,
   burned in at export or exported as an SRT/VTT sidecar.
 - **Export** — H.264 MP4 with resolution presets (a recommended preset is
@@ -49,7 +53,7 @@ The original scan had partial coverage; these fixes do not constitute a complete
 - **Media linking and project library** — add individual files or link a video
   folder on an external drive while keeping the source files in place. Finder/
   File Explorer drag-and-drop, a recent-project library with neutral previews, durations,
-  missing-media warnings, and search/sort are also supported.
+  missing-media warnings, explicit relinking, and search/sort are also supported.
 - **Appearance** — Light, Dark, or System theme, chosen on first launch and
   switchable any time from View → Appearance.
 
@@ -57,7 +61,7 @@ The original scan had partial coverage; these fixes do not constitute a complete
 
 ### macOS
 
-Download `NeuroEdit-v0.5.13-alpha.2-macOS-unsigned.dmg` from the release page.
+Download `NeuroEdit-v0.5.14-alpha-macOS-unsigned.dmg` from the release page.
 Open the DMG, drag `NeuroEdit.app` into Applications, then right-click the app
 and choose `Open` for the first launch.
 
@@ -67,7 +71,7 @@ If macOS blocks launch, open `System Settings` -> `Privacy & Security`, choose
 
 ### Windows
 
-Download `NeuroEdit-v0.5.13-alpha.2-Windows-Setup.exe` from the release page on a
+Download `NeuroEdit-v0.5.14-alpha-Windows-Setup.exe` from the release page on a
 Windows PC. If SmartScreen warns, choose `More info` -> `Run anyway`, then follow
 the installer.
 

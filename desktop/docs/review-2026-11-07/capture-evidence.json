@@ -1,0 +1,29 @@
+{
+  "single_short_synthetic_import_ms": 145.16,
+  "window_size": [
+    1440,
+    900
+  ],
+  "clipped_controls": [
+    {
+      "text": "Add Video Files (Keep in Place)\u2026",
+      "widget_width": 226,
+      "text_width": 248
+    },
+    {
+      "text": "Link Video Folder (Keep Files in Place)\u2026",
+      "widget_width": 226,
+      "text_width": 301
+    },
+    {
+      "text": "Remove original clip audio (may contain spoken PHI)",
+      "widget_width": 380,
+      "text_width": 379
+    },
+    {
+      "text": "Burn captions into the video (from transcript)",
+      "widget_width": 380,
+      "text_width": 326
+    }
+  ]
+}

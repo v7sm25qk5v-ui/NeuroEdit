@@ -12,7 +12,7 @@ Requires: Python 3.12 on PATH, and Inno Setup 6 (ISCC.exe) installed or on PATH.
 Produces: release\NeuroEdit-<version>-Windows-Setup.exe
 #>
 param(
-    [string]$Version = "0.5.13"
+    [string]$Version = "0.5.14"
 )
 
 $ErrorActionPreference = "Stop"

@@ -63,15 +63,18 @@ class SamSegmentWorker(QObject):
         self._cancelled = True
 
     def run(self) -> None:
+        if self._cancelled:
+            self.finished.emit(None, "cancelled")
+            return
         try:
             result = self.backend.segment_frame(
                 self.video_path, self.time_s, self.points, self.mask_dir,
                 progress=self.progress.emit,
                 mask_color=self.mask_color,
             )
-            self.finished.emit(result, None)
+            self.finished.emit(result, "cancelled" if self._cancelled else None)
         except Exception as exc:  # noqa: BLE001
-            self.finished.emit(None, str(exc))
+            self.finished.emit(None, "cancelled" if self._cancelled else str(exc))
 
 
 class SamPropagationWorker(QObject):

@@ -600,7 +600,7 @@ class ExportDialog(QDialog):
         self.file_type.setEnabled(False)
 
         self.mute_source_audio_check = QCheckBox(
-            "Remove original clip audio (may contain spoken PHI)"
+            "Remove original clip audio"
         )
         # Safe default for a clinical tool: drop the original operating-room audio,
         # which can contain spoken identifiers. Narration added on the Audio panel
@@ -630,7 +630,15 @@ class ExportDialog(QDialog):
         form = QFormLayout()
         form.addRow("Viewing target", self.preset_combo)
         form.addRow("File type", self.file_type)
-        form.addRow("Privacy", self.mute_source_audio_check)
+        privacy_explanation = QLabel(
+            "Original audio may contain spoken PHI. Added narration and music are kept."
+        )
+        privacy_explanation.setWordWrap(True)
+        privacy_layout = QVBoxLayout()
+        privacy_layout.setContentsMargins(0, 0, 0, 0)
+        privacy_layout.addWidget(self.mute_source_audio_check)
+        privacy_layout.addWidget(privacy_explanation)
+        form.addRow("Privacy", privacy_layout)
         form.addRow("Captions", self.burn_captions_check)
 
         # Advanced settings stay collapsed: presets are the primary interface,

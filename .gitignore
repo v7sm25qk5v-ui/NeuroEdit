@@ -32,3 +32,6 @@ desktop/qa/screenshots/
 
 # Local Claude Code config (personal permissions, worktrees, memory)
 .claude/
+
+# Local-path screenshot retained only as private validation evidence.
+desktop/docs/engineering-2026-11-10/screenshots/dialog_storage_location.png

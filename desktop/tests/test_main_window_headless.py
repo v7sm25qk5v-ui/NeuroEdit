@@ -9,7 +9,9 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QMimeData, QSettings, QUrl
+from PySide6.QtCore import QMimeData, QSettings, QTimer, QUrl
+from PySide6.QtGui import QImage
+from PySide6.QtTest import QTest
 from PySide6.QtGui import QKeySequence
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtWidgets import QApplication, QPushButton
@@ -283,19 +285,13 @@ def test_multi_file_import_loads_preview_and_marks_dirty_once(window, tmp_path, 
     image = tmp_path / "still.png"
     loaded: list[str] = []
     history_before = len(window._undo_stack)
-    monkeypatch.setattr(
-        window,
-        "_add_video_clip",
-        lambda path: window.project.add_clip(path, duration=1.0, width=1920, height=1080),
-    )
-    monkeypatch.setattr(
-        window,
-        "_add_image_clip",
-        lambda path: window.project.add_image_clip(path, width=1920, height=1080),
-    )
+    image_data = QImage(10, 10, QImage.Format.Format_RGB32)
+    assert image_data.save(str(image))
+    monkeypatch.setattr(main_window_module, "probe_video", lambda path: (1.0, 1920, 1080))
     monkeypatch.setattr(window, "_load_active_clip", lambda: loaded.append("preview"))
 
     window._import_media_files([video, image])
+    _wait_for_import(window)
 
     assert [Path(clip.path) for clip in window.project.clips[-2:]] == [video, image]
     assert window.project.active_clip_id == window.project.clips[-1].id
@@ -329,8 +325,24 @@ def test_media_explorer_buttons_advertise_reference_import(window):
         for button in window.media_panel.findChildren(QPushButton)
     }
 
-    assert "Add Video Files (Keep in Place)…" in button_texts
-    assert "Link Video Folder (Keep Files in Place)…" in button_texts
+    assert "Add Video Files…" in button_texts
+    assert "Link Video Folder…" in button_texts
+
+
+def test_media_import_buttons_fit_at_minimum_and_wide_sizes(window, app):
+    buttons = [button for button in window.media_panel.findChildren(QPushButton)
+               if button.text() in {"Add Video Files…", "Link Video Folder…"}]
+    assert len(buttons) == 2
+    for width, height in ((window.minimumWidth(), window.minimumHeight()), (1440, 900)):
+        window.resize(width, height)
+        window.show()
+        app.processEvents()
+        for button in buttons:
+            window.media_scroll.ensureWidgetVisible(button)
+            app.processEvents()
+            viewport = window.media_scroll.viewport()
+            assert viewport.rect().contains(button.mapTo(viewport, button.rect().center()))
+            assert button.width() >= button.sizeHint().width()
 
 
 def test_link_video_folder_keeps_external_paths_across_save(
@@ -354,16 +366,11 @@ def test_link_video_folder_keeps_external_paths_across_save(
             else ""
         ),
     )
-    monkeypatch.setattr(
-        window,
-        "_add_video_clip",
-        lambda path: window.project.add_clip(
-            path, duration=1.0, width=1920, height=1080
-        ),
-    )
+    monkeypatch.setattr(main_window_module, "probe_video", lambda path: (1.0, 1920, 1080))
     monkeypatch.setattr(window, "_load_active_clip", lambda: None)
 
     window._link_video_folder()
+    _wait_for_import(window)
     window.store.save(window.project)
     _store, reopened = ProjectStore.open(window.store.project_path)
 
@@ -388,50 +395,35 @@ def test_import_image_delegates_to_batch_import(window, tmp_path, monkeypatch):
     assert imported == [paths]
 
 
-def test_multi_video_import_reports_probe_progress(window, tmp_path, monkeypatch):
-    videos = [tmp_path / f"recording-{index}.mov" for index in range(3)]
-    progress_values: list[int] = []
-    progress_labels: list[str] = []
+def _wait_for_import(window):
+    for _ in range(500):
+        QApplication.processEvents()
+        if getattr(window, "_import_thread", None) is None:
+            return
+        QTest.qWait(10)
+    pytest.fail("Import did not finish")
 
-    class _ProgressDialog:
-        def __init__(self, *_args: object) -> None:
-            pass
 
-        def setCancelButton(self, _button: object) -> None:
-            pass
-
-        def setMinimumDuration(self, _duration: int) -> None:
-            pass
-
-        def setWindowModality(self, _modality: object) -> None:
-            pass
-
-        def setValue(self, value: int) -> None:
-            progress_values.append(value)
-
-        def setLabelText(self, label: str) -> None:
-            progress_labels.append(label)
-
-        def close(self) -> None:
-            pass
-
-    monkeypatch.setattr(main_window_module, "QProgressDialog", _ProgressDialog)
-    monkeypatch.setattr(main_window_module.QApplication, "processEvents", lambda: None)
-    monkeypatch.setattr(
-        window,
-        "_add_video_clip",
-        lambda path: window.project.add_clip(path, duration=1.0, width=1920, height=1080),
-    )
-    monkeypatch.setattr(window, "_load_active_clip", lambda: None)
-
-    window._import_media_files(videos)
-
-    assert progress_values == [0, 1, 2, 3]
-    assert progress_labels == [
-        "Reading video metadata (1 of 3)...",
-        "Reading video metadata (2 of 3)...",
-        "Reading video metadata (3 of 3)...",
-    ]
+def test_import_probe_does_not_block_and_stale_results_are_discarded(window, tmp_path, monkeypatch):
+    import time
+    video = tmp_path / "recording.mov"
+    def slow_probe(_path):
+        time.sleep(0.2)
+        return (1.0, 1920, 1080)
+    monkeypatch.setattr(main_window_module, "probe_video", slow_probe)
+    ticks = []
+    timer = QTimer(window)
+    timer.setInterval(5)
+    timer.timeout.connect(lambda: ticks.append(1))
+    timer.start()
+    window._import_media_files([video])
+    QTest.qWait(30)
+    timer.stop()
+    assert ticks
+    assert window._import_thread is not None
+    window.project.project_name = "Changed while importing"
+    _wait_for_import(window)
+    assert not window.project.clips
 
 
 def test_appearance_action_persists_and_reapplies_theme(window, app):
@@ -800,3 +792,175 @@ def test_magnetic_clip_reorder_is_one_undoable_edit(window, monkeypatch):
     assert [(c.id, c.start_time) for c in window.project.clips] == [
         ('b', 0), ('a', 5), ('c', 10),
     ]
+
+
+def test_relink_preserves_clip_state_undo_and_reopens(window, tmp_path, monkeypatch):
+    missing = tmp_path / "missing.mov"
+    replacement = tmp_path / "replacement.mov"
+    replacement.touch()
+    clip = window.project.add_clip(missing, duration=10, width=100, height=100)
+    clip.trim_start, clip.trim_end = 2, 6
+    clip.source_in_limit, clip.source_out_limit = 1, 8
+    clip.start_time = 4
+    window.project.phi_review_confirmed = True
+    window.project.deidentified_confirmed = True
+    window.project.phi_review_progress = {clip.id: True}
+    window._seed_history()
+    monkeypatch.setattr(window, "_load_active_clip", lambda: None)
+    monkeypatch.setattr(main_window_module, "probe_video", lambda path: (7.0, 300, 200))
+    assert window._relink_reference(clip, "clip", replacement)
+    assert clip.path == str(missing)
+    monkeypatch.setattr(main_window_module, "probe_video", lambda path: (12.0, 300, 200))
+    assert window._relink_reference(clip, "clip", replacement) is None
+    assert (clip.id, clip.start_time, clip.trim_start, clip.trim_end, clip.source_out_limit) == (
+        window.project.clips[0].id, 4, 2, 6, 8
+    )
+    assert not window.project.phi_review_confirmed
+    assert not window.project.deidentified_confirmed
+    assert not window.project.phi_review_progress
+    window.store.save(window.project)
+    _, loaded = ProjectStore.open(window.store.project_path)
+    assert loaded.clips[0].path == str(replacement)
+    assert (loaded.clips[0].width, loaded.clips[0].height) == (300, 200)
+    window.undo()
+    assert window.project.clips[0].path == str(missing)
+    window.redo()
+    assert window.project.clips[0].path == str(replacement)
+
+
+def test_import_cancel_discards_completed_items(window, tmp_path, monkeypatch):
+    import time
+    def slow_probe(_path):
+        time.sleep(0.1)
+        return (1.0, 100, 100)
+    monkeypatch.setattr(main_window_module, "probe_video", slow_probe)
+    window._import_media_files([tmp_path / "a.mov", tmp_path / "b.mov"])
+    QTest.qWait(130)
+    window._import_worker.cancel()
+    _wait_for_import(window)
+    assert not window.project.clips
+
+
+def test_import_partial_failure_commits_successes_in_order(window, tmp_path, monkeypatch):
+    paths = [tmp_path / name for name in ("a.mov", "bad.mov", "b.mov")]
+    monkeypatch.setattr(main_window_module, "probe_video", lambda path: (
+        (0.0, 0, 0) if path.name == "bad.mov" else (1.0, 100, 100)
+    ))
+    warnings = []
+    monkeypatch.setattr(main_window_module.QMessageBox, "warning", lambda *args: warnings.append(args[-1]))
+    monkeypatch.setattr(window, "_load_active_clip", lambda: None)
+    history_before = len(window._undo_stack)
+    window._import_media_files(paths)
+    _wait_for_import(window)
+    assert [Path(clip.path) for clip in window.project.clips] == [paths[0], paths[2]]
+    assert len(window._undo_stack) == history_before + 1
+    assert "bad.mov" in warnings[0]
+    window.undo()
+    assert not window.project.clips
+
+
+def test_import_cancel_after_worker_result_before_delivery(window, tmp_path, monkeypatch):
+    import threading
+    finished_probe = threading.Event()
+    def probe(_path):
+        finished_probe.set()
+        return (1.0, 100, 100)
+    monkeypatch.setattr(main_window_module, "probe_video", probe)
+    window._import_media_files([tmp_path / "a.mov"])
+    assert finished_probe.wait(2)
+    window._import_progress.canceled.emit()
+    assert window._import_worker._cancelled
+    _wait_for_import(window)
+    assert not window.project.clips
+
+
+def test_close_during_import_discards_results(window, tmp_path, monkeypatch):
+    import threading
+    import time
+    started = threading.Event()
+    def probe(_path):
+        started.set()
+        time.sleep(0.1)
+        return (1.0, 100, 100)
+    monkeypatch.setattr(main_window_module, "probe_video", probe)
+    window._import_media_files([tmp_path / "a.mov"])
+    assert started.wait(2)
+    window.close()
+    QApplication.processEvents()
+    assert not window.project.clips
+
+
+def test_relink_one_split_reference_preserves_default_source_extent(window, tmp_path, monkeypatch):
+    old = tmp_path / "missing.mov"
+    new = tmp_path / "new.mov"
+    new.touch()
+    first = window.project.add_clip(old, duration=10, width=100, height=100)
+    first.trim_end = 5
+    sibling = window.project.add_clip(old, duration=10, width=100, height=100)
+    sibling.trim_start = 5
+    monkeypatch.setattr(window, "_load_active_clip", lambda: None)
+    monkeypatch.setattr(main_window_module, "probe_video", lambda path: (20.0, 100, 100))
+    assert window._relink_reference(first, "clip", new) is None
+    assert first.effective_source_out_limit == 10
+    assert sibling.path == str(old)
+    assert sibling.trim_start == 5
+
+
+def test_relink_missing_audio_and_slide_image(window, tmp_path, monkeypatch):
+    from neuroedit_desktop.models import AudioTrack, Slide
+    track = AudioTrack(id="audio-id", path=str(tmp_path / "lost.wav"), name="Narration", duration=4)
+    slide = Slide(id="slide-id", title="Still", content="", image_path=str(tmp_path / "lost.png"))
+    window.project.audio_tracks.append(track)
+    window.project.slides.append(slide)
+    audio = tmp_path / "new.wav"
+    audio.touch()
+    image = tmp_path / "new.png"
+    assert QImage(10, 10, QImage.Format.Format_RGB32).save(str(image))
+    monkeypatch.setattr(window, "_load_active_clip", lambda: None)
+    monkeypatch.setattr(window.audio_panel, "_probe_audio_duration", lambda _path: 3.0)
+    assert window._relink_reference(track, "audio", audio)
+    assert track.path.endswith("lost.wav")
+    monkeypatch.setattr(window.audio_panel, "_probe_audio_duration", lambda _path: 5.0)
+    assert window._relink_reference(track, "audio", audio) is None
+    assert window._relink_reference(slide, "slide", image) is None
+    assert track.path == str(audio)
+    assert slide.image_path == str(image)
+
+
+def test_import_final_preview_does_not_reprobe_on_ui_thread(window, tmp_path, monkeypatch):
+    import threading
+    import time
+    video = tmp_path / "video.mov"
+    video.touch()
+    calls = []
+    def slow_probe(_path):
+        calls.append(threading.get_ident())
+        time.sleep(0.15)
+        return (1.0, 100, 100)
+    monkeypatch.setattr(main_window_module, "probe_video", slow_probe)
+    ticks = []
+    timer = QTimer(window)
+    timer.setInterval(5)
+    timer.timeout.connect(lambda: ticks.append(1))
+    timer.start()
+    window._import_media_files([video])
+    _wait_for_import(window)
+    timer.stop()
+    assert ticks
+    assert calls and all(ident != threading.get_ident() for ident in calls)
+    assert len(calls) == 1
+    assert window.project.clips[0].path == str(video)
+
+
+def test_relink_menu_repairs_the_selected_reference(window, tmp_path, monkeypatch):
+    first = window.project.add_clip(tmp_path / "first.mov", duration=5, width=100, height=100)
+    second = window.project.add_clip(tmp_path / "second.mov", duration=5, width=100, height=100)
+    replacement = tmp_path / "replacement.mov"
+    replacement.touch()
+    monkeypatch.setattr(main_window_module, "probe_video", lambda _path: (6.0, 100, 100))
+    monkeypatch.setattr(window, "_load_active_clip", lambda: None)
+    monkeypatch.setattr(main_window_module.QInputDialog, "getItem", lambda _parent, _title, _label, items, *_args: (items[1], True))
+    monkeypatch.setattr(main_window_module.QFileDialog, "getOpenFileName", lambda *_args: (str(replacement), ""))
+    window.relink_media_action.trigger()
+    assert first.path.endswith("first.mov")
+    assert second.path == str(replacement)

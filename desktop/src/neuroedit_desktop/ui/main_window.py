@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import os
 import shutil
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QMimeData, Qt, QTimer, QUrl
+from PySide6.QtCore import QMimeData, QThread, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -82,7 +83,9 @@ from neuroedit_desktop.ui.sam_workers import (
 from neuroedit_desktop.ui.sam_panel import SamPanel
 from neuroedit_desktop.ui.sam_workflow import SamWorkflowMixin
 from neuroedit_desktop.ui.export_workflow import ExportWorkflowMixin
+from neuroedit_desktop.ui.audio_preview import AudioPreview
 from neuroedit_desktop.ui.history import HistoryMixin
+from neuroedit_desktop.ui.media_import_worker import MediaImportWorker
 from neuroedit_desktop.ui.labels_panel import (
     ANATOMY_PRESETS,
     SWATCH_COLORS,
@@ -247,6 +250,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self._pending_play = False
         self.audio.setVolume(self.project.volume)
         self._timeline_playing = False
+        self.audio_preview = AudioPreview(self)
+        self.audio_preview.error.connect(lambda message: self.statusBar().showMessage(message, 6000))
         self._last_timeline_tick = time.monotonic()
         self.timeline_clock = QTimer(self)
         self.timeline_clock.setInterval(33)
@@ -272,6 +277,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         )
         self.import_image_action = QAction("Import Image…", self)
         self.import_image_action.setShortcut("Ctrl+Shift+I")
+        self.relink_media_action = QAction("Relink Unavailable Media…", self)
+        self.relink_media_action.triggered.connect(self._relink_media)
 
         self.tutorial_action = QAction("Tutorial", self)
         self.tutorial_action.setShortcut("F1")
@@ -375,6 +382,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         file_menu.addAction(self.import_video_action)
         file_menu.addAction(self.link_video_folder_action)
         file_menu.addAction(self.import_image_action)
+        file_menu.addAction(self.relink_media_action)
         file_menu.addSeparator()
         file_menu.addAction(self.export_captions_action)
         file_menu.addAction(self.export_history_action)
@@ -1039,6 +1047,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
                 self.panels.setCurrentIndex(i)
                 break
 
+        self.audio_preview.sync(self.project, self._timeline_playing)
         self.video_view.set_project(self.project)
         self.timeline.set_project(self.project)
         self.media_panel.set_project(self.project)
@@ -1111,6 +1120,12 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         return True
 
     def _activate_project(self, store: ProjectStore, project: ProjectState) -> None:
+        self._timeline_playing = False
+        self.timeline_clock.stop()
+        self.audio_preview.stop()
+        self._pending_seek_ms = None
+        self._pending_play = False
+        self.play_button.setText("▶")
         player = getattr(self, "player", None)
         if player is not None:
             player.stop()
@@ -1645,62 +1660,161 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             )
         return self.project.add_clip(video_path, duration=duration, width=width, height=height)
 
-    def _add_image_clip(self, image_path: Path):
-        pix = QPixmap(str(image_path))
-        if pix.isNull():
-            QMessageBox.warning(self, "Import Image", f"Could not read image: {image_path.name}")
-            return None
-        return self.project.add_image_clip(
-            image_path,
-            width=pix.width() or 1920,
-            height=pix.height() or 1080,
-            display_duration=5.0,
-        )
-
     def _import_media_file(self, path: str) -> None:
         self._import_media_files([Path(path)])
 
     def _import_media_files(self, paths: list[Path]) -> None:
-        clip = None
-        video_count = sum(path.suffix.lower() in VIDEO_EXTENSIONS for path in paths)
-        progress = None
-        probed_videos = 0
-        if video_count > 1:
-            progress = QProgressDialog("Reading video metadata...", "", 0, video_count, self)
-            progress.setCancelButton(None)
-            progress.setMinimumDuration(0)
-            progress.setWindowModality(Qt.WindowModality.WindowModal)
-            progress.setValue(0)
-            QApplication.processEvents()
-        for media_path in paths:
-            imported_clip = None
-            suffix = media_path.suffix.lower()
-            if suffix in VIDEO_EXTENSIONS:
-                if progress is not None:
-                    progress.setLabelText(
-                        f"Reading video metadata ({probed_videos + 1} of {video_count})..."
-                    )
-                    QApplication.processEvents()
-                imported_clip = self._add_video_clip(media_path)
-                probed_videos += 1
-                if progress is not None:
-                    progress.setValue(probed_videos)
-                    QApplication.processEvents()
-            elif suffix in IMAGE_EXTENSIONS:
-                imported_clip = self._add_image_clip(media_path)
-            else:
-                QMessageBox.information(
-                    self, "Import Media", f"Unsupported media file: {media_path.name}"
-                )
-            if imported_clip is not None:
-                clip = imported_clip
-        if progress is not None:
-            progress.close()
-        if clip is None:
+        if getattr(self, "_import_thread", None) is not None:
+            self.statusBar().showMessage("An import is already in progress.", 5000)
             return
-        self.project.active_clip_id = clip.id
+        videos = [path for path in paths if path.suffix.lower() in VIDEO_EXTENSIONS]
+        self._import_paths = paths
+        self._import_project = self.project
+        self._import_store = self.store
+        self._import_snapshot = self._snapshot_payload(self._snapshot())
+        if not videos:
+            self._finish_media_import([], False)
+            return
+        progress = QProgressDialog("Reading video metadata...", "Cancel", 0, len(videos), self)
+        progress.setMinimumDuration(0)
+        progress.setWindowModality(Qt.WindowModality.NonModal)
+        progress.setValue(0)
+        self._import_progress = progress
+        thread = QThread(self)
+        worker = MediaImportWorker(videos, probe_video)
+        self._import_thread, self._import_worker = thread, worker
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        progress.canceled.connect(lambda: worker.cancel())
+        worker.progress.connect(progress.setValue)
+        worker.finished.connect(self._finish_media_import)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(self._media_import_thread_finished)
+        thread.start()
+
+    def _media_import_thread_finished(self) -> None:
+        thread = self._import_thread
+        self._import_thread = None
+        self._import_worker = None
+        thread.deleteLater()
+
+    def _finish_media_import(self, results, cancelled: bool) -> None:
+        worker = getattr(self, "_import_worker", None)
+        was_cancelled = cancelled or (worker is not None and worker._cancelled)
+        progress = getattr(self, "_import_progress", None)
+        if progress is not None:
+            progress.canceled.disconnect()
+            progress.close()
+            self._import_progress = None
+        if (was_cancelled
+                or getattr(self, "_closing", False) or self.project is not self._import_project
+                or self.store is not self._import_store
+                or self._snapshot_payload(self._snapshot()) != self._import_snapshot):
+            self.statusBar().showMessage("Import cancelled or project changed; no files added.", 5000)
+            return
+        metadata = dict(results)
+        failures = []
+        clip = None
+        for path in self._import_paths:
+            suffix = path.suffix.lower()
+            if suffix in VIDEO_EXTENSIONS:
+                values, signature = metadata.get(path, ((0, 0, 0), None))
+                duration, width, height = values
+                if (math.isfinite(duration) and duration > 0 and width > 0 and height > 0
+                        and signature == MediaImportWorker._file_signature(path)):
+                    clip = self.project.add_clip(path, duration=duration, width=width, height=height)
+                    self._media_problem_cache[(clip.id, clip.path, *signature)] = None
+                else:
+                    failures.append(path.name)
+            elif suffix in IMAGE_EXTENSIONS:
+                image = QPixmap(str(path))
+                if image.isNull():
+                    failures.append(path.name)
+                else:
+                    clip = self.project.add_image_clip(path, width=image.width(), height=image.height())
+            else:
+                failures.append(path.name)
+        if clip is not None:
+            self.project.active_clip_id = clip.id
+            self._load_active_clip()
+            self._mark_dirty(review_relevant=True)
+        if failures:
+            QMessageBox.warning(self, "Import Media", "Could not import: " + ", ".join(failures))
+
+    def _relink_media(self) -> None:
+        # Each entry represents one project reference, including split clips.
+        references = []
+        for clip in self.project.clips:
+            if self._cached_clip_media_problem(clip):
+                references.append((f"Clip: {clip.name} [{clip.id}]", clip, "clip"))
+        for track in self.project.audio_tracks:
+            if not Path(track.path).is_file():
+                references.append((f"Audio: {track.name} [{track.id}]", track, "audio"))
+        for slide in self.project.slides:
+            if slide.image_path and not Path(slide.image_path).is_file():
+                references.append((f"Slide image: {slide.title} [{slide.id}]", slide, "slide"))
+        if not references:
+            QMessageBox.information(self, "Relink Media", "No unavailable media references found.")
+            return
+        label, accepted = QInputDialog.getItem(
+            self, "Relink Media", "Choose one unavailable reference to repair:",
+            [item[0] for item in references], 0, False,
+        )
+        if not accepted:
+            return
+        _, item, kind = next(entry for entry in references if entry[0] == label)
+        path, _ = QFileDialog.getOpenFileName(self, "Choose Replacement Media")
+        if not path:
+            return
+        problem = self._relink_reference(item, kind, Path(path))
+        if problem:
+            QMessageBox.warning(self, "Relink Media", problem)
+
+    def _relink_reference(self, item, kind: str, path: Path) -> str | None:
+        if not path.is_file():
+            return "The replacement file is unavailable."
+        if kind == "clip" and item.media_type == "video":
+            if path.suffix.lower() not in VIDEO_EXTENSIONS:
+                return "Choose a supported video file."
+            try:
+                duration, width, height = probe_video(path)
+            except Exception:  # noqa: BLE001
+                return "The replacement video could not be read."
+            required = max(item.trim_end, item.effective_source_out_limit, item.source_out_limit or 0)
+            if not math.isfinite(duration) or duration <= 0 or width <= 0 or height <= 0 or duration < required:
+                return "The replacement video is unreadable or shorter than the clip's source bounds."
+            if item.source_out_limit is None:
+                item.source_out_limit = item.effective_source_out_limit
+            item.path = str(path)
+            item.duration, item.width, item.height = duration, width, height
+            item.thumbnail_path = None
+        elif kind == "audio":
+            if path.suffix.lower() not in {".wav", ".mp3", ".m4a", ".aac", ".aiff", ".caf"}:
+                return "Choose a supported audio file."
+            duration = self.audio_panel._probe_audio_duration(path)
+            if not math.isfinite(duration) or duration <= 0 or duration + 0.01 < item.duration:
+                return "The replacement audio is unreadable or shorter than the track."
+            item.path = str(path)
+        else:
+            if path.suffix.lower() not in IMAGE_EXTENSIONS:
+                return "Choose a supported image file."
+            image = QPixmap(str(path))
+            if image.isNull():
+                return "The replacement image could not be read."
+            if kind == "slide":
+                item.image_path = str(path)
+            else:
+                item.path = str(path)
+                item.width, item.height = image.width(), image.height()
+                item.thumbnail_path = None
+        self._media_problem_cache.clear()
+        self._media_warnings_shown.clear()
+        if kind == "clip" and self.project.active_clip_id is None:
+            self.project.active_clip_id = item.id
         self._load_active_clip()
         self._mark_dirty(review_relevant=True)
+        return None
 
     @staticmethod
     def _dropped_media_paths(mime_data: QMimeData) -> list[Path]:
@@ -1951,7 +2065,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             "Media unavailable",
             f"{context} found media that cannot be loaded.\n\n"
             + "\n".join(lines)
-            + "\n\nThose clips remain in the project, but NeuroEdit will skip loading them until the files are restored or re-imported.",
+            + "\n\nThose clips remain in the project. Restore the files or use File → Relink Unavailable Media to repair a reference.",
         )
         self.statusBar().showMessage(f"{len(problems)} media item(s) unavailable", 6000)
 
@@ -2068,6 +2182,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             self._timeline_playing = False
             self.timeline_clock.stop()
             self.player.pause()
+            self.audio_preview.sync(self.project, False)
             self.play_button.setText("▶")
         else:
             self._timeline_playing = True
@@ -2085,6 +2200,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             idx = 2
         self.project.playback_rate = speeds[(idx + 1) % len(speeds)]
         self.player.setPlaybackRate(self.project.playback_rate)
+        self.audio_preview.sync(self.project, self._timeline_playing)
         self._mark_dirty()
 
     def _step_frame(self, direction: int) -> None:
@@ -2095,6 +2211,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         time_s = max(0.0, min(time_s, self.project.duration))
         self.project.current_time = time_s
         self._sync_player_to_timeline(play=self._timeline_playing)
+        self.audio_preview.sync(self.project, self._timeline_playing and self._pending_seek_ms is None, seek=True)
         self.timeline.refresh()
         self.video_view.update_annotations()
         self.time_label.setText(format_time(self.project.current_time))
@@ -2142,6 +2259,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         # playhead here for the few ms until _media_status_changed seeks+plays,
         # so we don't advance past it or re-issue a play() that starts at 0.
         if self._pending_seek_ms is not None:
+            self.audio_preview.sync(self.project, False)
             return
 
         previous_time = self.project.current_time
@@ -2175,11 +2293,13 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
                 or next_active.id != active.id
             ):
                 self._sync_player_to_timeline(play=True)
+        self.audio_preview.sync(self.project, self._timeline_playing and self._pending_seek_ms is None)
         self.timeline.refresh()
         self.video_view.update_annotations_for_time(previous_time, self.project.current_time)
         self.time_label.setText(format_time(self.project.current_time))
 
     def _sync_player_to_timeline(self, *, play: bool) -> None:
+        self.audio_preview.sync(self.project, play and self._pending_seek_ms is None)
         slide = self._slide_at_time(self.project.current_time)
         clip = self._clip_at_time(self.project.current_time)
         if clip is None:
@@ -2239,6 +2359,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             self.player.setPlaybackRate(self.project.playback_rate)
             self._pending_seek_ms = target_ms
             self._pending_play = play
+            self.audio_preview.sync(self.project, False)
             self._media_status_changed(self.player.mediaStatus())
             return
         if not self.video_view.video_item.isVisible():
@@ -2480,6 +2601,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         (heap may be inconsistent — the caller should exit immediately)."""
         pairs = [
             ("_export_thread", "_export_worker"),
+            ("_import_thread", "_import_worker"),
             ("_sam_probe_thread", "_sam_probe_worker"),
             ("_sam_download_thread", "_sam_download_worker"),
             ("_sam_segment_thread", "_sam_segment_worker"),
@@ -2511,6 +2633,11 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         return force_terminated
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        if self.audio_panel.recording_pending:
+            self.audio_panel.status.setText("Stop recording and wait for it to finish before closing.")
+            self.statusBar().showMessage("Stop recording and wait for it to finish before closing.", 6000)
+            event.ignore()
+            return
         # Save BEFORE touching threads, while the heap is known-good — if a worker
         # later has to be force-terminated mid-allocation, the project is already
         # safely on disk. Never close silently after a failed dirty save.
@@ -2523,6 +2650,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
                 QMessageBox.critical(self, "Save failed", str(exc))
                 event.ignore()
                 return
+        self._closing = True
+        self.audio_preview.stop()
         for timer_attr in ("autosave_timer", "_sam_heartbeat_timer"):
             timer = getattr(self, timer_attr, None)
             if timer is not None:

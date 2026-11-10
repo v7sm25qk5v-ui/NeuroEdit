@@ -1,0 +1,32 @@
+{
+  "date": "2026-11-10",
+  "scope": "Offscreen real encoded media import; no physical playback assessment",
+  "fixture": {
+    "path": "<temporary synthetic fixture directory>/moved-source.mp4",
+    "codec": "H.264",
+    "dimensions": "64x64",
+    "duration_seconds": 2.0
+  },
+  "harness": "Temporary script <local temporary validation script>; actual unchanged MainWindow signal receiver, downstream preview-call thread instrumentation, isolated explicit QSettings constructor, stubbed SAM and tutorial, QEventLoop with 15-second timer, finally close",
+  "observed": {
+    "gui_thread_id": 8692662144,
+    "worker_thread_id": 6172094464,
+    "import_start_seconds": 0.178,
+    "probe_start_seconds": 0.179,
+    "probe_return_seconds": 0.282,
+    "probe_result": [
+      2.0,
+      64,
+      64
+    ],
+    "probe_call_count": 1,
+    "preview_finalization_thread_id": 8692662144,
+    "preview_finalization_start_seconds": 0.283,
+    "thread_finished_seconds": 0.285,
+    "committed_clip_count": 1,
+    "timer_heartbeat_count": 1,
+    "window_closed_seconds": 0.286
+  },
+  "cold_probe_comparison": "Standalone cv2 import 0.091 seconds; opening VideoCapture completed at 0.093 seconds.",
+  "harness_observation": "An initial repeated QTest.qWait polling loop failed to finish within 15 seconds; its probe returned when the loop exited. A monkey-patched completion method in that diagnostic altered Qt signal receiver semantics, so its completion and shutdown were discarded. The event-loop test above completed cleanly; this does not establish an application defect."
+}

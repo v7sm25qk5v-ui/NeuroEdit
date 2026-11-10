@@ -10,7 +10,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 from neuroedit_desktop.models import ProjectState, VideoClip, new_id  # noqa: E402
 from neuroedit_desktop.ui.main_window import (  # noqa: E402
@@ -74,3 +74,17 @@ def test_dialog_defaults_keep_simple_path(app):
     assert dialog.preset_combo.currentData()[0] == "1080p"
     assert not dialog.advanced_widget.isVisible()  # advanced stays collapsed
     assert dialog.mute_source_audio_check.isChecked()  # privacy default intact
+
+
+def test_privacy_guidance_fits_dialog(app):
+    dialog = ExportDialog(_project(height=1080))
+    dialog.show()
+    app.processEvents()
+    check = dialog.mute_source_audio_check
+    guidance = next(label for label in dialog.findChildren(QLabel)
+                    if label.text().startswith("Original audio may contain spoken PHI."))
+    assert check.isChecked()
+    assert check.width() >= check.sizeHint().width()
+    assert guidance.wordWrap()
+    assert guidance.height() >= guidance.heightForWidth(guidance.width())
+    dialog.close()

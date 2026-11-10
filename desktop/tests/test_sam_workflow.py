@@ -530,3 +530,50 @@ def test_empty_bounded_propagation_records_failure(workflow):
     assert workflow.project.annotations == []
     assert workflow.project.sam_last_run["result"] == "error"
     assert workflow.project.sam_last_run["frames"] == 0
+
+
+def test_segment_worker_cancel_before_and_during_inference(app, tmp_path):
+    from unittest.mock import Mock
+    from neuroedit_desktop.sam_backend import SamSegmentResult
+    from neuroedit_desktop.ui.sam_workers import SamSegmentWorker
+
+    backend = Mock()
+    worker = SamSegmentWorker(backend, tmp_path / 'video.mp4', 0, [], tmp_path)
+    results = []
+    worker.finished.connect(lambda result, error: results.append((result, error)))
+    worker.cancel()
+    worker.run()
+    backend.segment_frame.assert_not_called()
+    assert results == [(None, 'cancelled')]
+
+    worker = SamSegmentWorker(backend, tmp_path / 'video.mp4', 0, [], tmp_path)
+    mask = tmp_path / 'new.png'
+    mask.write_bytes(b'mask')
+    result = SamSegmentResult(mask, .9, 'test')
+    def segment(*args, **kwargs):
+        worker.cancel()
+        return result
+    backend.segment_frame.side_effect = segment
+    results = []
+    worker.finished.connect(lambda result, error: results.append((result, error)))
+    worker.run()
+    assert results == [(result, 'cancelled')]
+
+
+def test_segment_cancel_after_result_queued_discards_only_new_mask(workflow):
+    from neuroedit_desktop.sam_backend import SamSegmentResult
+
+    workflow._run_segmentation()
+    mask_dir = workflow.store.project_path.parent
+    old = mask_dir / 'old.png'
+    new = mask_dir / 'new.png'
+    old.write_bytes(b'old')
+    new.write_bytes(b'new')
+    prior = _mask_annotation('prior')
+    prior.mask_path = str(old)
+    workflow.project.annotations.append(prior)
+    workflow._cancel_sam_jobs()
+    workflow._on_segment_finished(SamSegmentResult(new, .9, 'test'), None)
+    assert workflow.project.annotations == [prior]
+    assert old.exists() and not new.exists()
+    workflow.sam_panel.set_status.assert_called_with('Segmentation canceled.')

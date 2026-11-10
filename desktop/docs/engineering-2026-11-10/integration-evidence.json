@@ -1,0 +1,25 @@
+{
+  "relink": {
+    "real_moved_video_repaired": true,
+    "clip_id_trim_and_annotations_preserved": true,
+    "privacy_approvals_reset": true,
+    "undo_redo_save_reopen": true,
+    "encoded_export_redaction_pixels_checked": true,
+    "warnings": []
+  },
+  "audio_export": {
+    "fixture": "3s still timeline, 1s880Hz tone begins0.75s gain0.4 with source muted",
+    "decoded_pcm_rms": {
+      "before_tone": 0.0,
+      "during_tone": 0.03533392772078514,
+      "after_tone": 0.0
+    },
+    "warnings": [],
+    "measurement": "Audio padded with silence to3s after natural stream end, then decoded mono float32 at8kHz"
+  },
+  "limits": [
+    "No physical audio device available; direct Qt audio-buffer preview attempt did not finish and was terminated.",
+    "Preview transport is covered by deterministic player tests; hardware listening/latency not verified.",
+    "No actual SAM inference or native Windows checks."
+  ]
+}

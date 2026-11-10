@@ -1,0 +1,17 @@
+{
+  "date": "2026-11-10",
+  "scope": "Actual recording controller and close methods with mocked device, recorder, and base widget close; no microphone or native settings writes",
+  "NE-008": {
+    "record_pressed_at_seconds": 2.0,
+    "playhead_when_recording_finished_seconds": 7.0,
+    "inserted_track_start_seconds": 7.0,
+    "expected_track_start_seconds": 2.0
+  },
+  "NE-009": {
+    "recording_pending_when_close_saved": true,
+    "tracks_after_delayed_recording_completion": 1,
+    "tracks_in_saved_project": 0,
+    "limitation": "Lost saved project reference reproduced; physical recording, actual OS close timing, and deletion of audio file are not established"
+  },
+  "status": "Pre-fix reproduction evidence for NE-008/NE-009; see CODING_TICKETS.md for current implementation status"
+}

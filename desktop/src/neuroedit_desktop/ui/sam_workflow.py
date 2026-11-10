@@ -106,6 +106,13 @@ class SamWorkflowMixin:
             worker = getattr(self, worker_attr, None)
             cancel = getattr(worker, "cancel", None)
             if worker is not None and callable(cancel):
+                if worker_attr == "_sam_segment_worker":
+                    context = getattr(self, "_sam_job_context", None)
+                    if context is not None:
+                        context["cancelled"] = True
+                    self.sam_panel.set_status(
+                        "Cancel requested. Current inference must finish before it stops."
+                    )
                 cancel()
                 self.statusBar().showMessage("SAM: cancel requested…", 3000)
 
@@ -315,6 +322,11 @@ class SamWorkflowMixin:
         self._sam_segment_worker = None
         self.sam_panel.set_busy(False)
         context = getattr(self, "_sam_job_context", None) or {}
+        if context.get("cancelled") or error == "cancelled":
+            self._discard_sam_result(result)
+            self.sam_panel.set_status("Segmentation canceled.")
+            self.statusBar().showMessage("SAM: segmentation canceled", 5000)
+            return
         if not self._sam_context_is_current(context):
             self._discard_sam_result(result)
             self.sam_panel.set_status("Segmentation result discarded after project changed.")

@@ -1,0 +1,34 @@
+{
+  "sam_cancel_during_stubbed_inference": {
+    "cancelled": true,
+    "finished": [
+      [
+        "synthetic-result-after-cancel",
+        null
+      ]
+    ]
+  },
+  "audio_duration_after_failed_probe": 5.0,
+  "import_with_250ms_injected_probe": {
+    "elapsed_ms": 255.43,
+    "heartbeat_callbacks_during_import": 0,
+    "heartbeat_callbacks_after_event_processing": 1
+  },
+  "timeline_fingerprint_microbenchmark": [
+    {
+      "annotations": 100,
+      "median_ms": 0.15,
+      "p95_ms": 0.159
+    },
+    {
+      "annotations": 1000,
+      "median_ms": 0.491,
+      "p95_ms": 0.797
+    },
+    {
+      "annotations": 5000,
+      "median_ms": 1.832,
+      "p95_ms": 2.428
+    }
+  ]
+}

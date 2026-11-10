@@ -150,6 +150,9 @@ def _window(project: ProjectState | None = None) -> MainWindow:
     window._project_end_time_cache = None
     window._pending_seek_ms = None
     window._pending_play = False
+    window.audio_preview = type("AudioPreviewStub", (), {"sync": lambda *args, **kwargs: None, "stop": lambda *args: None})()
+    window.timeline_clock = _StubTimer()
+    window.play_button = _StubButton()
     window.labels_panel = _StubPanel()
     window.video_view = _StubView()
     window.timeline = _StubTimeline()
@@ -642,3 +645,54 @@ def test_timeline_does_not_resync_playing_video_under_overlay_slide(
 
     assert project.current_time == pytest.approx(2.033)
     assert sync_calls == []
+
+
+def test_audio_preview_follows_clock_holds_and_full_frame_slide(monkeypatch):
+    project = ProjectState(current_time=2.0, playback_rate=1.0)
+    project.audio_tracks.append(AudioTrack('a', '/tmp/voice.wav', 'Voice', duration=10))
+    project.slides.append(Slide(id='slide', title='Still', duration=5, overlay=False))
+    window = _window(project)
+    window._timeline_playing = True
+    window._last_timeline_tick = 1.0
+    window._pending_seek_ms = 500
+    window.player = _StubPlayer()
+    window.timeline_clock = _StubTimer()
+    window.play_button = _StubButton()
+    window.time_label = _StubLabel()
+    calls = []
+    window.audio_preview.sync = lambda project, playing, **kwargs: calls.append((project.current_time, playing))
+    window._sync_player_to_timeline = lambda *, play: None
+    monkeypatch.setattr(main_window_module.time, 'monotonic', lambda: 1.1)
+    window._tick_timeline_playback()
+    assert calls == [(2.0, False)]
+    window._pending_seek_ms = None
+    monkeypatch.setattr(main_window_module.time, 'monotonic', lambda: 1.2)
+    window._tick_timeline_playback()
+    assert calls[-1] == pytest.approx((2.1, True))
+
+
+def test_project_activation_stops_transport_before_replacement():
+    old = ProjectState()
+    window = _window(old)
+    window._timeline_playing = True
+    calls = []
+    window.audio_preview.stop = lambda: calls.append(window.project)
+    new = ProjectState(audio_tracks=[AudioTrack("new", "/tmp/new.wav", "New", duration=3)])
+    window._activate_project(_StubStore(), new)
+    assert calls == [old]
+    assert window.project is new
+    assert not window._timeline_playing
+    assert window.timeline_clock.stop_count == 1
+    assert window.play_button.text == "▶"
+
+
+def test_small_timeline_seek_forces_audio_position():
+    window = _window(ProjectState(current_time=1.0, duration=10))
+    window._timeline_playing = True
+    window.time_label = _StubLabel()
+    window._project_end_time = lambda: 10
+    window._sync_player_to_timeline = lambda *, play: None
+    calls = []
+    window.audio_preview.sync = lambda project, playing, **kwargs: calls.append((project.current_time, playing, kwargs))
+    window._seek_global(1.1)
+    assert calls == [(1.1, True, {"seek": True})]

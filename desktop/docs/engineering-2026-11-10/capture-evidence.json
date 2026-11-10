@@ -1,0 +1,109 @@
+{
+  "date": "2026-11-10",
+  "environment": "Qt offscreen, synthetic project, stubbed SAM probe",
+  "run_count": 2,
+  "images_per_run": 19,
+  "native_settings_unchanged_after_each_corrected_run": true,
+  "injected_capture_failure_surfaced": true,
+  "native_settings_unchanged_after_injected_failure": true,
+  "temporary_settings_and_storage_cleanup_verified": true,
+  "images": {
+    "dialog_export.png": {
+      "width": 510,
+      "height": 484,
+      "bytes": 64751
+    },
+    "dialog_export_checklist.png": {
+      "width": 500,
+      "height": 479,
+      "bytes": 50984
+    },
+    "dialog_export_history.png": {
+      "width": 560,
+      "height": 360,
+      "bytes": 14342
+    },
+    "dialog_phi_review.png": {
+      "width": 460,
+      "height": 183,
+      "bytes": 21523
+    },
+    "dialog_project_library.png": {
+      "width": 640,
+      "height": 420,
+      "bytes": 17856
+    },
+    "dialog_sam_setup.png": {
+      "width": 480,
+      "height": 281,
+      "bytes": 26921
+    },
+    "dialog_storage_location.png": {
+      "width": 533,
+      "height": 361,
+      "bytes": 50844
+    },
+    "header.png": {
+      "width": 1440,
+      "height": 92,
+      "bytes": 20620
+    },
+    "media_minimum_add.png": {
+      "width": 260,
+      "height": 117,
+      "bytes": 10489
+    },
+    "media_minimum_link.png": {
+      "width": 260,
+      "height": 117,
+      "bytes": 8742
+    },
+    "panel_audio.png": {
+      "width": 455,
+      "height": 417,
+      "bytes": 18400
+    },
+    "panel_labels.png": {
+      "width": 455,
+      "height": 417,
+      "bytes": 5960
+    },
+    "panel_sam.png": {
+      "width": 455,
+      "height": 417,
+      "bytes": 44375
+    },
+    "panel_sam_missing_backend.png": {
+      "width": 455,
+      "height": 417,
+      "bytes": 44375
+    },
+    "panel_slides.png": {
+      "width": 455,
+      "height": 417,
+      "bytes": 6049
+    },
+    "panel_tips.png": {
+      "width": 455,
+      "height": 417,
+      "bytes": 41384
+    },
+    "timeline.png": {
+      "width": 1440,
+      "height": 340,
+      "bytes": 25001
+    },
+    "window_1440x900.png": {
+      "width": 1440,
+      "height": 900,
+      "bytes": 118805
+    },
+    "window_minimum.png": {
+      "width": 1095,
+      "height": 600,
+      "bytes": 76577
+    }
+  },
+  "limitations": "Offscreen rendering is not physical-device, accessibility, Windows scaling, or clinical validation. This evidence describes corrected harness runs only.",
+  "publication_note": "19 captures were inspected locally. dialog_storage_location.png is retained locally but excluded from the repository because it displays local filesystem paths; the other 18 captures are published."
+}

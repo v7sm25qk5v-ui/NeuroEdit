@@ -1,5 +1,182 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-10 — v0.5.14-alpha validated release candidate
+
+- The user authorized fixing NE-008/009, updating GitHub, pushing, and cutting
+  a new tag/release. Continued the Terra engineer/Sol senior-review arrangement.
+  All nine coding tickets are now software verified; release publication is
+  recorded separately after CI succeeds.
+- Regressions first reproduced three failures: recording at the wrong timeline
+  position and premature close/save while active or already finalizing. Record
+  now retains its original playhead position. Close is refused until recording
+  finishes, with Stop/wait/retry guidance. Recorder failures preserve existing
+  files, skip invalid attachment, and do not trap the window in a pending state.
+  Error-signal ordering, synchronous completion, repeated/reentrant close,
+  failed save/probe, and saved-project recovery are covered.
+- Sol inspected the actual changes and independently passed 31 focused tests.
+  Final full local suite: **341 passed in 148.64 s**, no skips and clean exit,
+  using the existing isolated runtime, bundled arm64 FFmpeg, Qt offscreen, and
+  `PYTHONPATH=src`. Full Ruff, source compileall, and diff checks passed.
+  Native preferences exactly matched the private pre-validation snapshot,
+  including the user-approved autosave folder; no project files were migrated.
+- Prepared numeric version `0.5.14` and tag/download labels `v0.5.14-alpha` in
+  package metadata, app version, bundle defaults, Windows defaults, and README.
+  Release notes are in
+  `desktop/docs/engineering-2026-11-10/RELEASE_NOTES.md`. Dependency constraints
+  and the reviewed CI quality/build ordering remain unchanged.
+- Live GitHub checks confirmed remote main at `81a405f`, write permission, and
+  no existing `v0.5.14-alpha` tag. The previous published alpha is
+  `v0.5.13-alpha.2`. The release will include the earlier seven reviewed fixes
+  as well as these two recording fixes.
+- Existing untracked `desktop/qa/` is excluded. New documentation paths were
+  generalized, and the local storage-location screenshot is retained locally
+  but gitignored because it displays local filesystem paths. Nineteen captures
+  were inspected locally; eighteen engineering captures are published.
+- This entry records validation/preparation only, not completed publication or
+  installer execution. Physical audio/microphone, native Windows scaling, real
+  SAM inference, and installed-app runtime checks remain unverified.
+
+## 2026-11-10 — Two recording follow-up defects ticketed
+
+- The user asked whether further issues/tickets remained. Reviewed the live
+  board and recording lifecycle, and added NE-008/009 as **Ready**, unassigned
+  coding tickets. The original seven remain software verified; these are not
+  claims that the earlier batch addressed the whole recording workflow.
+- NE-008: controlled invocation of the actual recording methods starts at 2 s,
+  moves the playhead to 7 s, and inserts narration at 7 s on completion. Capture
+  and retain the recording's original timeline insertion point.
+- NE-009: controlled close/finalization invocation saves before a pending
+  recording is attached; delayed completion adds one live track while the saved
+  project contains none. Finalize narration before final save/close, with a safe
+  cancellation/error path. This demonstrates a missing saved reference, not
+  deletion of the underlying audio file.
+- Evidence: `desktop/docs/engineering-2026-11-10/follow-up-evidence.json`.
+  Recorder/device/base widget close were mocked; no microphone, real application
+  close, native preference write, or production source edit was performed.
+  JSON parsing and `git diff --check` passed. No fresh full-suite result is
+  claimed for this ticket/documentation-only follow-up.
+
+## 2026-11-10 — User-approved autosave location restored
+
+- The user approved restoring the existing
+  `/Users/alangordillo/Documents/NeuroEdit/Autosave` folder after it was verified
+  to contain `project.json`.
+- Changed only the native `storage/projectRoot` preference. A fresh process
+  using the app's `default_project_root()` resolves to the approved folder.
+  Other preferences compared equal before/after, and the existing `project.json`
+  SHA-256 was unchanged. No project files were moved or rewritten.
+- This resolves the autosave-location follow-up in the entry below. The original
+  values of the other keys touched by the earlier validation incident remain
+  unknown and were not guessed. A running app keeps its current project/store;
+  the restored default applies when NeuroEdit next opens or creates a project.
+- Updated ticket/review status notes; `git diff --check` passed. No application
+  code changed, so the earlier 327-test result was not rerun or claimed anew.
+
+## 2026-11-10 — Coding tickets, Terra implementation, and Sol review
+
+- Created [CODING_TICKETS.md](CODING_TICKETS.md) for the six concrete application
+  issues and the confirmed screenshot-tool defect from the November 7 review.
+  Two `gpt-6.1-terra` software engineers implemented the changes; a
+  `gpt-6.1-sol` project manager/senior reviewer managed acceptance and reviewed
+  the actual diffs. The coordinating agent checked integration and maintained
+  this handoff. No external issue tracker was selected or written to.
+- NE-001: import buttons now fit the media pane; export source-audio guidance
+  wraps and explains that added narration/music is retained. Defaults are intact.
+- NE-002/005: added audio tracks can be auditioned against timeline playback,
+  including seeks, overlap, rate changes, stills, and audio-only intervals.
+  Playback stops on project replacement/close and during deferred video seeks.
+  Invalid audio probes no longer create guessed five-second tracks; recording
+  finalization waits for the recorder to stop and validates the finished file.
+- NE-003: File → Relink Unavailable Media repairs an explicitly selected
+  video/image/audio/slide-image reference, validates replacement bounds, retains
+  identity and edits, supports undo/save/reopen, clears caches, and resets PHI
+  approvals. Split siblings are repaired individually, without silent matching.
+- NE-004: video metadata import runs on a worker, commits ordered successful
+  results in one undo transaction, rejects cancelled/stale results, and reuses
+  stat-validated metadata for the selected preview instead of probing again on
+  the UI thread. Close includes import-worker shutdown.
+- NE-006: single-frame SAM cancellation is checked before/after inference and
+  again when delivering a queued result. Cancelled masks are discarded without
+  attaching an annotation or removing unrelated masks.
+- NE-007: screenshots use an asserted temporary INI settings constructor and
+  isolated storage, verify panel/dialog identity, select SAM explicitly, surface
+  save failures, and restore patches/clean up on failure. Two corrected runs
+  each produced 19 inspected captures, including scrolled minimum-size controls.
+- Senior review and evidence:
+  [desktop/docs/engineering-2026-11-10/REVIEW.md](desktop/docs/engineering-2026-11-10/REVIEW.md).
+  Review caught and resolved small-seek synchronization, old narration during
+  project activation, queued cancellation, source-bound expansion, duplicate
+  GUI probing, and ineffective native settings isolation. A newly orphaned
+  image helper was removed; the tutorial's video helper remains.
+- Final combined checks from `desktop/`, using the existing isolated runtime
+  `/private/tmp/neuroedit-security-20261106/bin/python`, arm64 FFmpeg via
+  `PATH=/private/tmp/neuroedit-security-bin:$PATH`, `QT_QPA_PLATFORM=offscreen`,
+  and `PYTHONPATH=src`: **327 passed in 139.58 s**, no skips and a clean exit;
+  full Ruff, source compileall, and `git diff --check` passed. The first combined
+  run had one failure in an older incomplete `MainWindow.__new__` test fixture;
+  the fixture now supplies the transport collaborators required by activation.
+  Production lifecycle safeguards were preserved.
+- Real synthetic media checks passed: moved-video relink, undo/redo,
+  save/reopen, encoded export, and decoded redaction pixels; encoded narration
+  PCM was silent before/after the intended tone interval and nonzero within it.
+  A real H.264 import probed once off the GUI thread, committed on the GUI thread,
+  finished, and closed cleanly in about 0.3 s. Earlier polling/instrumentation
+  attempts were rejected as evidence; their isolated processes were stopped.
+- **Unresolved preference recovery:** an early screenshot-harness revision
+  wrote `storage/projectRoot`, `storage/promptShown`, `tutorial/seen`, and
+  `recentProjects` before constructor isolation was corrected. Original values
+  were not recorded, so exact persistent effects are unknown. Current preferences
+  include an older pytest autosave path and nonempty recents; this task cannot
+  establish their origin. The user was informed and asked for the intended
+  autosave folder. No guessed restoration or project migration was performed.
+  Corrected success/failure tests preserve native settings, but do not undo the
+  earlier incident. The software fixes are verified; this operational follow-up
+  remains open.
+- Physical listening/latency, Windows scaling, and real SAM inference remain
+  unverified. A direct Qt audio-buffer smoke could not complete without an audio
+  device and was terminated; it is not counted as successful validation. Preview
+  gain is capped at 1.0 by Qt, while existing exported persisted gain can reach
+  2.0; normal UI-created tracks use 0..1. No commit, push, package, tag, release,
+  dependency change, or migration was made. Existing `desktop/qa/` and prior
+  November 7 review artifacts were preserved.
+
+## 2026-11-07 — Feature, implementation, and repeat-use product review
+
+- The user requested a main-agent review coordinated with lower-cost research
+  subagents, then selected **getting a small group of clinicians using NeuroEdit
+  repeatedly** as the next-phase outcome. Three `gpt-6-luna` reviewers examined
+  feature functionality, engineering/optimization, and current alternatives;
+  the main agent checked source findings, ran controlled probes, and prioritized
+  the combined results. This was a review, not a feature implementation.
+- The durable report is
+  [desktop/docs/review-2026-11-07/REVIEW.md](desktop/docs/review-2026-11-07/REVIEW.md),
+  with seven inspected fresh offscreen screenshots and two JSON evidence files.
+  It maps current features, distinguishes source confirmation from execution
+  and hypotheses, and proposes a five-clinician pilot with three independent
+  second-session exports within 30 days as a decision target.
+- Highest-value gaps: clipped import/export guidance, absent timeline audition
+  for added narration, no in-place missing-media relink, synchronous video
+  probing on import, guessed audio duration after failed probing, and ineffective
+  single-frame SAM cancellation. Captions use supplied/imported transcripts;
+  they do not perform speech recognition. SAM remains source-build-only.
+- Controlled probes confirmed that a 250 ms metadata-probe delay blocked the
+  UI heartbeat, failed audio probing returned 5.0 seconds, and the real SAM
+  worker emitted a successful fake result despite in-flight cancellation.
+  Timeline fingerprint microbenchmarks show scaling cost but do not establish
+  a user-visible performance failure or justify a general state/cache rewrite.
+- Fresh full validation from `desktop/`: the existing isolated runtime at
+  `/private/tmp/neuroedit-security-20261106/bin/python`, arm64 FFmpeg via
+  `PATH=/private/tmp/neuroedit-security-bin:$PATH`, `QT_QPA_PLATFORM=offscreen`,
+  and `PYTHONPATH=src`; `python -m pytest tests/ -q --disable-warnings
+  -o faulthandler_timeout=120` passed **301 tests in 85.47 s** with no skips
+  and a clean exit. Ruff and `git diff --check` passed. Screenshot capture used
+  temporary INI settings and storage; the user's preferences were not changed.
+- No actual SAM inference, clinical footage, packaged installation, Windows UI,
+  hardware audio synchronization, or assistive-technology run was performed.
+  This was not a security scan and does not replace the existing partial scan.
+  No application source, dependency, release, commit, push, or tag changed.
+  Existing untracked `desktop/qa/` was preserved.
+
 ## 2026-09-29 — Codex Security scan launch blocked
 
 - Requested a Standard Codex Security scan of the whole repository through
