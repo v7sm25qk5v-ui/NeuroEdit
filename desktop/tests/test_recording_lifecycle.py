@@ -147,40 +147,47 @@ def test_recording_unchanged_playhead_and_delayed_completion(recording):
 
 
 def test_close_after_recording_persists_track_in_real_window(app, tmp_path, monkeypatch):
-    from PySide6.QtCore import QSettings
+    from PySide6.QtCore import QCoreApplication, QEvent, QSettings
     from PySide6.QtGui import QCloseEvent
-    from neuroedit_desktop.sam_backend import SamBackend, SamBackendInfo
 
-    monkeypatch.setattr(SamBackend, "probe", lambda self: SamBackendInfo("missing", "none", "stubbed"))
+    monkeypatch.setattr(MainWindow, "_load_sam_backend", lambda self: None)
     monkeypatch.setattr(MainWindow, "_maybe_show_first_run_tutorial", lambda self: None)
     settings = QSettings("NeuroEdit", "Desktop")
     settings.setValue("storage/projectRoot", str(tmp_path / "autosave"))
     settings.setValue("storage/promptShown", True)
     settings.setValue("tutorial/seen", True)
     window = MainWindow()
-    panel = window.audio_panel
-    panel.recorder = FakeRecorder()
-    panel.capture_session = SimpleNamespace(setAudioInput=lambda value: None)
-    monkeypatch.setattr(audio_panel.QMediaDevices, "defaultAudioInput", lambda: SimpleNamespace(isNull=lambda: False))
-    monkeypatch.setattr(audio_panel, "QAudioInput", lambda *args: object())
-    monkeypatch.setattr(panel, "_probe_audio_duration", lambda path: 3.5)
-    window.project.current_time = 2.0
-    panel._start_recording()
-    path = panel._recording_path
-    path.write_bytes(b"fixture recording")
-    window.project.current_time = 7.0
-    first_close = QCloseEvent()
-    window.closeEvent(first_close)
-    assert not first_close.isAccepted()
-    panel._stop_recording()
-    panel._recording_state_changed(QMediaRecorder.RecorderState.StoppedState)
-    final_close = QCloseEvent()
-    window.closeEvent(final_close)
-    assert final_close.isAccepted()
-    reopened = ProjectStore.open(window.store.project_path)[1]
-    assert len(reopened.audio_tracks) == 1
-    assert reopened.audio_tracks[0].start_time == 2.0
-    assert reopened.audio_tracks[0].duration == 3.5
+    try:
+        panel = window.audio_panel
+        panel.recorder = FakeRecorder()
+        panel.capture_session = SimpleNamespace(setAudioInput=lambda value: None)
+        monkeypatch.setattr(audio_panel.QMediaDevices, "defaultAudioInput", lambda: SimpleNamespace(isNull=lambda: False))
+        monkeypatch.setattr(audio_panel, "QAudioInput", lambda *args: object())
+        monkeypatch.setattr(panel, "_probe_audio_duration", lambda path: 3.5)
+        window.project.current_time = 2.0
+        panel._start_recording()
+        path = panel._recording_path
+        path.write_bytes(b"fixture recording")
+        window.project.current_time = 7.0
+        first_close = QCloseEvent()
+        window.closeEvent(first_close)
+        assert not first_close.isAccepted()
+        panel._stop_recording()
+        panel._recording_state_changed(QMediaRecorder.RecorderState.StoppedState)
+        final_close = QCloseEvent()
+        window.closeEvent(final_close)
+        assert final_close.isAccepted()
+        reopened = ProjectStore.open(window.store.project_path)[1]
+        assert len(reopened.audio_tracks) == 1
+        assert reopened.audio_tracks[0].start_time == 2.0
+        assert reopened.audio_tracks[0].duration == 3.5
+    finally:
+        window.audio_panel._recording_path = None
+        window.close()
+        window.deleteLater()
+        app.processEvents()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
 
 
 def test_recorded_start_is_used_by_preview_and_export(recording, tmp_path, monkeypatch):

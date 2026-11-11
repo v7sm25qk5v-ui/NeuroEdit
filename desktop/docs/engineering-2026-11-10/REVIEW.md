@@ -7,6 +7,16 @@ part of this review.
 
 ## Review state
 
+Release test-cleanup checkpoint: the initial GitHub candidate passed 341 tests
+in 358.97 s with clean exit. Independent isolated review then reproduced a
+deferred SAM startup callback escaping the new real-window recording test after
+patch restoration. This was not attributed to CI. Terra's test-only cleanup
+stubs unrelated startup before construction and uses finally close/delete/event
+draining. Sol approved the preserved assertions and independently passed the
+target test plus a post-fixture sentinel: two tests, clean exit, no escaped probe
+or retained window. No production change was needed. Final release validation
+is recorded in `HANDOFF.md`.
+
 Coordinator release validation, 2026-11-10: NE-008/009 are now software verified
 after Sol review and **341 passing tests in 148.64 s**, no skips and clean exit.
 Full Ruff, compilation, version-label validation, and diff checks passed. Native

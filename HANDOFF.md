@@ -1,5 +1,29 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-10 — Release-candidate CI and test lifecycle cleanup
+
+- Final local rerun after cleanup: **341 passed in 139.36 s**, no skips and
+  clean exit. Ruff/diff checks passed, and native preferences still exactly
+  matched the private pre-validation snapshot. This final candidate is ready
+  for the new immutable release tag and its gated installer pipeline.
+- Pushed `bf45a3945e793069b0120d83395927a6e2467429` to `origin/main`.
+  [Quality run 42926473034](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/42926473034)
+  passed Ruff and **341 tests in 358.97 s**, no skips and clean exit.
+- The configured Git credential helper referenced an Intel-only CLI. The push
+  succeeded using the existing arm64 CLI as a command-scoped helper override;
+  global Git configuration was not changed.
+- Before tagging, Sol reproduced a deferred startup callback escaping the new
+  recording real-window test after monkeypatch teardown. This was a test-only
+  lifecycle defect, not attributed to the successful CI run or production app.
+  Terra scoped out unrelated SAM startup and added finally close/delete/event
+  cleanup while patches remain active. Test assertions are preserved.
+- Focused recording/lifecycle checks passed 22 tests. Sol's independent pytest
+  post-fixture sentinel passed two tests with clean exit, no late probe, and no
+  retained window. No application source or version changed in this cleanup.
+  The final full local rerun and tag-build results are recorded separately.
+- No release tag was moved or published during this checkpoint. Existing
+  untracked QA files and the approved native autosave setting remain untouched.
+
 ## 2026-11-10 — v0.5.14-alpha validated release candidate
 
 - The user authorized fixing NE-008/009, updating GitHub, pushing, and cutting
