@@ -40,6 +40,12 @@ plus Ruff, source compilation, and diff/version checks. Native app preferences
 were unchanged by this validation. GitHub CI/build/publication results are
 recorded in `HANDOFF.md`.
 
+The [tagged installer workflow](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/42927955107)
+passed Ruff and all **341 tests**, then built both platform installers and
+published all three downloads successfully. The final main-branch quality gate
+also passed all 341 tests. Both runs used commit
+`c28bf019b1da3f05f85b62d30abef0eee1813bed`.
+
 Final local and CI validation are recorded in `HANDOFF.md`. Regression coverage
 includes recording start position, active/finalizing close, error ordering,
 repeated close, saved-project recovery, source mapping, and preservation of the

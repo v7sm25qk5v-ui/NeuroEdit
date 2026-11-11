@@ -1,5 +1,35 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-10 — v0.5.14-alpha published
+
+- Published [NeuroEdit v0.5.14-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.14-alpha)
+  as a public, non-draft GitHub prerelease. The new immutable annotated tag
+  resolves to `c28bf019b1da3f05f85b62d30abef0eee1813bed`; the tag object is
+  `fdb467bd69ecce12c564bca5eb7947cec12e81ac`. No existing tag was moved.
+- [Installer workflow 42927955107](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/42927955107)
+  completed quality, macOS, Windows, and publication jobs successfully.
+  Tagged quality passed Ruff and **341 tests in 339.65 s**, no skips and clean
+  exit. Final [main quality run 42927955543](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/42927955543)
+  also passed Ruff and **341 tests in 412.20 s**, no skips and clean exit.
+- All three release assets are uploaded and nonempty:
+  - `NeuroEdit-v0.5.14-alpha-macOS-unsigned.dmg` — 129,468,455 bytes.
+  - `NeuroEdit-v0.5.14-alpha-macOS-unsigned.zip` — 117,552,547 bytes.
+  - `NeuroEdit-v0.5.14-alpha-Windows-Setup.exe` — 100,243,525 bytes.
+  GitHub-reported SHA-256 hashes and publication metadata are recorded in
+  `desktop/docs/engineering-2026-11-10/release-verification.json`.
+  Public HTTP HEAD requests returned 200 for all three installer URLs; the
+  installers were not downloaded or installed during verification.
+- Release notes and installer links describe the nine verified tickets,
+  including original-position narration and the explicit Stop/wait/retry close
+  policy. Numeric app/package/bundle defaults are `0.5.14`; artifacts and the
+  prerelease use `v0.5.14-alpha`.
+- This final publication record is documentation-only; application code stays
+  at the tested tag. Native preferences and project files were not changed by
+  publication. Existing `desktop/qa/` and the storage-location screenshot remain
+  local. Physical microphone/audio latency, native Windows UI/scaling, installed
+  app runtime, and actual SAM inference remain unverified. Installers remain
+  unsigned/editor-only; no completed security-audit claim is made.
+
 ## 2026-11-10 — Release-candidate CI and test lifecycle cleanup
 
 - Final local rerun after cleanup: **341 passed in 139.36 s**, no skips and

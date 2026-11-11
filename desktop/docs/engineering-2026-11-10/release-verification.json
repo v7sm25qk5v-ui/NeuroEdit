@@ -1,0 +1,63 @@
+{
+  "assets": [
+    {
+      "browser_download_url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/download/v0.5.14-alpha/NeuroEdit-v0.5.14-alpha-macOS-unsigned.dmg",
+      "digest": "sha256:3778aff3dd68d4d697d9ecc598a6078cb2703b592b4423ac775b360050b6c993",
+      "name": "NeuroEdit-v0.5.14-alpha-macOS-unsigned.dmg",
+      "size": 129468455,
+      "state": "uploaded",
+      "public_download_head_http_status": 200
+    },
+    {
+      "browser_download_url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/download/v0.5.14-alpha/NeuroEdit-v0.5.14-alpha-macOS-unsigned.zip",
+      "digest": "sha256:3f5c20774b2a1ecc2fdd8d35dbaae666701c1a42fb32155aeb8f79f03f04563a",
+      "name": "NeuroEdit-v0.5.14-alpha-macOS-unsigned.zip",
+      "size": 117552547,
+      "state": "uploaded",
+      "public_download_head_http_status": 200
+    },
+    {
+      "browser_download_url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/download/v0.5.14-alpha/NeuroEdit-v0.5.14-alpha-Windows-Setup.exe",
+      "digest": "sha256:ced690bf9ea6da9adfdc3cc91872e8bab6d7e994ff9a008a20b6bf24616c8b9d",
+      "name": "NeuroEdit-v0.5.14-alpha-Windows-Setup.exe",
+      "size": 100243525,
+      "state": "uploaded",
+      "public_download_head_http_status": 200
+    }
+  ],
+  "draft": false,
+  "html_url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.14-alpha",
+  "id": 441078483,
+  "name": "NeuroEdit v0.5.14-alpha",
+  "prerelease": true,
+  "published_at": "2026-11-11T00:09:58Z",
+  "tag_name": "v0.5.14-alpha",
+  "target_commitish": "main",
+  "verified_date_local": "2026-11-10",
+  "timezone": "America/New_York",
+  "tag_commit_sha": "c28bf019b1da3f05f85b62d30abef0eee1813bed",
+  "tag_object_sha": "fdb467bd69ecce12c564bca5eb7947cec12e81ac",
+  "installer_workflow": {
+    "id": 42927955107,
+    "url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/42927955107",
+    "conclusion": "success",
+    "tests_passed": 341,
+    "tests_skipped": 0,
+    "test_duration_seconds": 339.65,
+    "jobs": [
+      "quality",
+      "macOS",
+      "Windows",
+      "publication"
+    ]
+  },
+  "main_quality_workflow": {
+    "id": 42927955543,
+    "url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/42927955543",
+    "conclusion": "success",
+    "tests_passed": 341,
+    "tests_skipped": 0,
+    "test_duration_seconds": 412.2
+  },
+  "verification_limits": "GitHub-reported SHA-256; public HTTP HEAD only, installers not downloaded or installed. No physical microphone/audio latency, Windows UI/scaling, or actual SAM inference verification."
+}
