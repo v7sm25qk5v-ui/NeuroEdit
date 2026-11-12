@@ -583,3 +583,47 @@ command-line tools.
   palette (no red) burned into the saved PNGs. Focused tests in
   `tests/test_sam_workflow.py`. UX choices grounded in research on
   Premiere/Resolve/FCP/Roto Brush/3D Slicer conventions and complaints.
+
+## Dependency Security Audit (2026-11-12, automation-maintained)
+
+Audited via PyPI release metadata + PyPI/OSV advisory data. The **shipped alpha
+pins** in `desktop/requirements-release.txt` are all CVE-clean; the security
+exposure is in the `>=` floors for the optional `[sam]`/`dev` extras in
+`desktop/pyproject.toml`, which still *permit* known-vulnerable (incl. RCE-class)
+releases. A fresh `pip install -e ".[sam]"` resolves to the patched latest, so
+the practical risk is a stale/cached environment — but the floors should be
+raised so a vulnerable resolve is impossible. Priority given that NeuroEdit
+parses untrusted media and loads remote SAM model checkpoints.
+
+### Immediate — raise vulnerable floors in `desktop/pyproject.toml`
+- [ ] **`pillow>=10` → `pillow>=13.0.0`** (latest 13.0.0, CVE-clean). The `>=10`
+  floor permits ~79 advisories, incl. **CVE-2023-50447** (RCE via
+  `ImageMath.eval`, fixed 10.2.0) and **CVE-2023-4863** (libwebp heap overflow,
+  fixed 10.0.1), plus a large 2026 batch of heap OOB / DoS image-parser bugs
+  fixed only in 12.3.0/13.0.0. Highest priority — image parsing on
+  untrusted/PHI media.
+- [ ] **`torch>=2.7` → `torch>=2.10.0`** (latest 2.15.0, CVE-clean). Floor
+  permits **CVE-2026-24747** (`weights_only` unpickler RCE via malicious `.pth`
+  checkpoint, fixed 2.10.0) — directly relevant since SAM weights are fetched
+  from HuggingFace — plus several DoS/memory-corruption CVEs (CVE-2025-2999/3000/3001, etc.).
+- [ ] **`transformers>=5.6` → `transformers>=5.10.0`** (latest 5.22.2,
+  CVE-clean). Floor permits **CVE-2026-9856** (path-traversal arbitrary file
+  write, fixed 5.10.0) and **CVE-2026-80047** (remote `.py` written to disk).
+- [ ] **`pytest>=8.0` → `pytest>=9.0.3`** (dev-only, latest 9.2.0).
+  **CVE-2025-71176** — predictable `/tmp/pytest-of-{user}` dir, local DoS/privesc
+  on UNIX (fixed 9.0.3). Low severity, dev environment only.
+
+### Routine (non-security) — shipped pins in `requirements-release.txt`
+No CVEs; refresh deliberately per the file's "validate a new build on both
+platforms" note.
+- [ ] imageio-ffmpeg `0.6.0` → `0.8.1` (minor) · numpy `2.4.6` → `2.5.4` (minor)
+  · PySide6 `6.11.1` → `6.12.0` (minor) · pyinstaller `6.20.0` → `6.22.3` (patch)
+- [ ] **opencv-python `4.13.0.92` → `5.0.0.93` — MAJOR, hold.** OpenCV 5.0 is a
+  breaking release; validate separately before bumping, don't batch with the above.
+
+### Also noted (non-security)
+- [ ] `ruff>=0.8,<0.16` upper cap now excludes latest ruff `0.17.4`; widen the
+  cap when convenient (dev/lint only).
+- Clean, at/near latest, no action: numpy, opencv (ignoring the major),
+  PySide6, pyinstaller, imageio-ffmpeg, huggingface-hub, safetensors,
+  torchvision, hatchling.
