@@ -181,6 +181,51 @@ class Annotation:
         return str(path) if path else self.mask_path
 
 
+def _shift_mask_frames(annotation: Annotation, shift: float) -> None:
+    if shift:
+        for frame in annotation.mask_frames:
+            frame["time"] = float(frame["time"]) + shift
+
+
+def _ripple_redaction(annotation: Annotation, anchor: float, delta: float) -> None:
+    """Ripple one redaction so it still covers the footage it covered.
+
+    Covering extra footage is acceptable; exposing covered footage is not.
+    `ann_duration == 0` means "to the end of the timeline", so a finite
+    window is never allowed to collapse to zero.
+    """
+    eps = 1e-9
+    start = annotation.frame_time
+    finite = annotation.ann_duration > 0
+    end = start + annotation.ann_duration
+    if delta > 0:
+        # Footage is revealed at `anchor`. A redaction strictly after it
+        # follows its footage; one that touches or spans the edit point
+        # keeps its start and grows over the revealed footage.
+        if start > anchor + eps:
+            annotation.frame_time = start + delta
+        elif finite and end >= anchor - eps:
+            annotation.ann_duration += delta
+        return
+
+    # delta < 0: timeline [cut_start, anchor) was removed.
+    cut_start = max(0.0, anchor + delta)
+    if finite and start >= cut_start - eps and end <= anchor + eps:
+        return  # only covered removed footage: stays put, over-covering
+
+    def moved(time_s: float) -> float:
+        if time_s >= anchor - eps:
+            return max(0.0, time_s + delta)
+        return min(time_s, cut_start)
+
+    new_start = moved(start)
+    if finite:
+        new_duration = moved(end) - new_start
+        if new_duration > eps:
+            annotation.ann_duration = new_duration
+    annotation.frame_time = new_start
+
+
 @dataclass
 class ProjectState:
     project_name: str = "Untitled Case"
@@ -351,11 +396,87 @@ class ProjectState:
             if marker.time >= threshold:
                 marker.time = max(0.0, marker.time + delta)
         for annotation in self.annotations:
-            if annotation.frame_time >= threshold:
-                old_start = annotation.frame_time
+            old_start = annotation.frame_time
+            if annotation.type == "redact":
+                _ripple_redaction(annotation, anchor, delta)
+            elif annotation.frame_time >= threshold:
                 annotation.frame_time = max(0.0, annotation.frame_time + delta)
-                for frame in annotation.mask_frames:
-                    frame["time"] = float(frame["time"]) + annotation.frame_time - old_start
+            _shift_mask_frames(annotation, annotation.frame_time - old_start)
+
+    def move_redactions_with_clips(self, old_spans: dict[str, tuple[float, float]]) -> None:
+        """Re-place redactions after clips were reordered.
+
+        `old_spans` maps clip id to its (start, end) on the timeline before
+        the reorder. Each redaction moves to the smallest single window that
+        still holds every piece of footage it covered; time that was not over
+        a clip stays where it was. A redaction spanning clips that are no
+        longer adjacent therefore widens rather than exposing either piece.
+        """
+        moves = sorted(
+            (old_spans[clip.id][0], old_spans[clip.id][1], clip.start_time - old_spans[clip.id][0])
+            for clip in self.clips
+            if clip.id in old_spans
+        )
+        if all(abs(shift) < 1e-9 for _start, _end, shift in moves):
+            return
+        for annotation in self.annotations:
+            if annotation.type != "redact":
+                continue
+            start = annotation.frame_time
+            finite = annotation.ann_duration > 0
+            end = start + annotation.ann_duration if finite else math.inf
+            pieces: list[tuple[float, float]] = []
+            cursor = start
+            for clip_start, clip_end, shift in moves:
+                if clip_end <= start + 1e-9 or clip_start >= end - 1e-9:
+                    continue
+                if clip_start > cursor + 1e-9:
+                    pieces.append((cursor, clip_start))
+                pieces.append((max(start, clip_start) + shift, min(end, clip_end) + shift))
+                cursor = max(cursor, clip_end)
+            if cursor < end - 1e-9:
+                pieces.append((cursor, end))
+            new_start = max(0.0, min(piece[0] for piece in pieces))
+            if finite:
+                annotation.ann_duration = max(piece[1] for piece in pieces) - new_start
+            annotation.frame_time = new_start
+            _shift_mask_frames(annotation, new_start - start)
+
+    def timeline_positions(self) -> list[tuple[Any, dict[str, Any]]]:
+        """Capture every value a trim and its ripple can change, so a live
+        drag can be re-applied from its starting state on each mouse move."""
+        saved: list[tuple[Any, dict[str, Any]]] = []
+        for clip in self.clips:
+            saved.append((clip, {
+                "start_time": clip.start_time,
+                "trim_start": clip.trim_start,
+                "trim_end": clip.trim_end,
+            }))
+        for item in (*self.slides, *self.audio_tracks):
+            saved.append((item, {"start_time": item.start_time}))
+        for segment in self.transcript_segments:
+            saved.append((segment, {
+                "start_time": segment.start_time,
+                "end_time": segment.end_time,
+            }))
+        for marker in self.markers:
+            saved.append((marker, {"time": marker.time}))
+        for annotation in self.annotations:
+            saved.append((annotation, {
+                "frame_time": annotation.frame_time,
+                "ann_duration": annotation.ann_duration,
+                "mask_frame_times": [frame["time"] for frame in annotation.mask_frames],
+            }))
+        return saved
+
+    def restore_timeline_positions(self, saved: list[tuple[Any, dict[str, Any]]]) -> None:
+        for item, values in saved:
+            for name, value in values.items():
+                if name == "mask_frame_times":
+                    for frame, time_s in zip(item.mask_frames, value):
+                        frame["time"] = time_s
+                else:
+                    setattr(item, name, value)
 
     def _clip_order_with_insert(
         self,

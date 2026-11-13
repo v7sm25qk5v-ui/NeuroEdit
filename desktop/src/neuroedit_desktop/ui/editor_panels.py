@@ -287,7 +287,9 @@ class TimelineCanvas(QWidget):
         self._clip_scroll_timer.timeout.connect(self._autoscroll_clip_drag)
         self._annotation_lanes_key: tuple | None = None
         self._annotation_lanes_value: dict[str, int] = {}
-        self._trim_drag_origin: tuple[str, float, float] | None = None
+        # (clip id, ProjectState.timeline_positions() at press) while a trim
+        # handle is being dragged.
+        self._trim_drag_origin: tuple[str, list] | None = None
         self._slide_lanes_key: tuple | None = None
         self._slide_lanes_value: dict[str, int] = {}
         # Widget-level selection only — never serialized or snapshotted.
@@ -763,10 +765,8 @@ class TimelineCanvas(QWidget):
             self._drag = (kind, item_id, offset, origin_start)
             if kind == "clip":
                 self._clip_press_position = QPointF(pos)
-            if kind == "clip-trim-start":
-                clip = next((c for c in self.project.clips if c.id == item_id), None)
-                if clip is not None:
-                    self._trim_drag_origin = (clip.id, clip.start_time, clip.trim_start)
+            if kind in ("clip-trim-start", "clip-trim-end"):
+                self._trim_drag_origin = (item_id, self.project.timeline_positions())
             if kind.startswith("clip"):
                 self.project.active_clip_id = item_id
                 self.project_changed.emit()
@@ -811,20 +811,18 @@ class TimelineCanvas(QWidget):
             self.update()
             self._update_trash_arm(self._clip_pointer_global)
             return
-        elif kind == "clip-trim-start":
-            if snap:
-                time_at = self._snap_time(time_at, base_kind, item_id)
-            for clip in self.project.clips:
-                if clip.id == item_id:
+        elif kind in ("clip-trim-start", "clip-trim-end"):
+            clip = next((c for c in self.project.clips if c.id == item_id), None)
+            if clip is not None:
+                # Rewind before snapping so snap targets are the press-time
+                # positions, not wherever the previous move left them.
+                self._rewind_trim_drag(clip)
+                if snap:
+                    time_at = self._snap_time(time_at, base_kind, item_id)
+                if kind == "clip-trim-start":
                     self._apply_trim_start(clip, time_at)
-                    break
-        elif kind == "clip-trim-end":
-            if snap:
-                time_at = self._snap_time(time_at, base_kind, item_id)
-            for clip in self.project.clips:
-                if clip.id == item_id:
+                else:
                     self._apply_trim_end(clip, time_at)
-                    break
         elif kind == "audio":
             new_start = max(0.0, time_at - offset)
             if snap:
@@ -873,10 +871,15 @@ class TimelineCanvas(QWidget):
     def _commit_clip_move(self) -> None:
         if not self._clip_preview_positions:
             return
+        old_spans = {
+            clip.id: (clip.start_time, clip.start_time + clip.display_duration)
+            for clip in self.project.clips
+        }
         for clip in self.project.clips:
             clip.start_time = self._clip_preview_positions[clip.id]
         self.project.clips.sort(key=lambda c: c.start_time)
         self.project.arrange_clips_without_overlap()
+        self.project.move_redactions_with_clips(old_spans)
         self.project.duration = project_end_time(self.project)
 
     def _autoscroll_clip_drag(self) -> None:
@@ -925,6 +928,7 @@ class TimelineCanvas(QWidget):
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         drag = self._drag
         self._drag = None
+        trim_origin = self._trim_drag_origin
         self._trim_drag_origin = None
         self._snap_indicator_time = None
         self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -934,6 +938,9 @@ class TimelineCanvas(QWidget):
             self.trash_target.set_armed(False)
         if dropped_on_trash:
             # "Dump" the dragged item: delete it instead of committing the move.
+            if trim_origin is not None:
+                # Delete the clip as it was at press, not the half-trimmed one.
+                self.project.restore_timeline_positions(trim_origin[1])
             base_kind = "clip" if drag[0].startswith("clip") else drag[0]
             self._set_selection((base_kind, drag[1]))
             self._delete_selected_item()
@@ -1207,14 +1214,19 @@ class TimelineCanvas(QWidget):
                     return annotation.frame_time
         return 0.0
 
-    def _apply_trim_start(self, clip, time_at: float) -> None:
-        zoom_min_dur = 0.05
-        old_duration = clip.display_duration
+    def _rewind_trim_drag(self, clip) -> None:
+        """Put the timeline back as it was at press, so every mouse move
+        applies one ripple from the drag origin. Rippling move-by-move made
+        the result depend on how many moves the drag took."""
         origin = self._trim_drag_origin
         if origin is not None and origin[0] == clip.id:
-            timeline_start, trim_start = origin[1], origin[2]
-        else:
-            timeline_start, trim_start = clip.start_time, clip.trim_start
+            self.project.restore_timeline_positions(origin[1])
+
+    def _apply_trim_start(self, clip, time_at: float) -> None:
+        self._rewind_trim_drag(clip)
+        zoom_min_dur = 0.05
+        old_duration = clip.display_duration
+        timeline_start, trim_start = clip.start_time, clip.trim_start
         max_start = clip.trim_end - zoom_min_dur
         source_delta = max(0.0, time_at) - timeline_start
         new_trim_start = trim_start + source_delta
@@ -1232,6 +1244,7 @@ class TimelineCanvas(QWidget):
         self.project.ripple_after(anchor, duration_delta, excluded_clip_id=clip.id)
 
     def _apply_trim_end(self, clip, time_at: float) -> None:
+        self._rewind_trim_drag(clip)
         zoom_min_dur = 0.05
         old_duration = clip.display_duration
         old_end = clip.start_time + old_duration

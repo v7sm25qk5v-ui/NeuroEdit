@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "neuroedit-desktop"
-version = "0.5.14"
+version = "0.5.15"
 description = "Native macOS-first NeuroEdit desktop application."
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
@@ -41,3 +41,8 @@ packages = ["src/neuroedit_desktop"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+[tool.pytest.ini_options]
+# A bare `pytest` runs the same set CI does. Anything outside tests/ (for
+# example docs/review-*/repros) must be named explicitly.
+testpaths = ["tests"]

@@ -1,5 +1,141 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-12 — Release v0.5.15-alpha (NE-010/NE-011 fixes + review docs)
+
+**Release:** version bumped 0.5.14 -> 0.5.15 in `desktop/pyproject.toml`, `desktop/src/neuroedit_desktop/__init__.py`,
+`desktop/NeuroEdit.spec`, `desktop/installer/NeuroEdit.iss`, `desktop/scripts/build_alpha_windows.ps1`.
+Committed everything below plus `desktop/docs/review-2026-11-12/` and `desktop/qa/`, pushed `main`,
+tagged `v0.5.15-alpha` (tag push triggers `.github/workflows/build.yml`: quality job, then mac .dmg + Windows installer, GitHub Release).
+**Release-time local check:** full `pytest` here gave 368 passed / 13 failed; the failures are ffmpeg
+subprocess exits (code 255) in `test_export_timing.py` / `test_main_window_headless.py` with the system
+`/usr/local/bin/ffmpeg` (CI uses the bundled imageio ffmpeg). Not reproduced with CI's setup; CI is the gate.
+Ruff not installed in the local venv, so not run at release time. **Next step:** confirm the
+Actions run for `v0.5.15-alpha` is green and the Release has both installers.
+
+### Fix details (previously uncommitted)
+
+**What changed (base `3e00fc0`, nothing committed):**
+- `desktop/src/neuroedit_desktop/models.py`: `ripple_after` sends redactions through
+  `_ripple_redaction` (covered footage stays covered; grows over footage revealed at the edit
+  point; a finite window never becomes 0 = unlimited). New
+  `ProjectState.move_redactions_with_clips` (clip reorder) and `timeline_positions` /
+  `restore_timeline_positions` (trim-drag snapshot).
+- `desktop/src/neuroedit_desktop/ui/editor_panels.py`: both trim handles snapshot at press and
+  apply one ripple from that state per mouse move (`_rewind_trim_drag`), rewinding before
+  snapping; a trim drag dropped on the trash deletes the clip as it was at press;
+  `_commit_clip_move` calls `move_redactions_with_clips`.
+- `desktop/tests/test_ripple_overlays.py`: 40 new tests. 19 of the first 33 failed before the
+  fix; the 7 follow-up tests fail 4 ways when the follow-up fixes are removed.
+- `desktop/pyproject.toml`: `[tool.pytest.ini_options] testpaths = ["tests"]`.
+- `desktop/docs/review-2026-11-12/repros/conftest.py`: settings isolation for the repro folder;
+  the three NE-010/011 repros were removed from `test_pure.py` (now 8 fail, 1 pass by design).
+
+**Verification:**
+- Final run of `pytest` (tests/ only) on the finished change: 380 passed, 1 failed in 164 s.
+  The failure is the known `tests/test_capture_baseline.py` 30 s timeout (NE-027).
+  `ruff check src tests scripts` clean; `git diff --check` clean.
+- The process exited 139 after printing the summary. Same thing was seen once on unmodified
+  `3e00fc0` earlier today, so it predates this change; not investigated (add to NE-027).
+- Independent Sonnet review with randomized property tests: 28,000 single edits, 10,000 chains
+  of 1-3 edits, 14,000 real mouse drags; no case of a redaction losing footage it covered.
+  Its mutation checks showed the new tests fail when each rule is removed. Scripts are in the
+  session scratchpad only (not kept in the repo).
+- An earlier Haiku run on the first version of the change: 372 passed in tests/, plus one
+  `test_audio_preview` failure ("No ffmpeg exe could be found" from `imageio_ffmpeg`) that
+  passes alone and in the final run. Treat as a flake of the iCloud-hosted venv under load.
+- NOT verified: in the running app by hand; rendered export frames; Windows.
+
+**Gotcha — test isolation slip (fixed):** the review repros under `desktop/docs/` were collected
+by a bare `pytest` from `desktop/` without `tests/conftest.py`, so MainWindow repro tests ran
+against the native preferences once and
+`~/Library/Preferences/com.neuroedit.Desktop.plist` was rewritten (hash `a76780b4…` ->
+`7bd8ebe8…`). Same size (482 bytes), same keys, values as expected; the fixtures restore what
+they set. Autosave `project.json` unchanged (`0d10f810…`). Fixed by the two items above; the
+final run left all three hashes unchanged. Rule going forward: any test that builds MainWindow
+must sit under a conftest that applies `isolated_app_settings`.
+
+**Known trade-offs:** a redaction spanning two clips that are reordered apart widens to one
+window; a redaction only on removed footage stays in place; unlimited redactions move earlier
+on removal (deviation from the ticket's "never move"); an item added mid-drag is not rewound.
+
+**Next steps:** user to decide on committing; try a trim/reorder with a redaction in the app;
+then NE-012, NE-014, NE-013 in that order.
+
+## 2026-11-12 — Full app review, 21 new tickets (NE-010 to NE-030)
+
+- The user asked for a high-level review of the app and its current state,
+  orchestrated with Haiku and Sonnet subagents, with tickets for what it found.
+  Baseline `3e00fc0` (v0.5.14-alpha). **Review and ticketing only: no
+  application source, test, dependency, preference, commit, push, tag, or
+  release changed.** Nothing from this entry is committed.
+- Coordinator: Claude Fable. Subagents: four Sonnet code reviewers (core
+  window/undo/persistence; timeline/canvas; export/PHI/captions;
+  audio/import/SAM/library), one Haiku docs/CI auditor, one Haiku test runner,
+  one Sonnet verification engineer. The coordinator read the cited source for
+  every ticket and reran the failing tests itself.
+- Durable report: [desktop/docs/review-2026-11-12/REVIEW.md](desktop/docs/review-2026-11-12/REVIEW.md).
+  Tickets: [CODING_TICKETS.md](CODING_TICKETS.md), new section "2026-11-12
+  review batch", NE-010 to NE-030, all **Ready** and unassigned.
+- Five P1 tickets:
+  - NE-010 — redactions stop covering their footage after timeline edits.
+    Dragging the head handle of the first clip left moves a whole-timeline
+    redaction off t=0 (`models.py:353-358` via `ui/editor_panels.py:1232`).
+  - NE-011 — head-trim ripple result depends on the drag path
+    (`ui/editor_panels.py:1210-1232`).
+  - NE-012 — the exporter paints labels, arrows, and masks over the whole
+    output frame instead of the fitted source rectangle (`exporter.py:717-726`,
+    `:834`); wrong whenever the source is not the output aspect.
+  - NE-013 — final `os.replace` from the temp directory fails when the output
+    is on another volume (`exporter.py:125`, `:1165`). Source confirmed only.
+  - NE-014 — zooming or clicking the timeline resets a completed PHI review
+    and adds an undo step (`ui/main_window.py:832`, `ui/editor_panels.py:1572`).
+- Twelve P2 tickets (NE-015 to NE-026) cover caption PHI gating, per-keystroke
+  undo snapshots, two scratch-autosave data-loss paths, a spurious dirty mark
+  on media load, Take Still caption drift, silent cancel on close, discarded
+  edge drags, ffmpeg selection, SAM weight lifecycle, the tutorial editing real
+  projects, and export render cost. Four P3 tickets (NE-027 to NE-030) group CI,
+  timeline polish, export robustness, and small items including docs drift.
+- **Verification.** Ten findings were turned into pytest tests that assert the
+  desired behaviour; all fail on `3e00fc0`
+  (`desktop/docs/review-2026-11-12/repros/`, **11 failed, 1 passed in 3.32 s**;
+  the pass is the settings-isolation guard). They are kept outside `tests/` so
+  the release gate stays green; move each into `tests/` when its ticket is
+  fixed. Run from `desktop/`:
+  `QT_QPA_PLATFORM=offscreen PYTHONPATH=src:tests python -m pytest -p conftest docs/review-2026-11-12/repros -q`.
+  NE-013, NE-015, NE-021, NE-024, NE-025 are source confirmed, not executed.
+  NE-026 is unmeasured.
+- **Suite status on this Mac.** `ruff check src tests scripts` passed (system
+  ruff 0.15.16; the project venv has no ruff). Full suite with the project venv
+  (Python 3.13.5, PySide6 6.11.1): 341 collected, **328 passed, 13 failed in
+  370 s**, process exit 139 after the summary (seen once, not rerun).
+  Twelve failures are environmental and also a product finding (NE-023):
+  `/usr/local/bin/ffmpeg` is an x86_64 binary, this Mac is arm64 without
+  Rosetta, and `exporter.py:165-176` prefers `PATH` ffmpeg over the bundled
+  one. With the bundled arm64 ffmpeg first on `PATH` those twelve pass. The
+  thirteenth, `tests/test_capture_baseline.py`, exceeds its 30 s child-process
+  limit here (three of three runs); see NE-027. Net 340 of 341 locally.
+- **Gotchas.** The isolated runtime the earlier entries used
+  (`/private/tmp/neuroedit-security-20261106`, `/private/tmp/neuroedit-security-bin`)
+  no longer exists. To run export tests locally, put the bundled binary first:
+  `python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"`,
+  symlink it as `ffmpeg` in a scratch directory, and prepend that to `PATH`.
+  First import from the iCloud venv can take over two minutes.
+- **Side effects.** SHA-256 of the user's autosave `project.json` and both
+  NeuroEdit preference plists were identical before and after every test run.
+  The app was not launched.
+- **Not covered.** Packaged installers, Windows, physical audio, real SAM
+  inference (no torch in the venv), clinical footage, accessibility. Not a
+  security audit.
+- **Working tree.** New and uncommitted from this session: the
+  `CODING_TICKETS.md` batch, this entry, one pointer line in `TODO.md`, and
+  `desktop/docs/review-2026-11-12/`. The earlier uncommitted automation edits
+  to `HANDOFF.md`, `TODO.md`, and `desktop/CLAUDE.md`, and untracked
+  `desktop/qa/`, were left as found.
+- **Next steps.** Fix NE-010 and NE-011 together (same function), then NE-012,
+  NE-014, NE-013. Settle "what counts as a document edit" once for NE-014,
+  NE-016, and NE-019. Owner decisions still open from `TODO.md` P0: DMG launch
+  verification, repository visibility, signing.
+
 ## 2026-11-10 — v0.5.14-alpha published
 
 - Published [NeuroEdit v0.5.14-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.14-alpha)
@@ -2782,3 +2918,28 @@ analyzed this content as uncommitted work). No code changed; markdown only.
   made; the original failed scan remains partial and unchanged.
 - This final publication record changes only `HANDOFF.md`; `git diff --check`
   passed, with no redundant application test run or tag movement.
+
+## 70. Optimization automation sweep (2026-11-12, docs-only)
+
+- Full-sweep run (prior "Last reviewed" marker was 2026-08-23, >30 days stale).
+  Reviewed `fdce351..HEAD` (`3e00fc0`) — the v0.5.6→v0.5.14 wave: timeline
+  reorder/drag, labels-in-timeline, narration recording rewrite, off-thread
+  media-import probing, brush annotation, video-transition last-frame hold, and
+  keep-in-place external media. Note: this HANDOFF's numbered log jumps from §63
+  (2026-07-12) to §64 (2026-11-06); that Sept–Oct feature work is captured in
+  `desktop/docs/CODEBASE_REVIEW_2026-09-05.md` and
+  `desktop/docs/engineering-2026-11-10/`, not here.
+- One new optimization finding filed in `TODO.md` → "New findings — 2026-11-12":
+  `AudioPreview.sync` (`ui/audio_preview.py`) `stat`s each active narration file
+  ~30×/sec during playback via `Path.exists()`, blocking the UI thread on
+  external/iCloud media. No code changed (automation is docs-only).
+- Verified-as-optimal (not re-flagged): timeline static-pixmap paint cache
+  (§44/§45), ref-counted `QVideoFrame` hold in `canvas.py`, memoized annotation/
+  slide lanes, off-thread `MediaImportWorker`. Recorded in
+  `desktop/CLAUDE.md` memory.
+- Markdown consistency: corrected the contradictory current-state test counts in
+  `desktop/CLAUDE.md` (was 228 / 155) to the last CI-verified **341 tests**
+  (2026-11-10). Historical per-session counts in review docs left as written.
+- Updated `desktop/CLAUDE.md`: "Last reviewed" → `3e00fc0` / 2026-11-12, new
+  architecture notes (recording, audio preview, media-import worker, brush), and
+  new intentionally-not-optimized entries.

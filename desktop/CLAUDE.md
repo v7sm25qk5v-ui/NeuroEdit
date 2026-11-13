@@ -92,7 +92,8 @@ python -c "import py_compile; py_compile.compile('src/neuroedit_desktop/<file>.p
 hf auth login
 ```
 
-The suite under `tests/` collects **228 tests** (`python -m pytest tests/ -q`).
+The suite under `tests/` collects **341 tests** (`python -m pytest tests/ -q`;
+last CI-verified count, 2026-11-10, `docs/engineering-2026-11-10/RELEASE_NOTES.md`).
 Keep it and `ruff check src tests scripts` green before every release tag.
 `tests/conftest.py` redirects NeuroEdit's application preferences to a temporary
 INI file; tests must not read or write the user's native QSettings store.
@@ -289,14 +290,18 @@ Other PHI safeguards:
   positive-duration, positive-volume active-audio criteria as source-media
   preflight and audio muxing, so inactive narration placeholders do not extend
   otherwise visual exports.
-- **Last reviewed:** 2026-08-23 — fallback review followed the export/audio
-  source handling changed on 2026-08-22. Phase 6 modularization remains complete;
-  keep future splits ownership-driven rather than line-count-driven, and keep a
-  true pre-`to_dict()` undo shortcut deferred unless the model gains a
-  trustworthy document revision signal.
-- **Mode:** incremental. Next optimization review should deep-dive files changed
-  after the §44 commit plus one hop. (Full-sweep baseline was `22085f9`,
-  2026-06-17.)
+- **Last reviewed:** 2026-11-12 (HEAD `3e00fc0`) — full-sweep run (prior marker
+  was >30 days stale). Deep-dived the `fdce351..HEAD` change set (v0.5.6→v0.5.14:
+  timeline reorder/drag, labels-in-timeline, narration recording rewrite,
+  background media-import probing, brush annotation, video-transition last-frame
+  hold, keep-in-place external media). One new finding filed: per-tick narration
+  `stat` in `AudioPreview.sync`. Phase 6 modularization remains complete; keep
+  future splits ownership-driven rather than line-count-driven, and keep a true
+  pre-`to_dict()` undo shortcut deferred unless the model gains a trustworthy
+  document revision signal.
+- **Mode:** incremental going forward. Next review should deep-dive files changed
+  after `3e00fc0` plus one hop. (Full-sweep baselines: `22085f9` 2026-06-17 and
+  `3e00fc0` 2026-11-12.)
 - **Out-of-scope paths:** root React/Vite prototype (legacy, superseded by
   `desktop/`); `desktop/dist/` and any build output; `node_modules/`; `*.lock`;
   `.venv/` (symlinked into iCloud, see venv note); vendored deps; iCloud
@@ -332,7 +337,44 @@ Other PHI safeguards:
     shallow-copy snapshot shares nested dicts with the cached autosave dict, but
     neither is mutated in place, so the aliasing is safe. No correctness issue,
     no new finding — don't re-audit unless a new `dirty` write path is added.
+  - `TimelineCanvas.paintEvent` (`ui/editor_panels.py:354`) already caches the
+    whole static layer in a QPixmap keyed by `_static_fingerprint`, which
+    deliberately omits `current_time`; per-tick playback only repaints the
+    playhead + snap indicator over the cached pixmap. `_annotation_lanes`,
+    `_slide_lanes`, and `_slide_lane_count` are memoized on geometry signatures.
+    This is the §44/§45 repaint-reduction work — do not re-flag timeline paint
+    as per-tick scan cost.
+  - `VideoGraphicsView._video_frame_changed` (`ui/canvas.py`) copies each decoded
+    frame into `_last_video_frame`, but `QVideoFrame` is implicitly shared
+    (ref-counted); rasterization to a QPixmap happens only in
+    `begin_video_transition` (a source cut), never per frame. Not a per-frame
+    cost — skip.
+  - `project_end_time()` is called O(annotations) per *static* timeline render,
+    but that render only runs on edits (cache miss), and `_tick_timeline_playback`
+    uses the cached `MainWindow._project_end_time()`. Playback is unaffected; not
+    worth threading a cache through `TimelineCanvas`.
 - **Architecture notes (high-signal):**
+  - Narration recording (v0.5.14, `ui/audio_panel.py`) now waits for
+    `QMediaRecorder` `StoppedState` before probing the *recorded file's* real
+    duration (`_probe_audio_duration`, wav-header or ffmpeg), instead of using
+    monotonic elapsed; it handles recorder errors, project-change-mid-recording,
+    and zero/non-finite durations. `recording_pending` blocks app close.
+    Zero-duration audio tracks are now valid placeholders (duration input min is
+    0.0), consistent with the "ignore inactive audio" export/preflight rules.
+  - Narration *preview* during playback lives in `ui/audio_preview.py`
+    (`AudioPreview`): per-track `QMediaPlayer`+`QAudioOutput`, synced from
+    `_tick_timeline_playback`. Players are created/torn down as tracks enter/leave
+    the active window; `QAudioOutput` volume is clamped 0..1 (export can amplify
+    to 2). See the open backlog finding re: its per-tick `Path.exists()` cost.
+  - Media import probing runs off-thread: `MediaImportWorker`
+    (`ui/media_import_worker.py`) on a `QThread`, probing each path and
+    re-stat-ing before/after to discard metadata if the file changed mid-probe.
+    Thread lifecycle (started→run, finished→quit/deleteLater) is wired in
+    `main_window._import_media_files`.
+  - New `brush` freehand annotation type: stored as normalized `points` in
+    `geometry`, painted as a round-cap/round-join polyline in both the live canvas
+    (`ui/canvas.py:_paint_brush`) and the exporter (`exporter.py:_paint_brush`);
+    hit-test is per-segment distance. Keep canvas/export paint in parity.
   - Undo/redo = full `ProjectState.to_dict()` JSON snapshots (cap 50 entries and
     64 MiB of compact serialized bytes), deduped
     by BLAKE2 hash. `_push_history()` builds `to_dict()` once and caches the full
@@ -381,8 +423,10 @@ Other PHI safeguards:
     Image, and single-file Media Explorer imports. A batch import loads one
     preview, selects the last successful clip, and creates one dirty/history
     operation; multi-video batches also share the §42 metadata progress dialog.
-  - Suite is **155 tests**; gate is `ruff check src tests scripts` +
-    `python -m pytest tests/ -q`, both green at this marker.
+  - Suite is **341 tests** (last CI-verified, 2026-11-10,
+    `docs/engineering-2026-11-10/RELEASE_NOTES.md`); gate is
+    `ruff check src tests scripts` + `python -m pytest tests/ -q`, both green at
+    the last release marker.
   - torch/SAM stack is lazy by design (venv has no torch → SAM no-ops); the
     cold-start import audit is complete and keeps the exporter out of the normal
     startup module graph.

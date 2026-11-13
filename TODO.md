@@ -271,6 +271,32 @@ by the optimization automation; they are not duplicated into P4.5.
   preview load, and single dirty/history operation as drag-and-drop. Focused
   regressions cover both dialog entry points.
 
+### New findings — 2026-11-12 full-sweep automation run
+
+- [ ] **2026-11-12 app review: 21 tickets, NE-010 to NE-030.** Five P1
+  (redaction coverage after timeline edits, head-trim ripple, export overlay
+  coordinates, cross-volume export, PHI review reset by view actions). Details,
+  evidence, and acceptance criteria live in
+  [CODING_TICKETS.md](CODING_TICKETS.md); report in
+  [desktop/docs/review-2026-11-12/REVIEW.md](desktop/docs/review-2026-11-12/REVIEW.md).
+  Not duplicated here.
+
+- [ ] **`AudioPreview.sync` stats every narration file on disk ~30×/sec during
+  playback (perf; blocks the UI thread on external/iCloud media).**
+  `ui/audio_preview.py:30-41` rebuilds its `active` set on every call, and the
+  comprehension evaluates `Path(track.path).exists()` for each positive-duration,
+  positive-volume audio track. `sync` is called from `_tick_timeline_playback`
+  (`ui/main_window.py:2296`) on the 33 ms timeline clock, so each active
+  narration path is `stat`-ed ~30 times per second on the main thread. On local
+  SSD this is cheap, but NeuroEdit deliberately supports keep-in-place external
+  and iCloud-backed media (Link Video Folder), where `stat` latency is a
+  documented pain point — re-checking existence per tick can stutter the exact
+  smooth-playhead motion the VFR/monotonic clock work protects. A file's
+  existence does not change within a playback session: check it once when the
+  player entry is created (the missing-file case can reuse the existing
+  `failed`/teardown path) rather than on every tick. Affected:
+  `ui/audio_preview.py`.
+
 ## P0 — Unblock and ship the current alpha
 
 - [x] Fix the dev environment — Python 3.13 reinstalled 2026-06-10; venv
