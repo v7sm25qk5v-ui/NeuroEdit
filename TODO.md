@@ -14,6 +14,28 @@ bet and stays parked until sample data and a design pass exist.
 ## Optimization Backlog
 _(automation-maintained — new findings appended below, checked off when implemented)_
 
+- [ ] **Dependency security hygiene (2026-11-13 automated scan).** No shipped
+  dependency is vulnerable — every pin in `desktop/requirements-release.txt`
+  (imageio-ffmpeg 0.6.0, numpy 2.4.6, opencv-python 4.13.0.92, PySide6 6.11.1,
+  pyinstaller 6.20.0) is CVE-clean, and a normal `pip install -e ".[sam]"`
+  resolves the `>=` floors to clean latest versions. The action items are
+  defense-in-depth, not active exploits:
+  - **Raise `[sam]` extra floors in `desktop/pyproject.toml`** so a constrained
+    or pinned-to-floor resolution cannot land on a known-vulnerable build:
+    `pillow>=10` → `>=13` (floor 10.x carries ~70 CVEs incl. many memory-safety /
+    buffer-overflow issues, e.g. CVE-2023-4863, CVE-2024-28219, and the
+    2026 batch fixed through 13.0.0), `transformers>=5.6` → `>=5.10`
+    (CVE-2026-9856, CVE-2026-80047), `torch>=2.7` → `>=2.9` (floor 2.7.0 carries
+    CVE-2025-3730, CVE-2025-55551/55552/55554, CVE-2026-24747 and others; fixes
+    land across 2.7.1–2.13.0). torchvision, safetensors, huggingface-hub floors
+    are CVE-clean.
+  - **Lift the ruff cap** `ruff>=0.8,<0.16` (dev extra) — the `<0.16` upper bound
+    now excludes the latest 0.17.5; no security impact, but it blocks updates.
+  - **Evaluate opencv-python 4.13 → 5.0 (major, breaking).** Not security; a
+    deliberate build-validation + two-platform retest per the release-file
+    comment. Other shipped pins are minor/patch bumps (imageio-ffmpeg 0.6→0.8,
+    numpy 2.4.6→2.5.4, PySide6 6.11.1→6.12.0, pyinstaller 6.20.0→6.22.3).
+
 - [x] **Timeline reordering, wheel navigation, overlapping labels, split names,
   and playback flashes.** Fixed 2026-09-07, with drag behavior revised after
   user feedback: explicit reordering compacts the primary video storyline, and
