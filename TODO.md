@@ -297,6 +297,46 @@ by the optimization automation; they are not duplicated into P4.5.
   `failed`/teardown path) rather than on every tick. Affected:
   `ui/audio_preview.py`.
 
+### Dependency audit — 2026-11-14 automated run
+
+Scope: `desktop/pyproject.toml` + `desktop/requirements-release.txt` (only
+Python manifests in the repo; no `package.json` present — the legacy root
+React/Vite prototype ships no manifest). No active CVE affects any
+**pinned/shipped** version. The security item below is a **floor-hardening**
+task, not an active exploit: a reproducible/offline install resolving the
+optional `[sam]` extras to their floors would pull versions with known CVEs,
+even though a fresh online install resolves to the (clean) latest.
+
+- [ ] **SECURITY (low/hardening): raise optional `[sam]` dependency floors in
+  `desktop/pyproject.toml` — current floors permit versions with known CVEs.**
+  These extras are not installed in the shipped venv (SAM no-ops without torch),
+  so there is no active exposure today, but the constraints should not admit
+  vulnerable builds:
+  - `pillow>=10` → floor 10.0.0 carries 40+ CVEs (RCE/DoS/heap-overflow across
+    10.x–12.x; e.g. CVE-2023-4863, CVE-2024-28219, CVE-2026-42308). Latest
+    **13.0.0 is clean**. Raise floor to `>=13`.
+  - `transformers>=5.6` → floor 5.6.0 has CVE-2026-9856 (fixed 5.10.0) and
+    CVE-2026-80047 (no fix yet). Latest **5.23.0 is clean**. Raise floor to
+    `>=5.10` (ideally `>=5.23`).
+  - `torch>=2.7` → floor 2.7.0 has ~15 CVEs (several fixed only in 2.9–2.13).
+    Latest **2.15.0 is clean**. Raise floor to `>=2.13`.
+  - `huggingface-hub>=0.30`, `safetensors>=0.5`, `torchvision>=0.22`: no known
+    advisories at the floor.
+
+- [ ] **MAINTENANCE (non-security): refresh pinned release versions.** All
+  pinned deps in `requirements-release.txt` are clean (no CVEs) but behind
+  latest. Refresh deliberately per the file's own note (re-validate a build on
+  both platforms first):
+  - `imageio-ffmpeg` 0.6.0 → 0.8.1 (minor)
+  - `numpy` 2.4.6 → 2.5.4 (minor)
+  - `opencv-python` 4.13.0.92 → **5.0.0.92→5.0.0.93 (MAJOR, 4→5)** — review
+    cv2 API/behavior changes before bumping; highest-risk update here.
+  - `PySide6` 6.11.1 → 6.12.0 (minor; Qt 6.12)
+  - `pyinstaller` 6.20.0 → 6.22.3 (patch)
+  - Dev-only: `pytest` floor 8.0 (latest 9.2.0 — major); `ruff` is capped
+    `<0.16` while latest is 0.17.5 — the cap intentionally excludes current
+    ruff, revisit if lint rules need updating.
+
 ## P0 — Unblock and ship the current alpha
 
 - [x] Fix the dev environment — Python 3.13 reinstalled 2026-06-10; venv
