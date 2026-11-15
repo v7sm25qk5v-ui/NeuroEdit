@@ -1,0 +1,78 @@
+{
+  "tag": "v0.5.16-alpha",
+  "source_commit": "f88e7b6fe45e8dfdfb72eabf666e56810b274f94",
+  "annotated_tag_object": "f9800b74cac057aa33296f655bce3bd39b1d1e5a",
+  "release_url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.16-alpha",
+  "release_id": 446336033,
+  "published_at": "2026-11-15T20:15:35Z",
+  "verified_at": "2026-11-15T20:17:54.283627+00:00",
+  "draft": false,
+  "prerelease": true,
+  "local_validation": {
+    "pytest_passed": 381,
+    "pytest_skipped": 0,
+    "pytest_seconds": 199.33,
+    "clean_exit": true,
+    "ruff": "passed",
+    "compileall": "passed",
+    "version_consistency": "passed",
+    "macos_script_syntax": "passed",
+    "native_preferences_unchanged": true
+  },
+  "tagged_workflow": {
+    "id": 43756053191,
+    "url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/43756053191",
+    "conclusion": "success",
+    "pytest_passed": 381,
+    "pytest_skipped": 0,
+    "pytest_seconds": 385.29,
+    "jobs": [
+      "Test and lint desktop app",
+      "Build Windows (Setup.exe)",
+      "Build macOS (.dmg)",
+      "Publish GitHub Release"
+    ]
+  },
+  "main_quality_workflow": {
+    "id": 43756053408,
+    "url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/43756053408",
+    "conclusion": "success",
+    "pytest_passed": 381,
+    "pytest_seconds": 370.02
+  },
+  "assets": [
+    {
+      "name": "NeuroEdit-v0.5.16-alpha-macOS-unsigned.dmg",
+      "size": 130862716,
+      "state": "uploaded",
+      "github_reported_digest": "sha256:b850599eabf8be39c54c1f1c7f1ce61d215248589f02396da95d442433dc4229",
+      "browser_download_url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/download/v0.5.16-alpha/NeuroEdit-v0.5.16-alpha-macOS-unsigned.dmg",
+      "public_head_http_status": 200,
+      "curl_exit_code": 0
+    },
+    {
+      "name": "NeuroEdit-v0.5.16-alpha-macOS-unsigned.zip",
+      "size": 117555833,
+      "state": "uploaded",
+      "github_reported_digest": "sha256:37eb2a6715ba02925182394bf2226c839d5eb1802be3c22e9b15cbfb920e4eff",
+      "browser_download_url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/download/v0.5.16-alpha/NeuroEdit-v0.5.16-alpha-macOS-unsigned.zip",
+      "public_head_http_status": 200,
+      "curl_exit_code": 0
+    },
+    {
+      "name": "NeuroEdit-v0.5.16-alpha-Windows-Setup.exe",
+      "size": 100246368,
+      "state": "uploaded",
+      "github_reported_digest": "sha256:8cefce699939db1bdbbb43aa3d52befbaafeeab1fea8027deef3459f75df5e5a",
+      "browser_download_url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/download/v0.5.16-alpha/NeuroEdit-v0.5.16-alpha-Windows-Setup.exe",
+      "public_head_http_status": 200,
+      "curl_exit_code": 0
+    }
+  ],
+  "verification_scope": "GitHub-reported SHA-256 digests and public HTTP HEAD checks; installer bytes were not independently downloaded or executed.",
+  "limits": [
+    "Unsigned editor-only alpha installers; optional SAM/PyTorch requires a source build.",
+    "Physical audio/microphone behavior, installed-app launch, native Windows UI/scaling, clinical footage exports, and actual SAM inference were not verified.",
+    "Remaining NE-012 through NE-030 and open optimization findings are not implemented by this release."
+  ]
+}

@@ -1,5 +1,30 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-15 — v0.5.16-alpha published and verified
+
+- Published [NeuroEdit v0.5.16-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.16-alpha)
+  as an alpha prerelease, including all current implemented updates and pending
+  documentation. Source commit: `f88e7b6fe45e8dfdfb72eabf666e56810b274f94`;
+  annotated tag object: `f9800b74cac057aa33296f655bce3bd39b1d1e5a`.
+- [Tagged workflow 43756053191](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/43756053191)
+  passed all four jobs: quality, macOS, Windows, and publication. Tagged tests:
+  **381 passed in 385.29 s**, no skips, clean exit; Ruff passed. Main quality
+  workflow 43756053408 also succeeded: **381 passed in 370.02 s**.
+- Verified all three uploaded assets: unsigned macOS DMG (130862716 bytes),
+  macOS ZIP (117555833 bytes), and Windows Setup.exe (100246368 bytes).
+  All public download URLs returned HTTP 200. GitHub-reported SHA-256 digests,
+  CI links, and validation scope are preserved in
+  `desktop/docs/releases/v0.5.16-alpha-verification.json`. Installer bytes were
+  not independently downloaded, installed, or exercised on hardware.
+- After push, local main unexpectedly fell back to an older packed reference
+  while the index and every working file still matched the published source.
+  Found two unheld stale lock files from the push time; preserved both under
+  `/private/tmp/neuroedit-release-20261115/` and restored main with a checked
+  `git update-ref`. No working files or staged contents were discarded.
+- The follow-up release notes/evidence/handoff commit changes documentation only;
+  the tested source and published tag remain immutable. Open backlog work is
+  unchanged; this release does not claim to implement NE-012–NE-030.
+
 ## 2026-11-15 — v0.5.16-alpha release preparation
 
 - The user requested a new tag/release containing all current updates. Local
