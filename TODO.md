@@ -279,7 +279,11 @@ by the optimization automation; they are not duplicated into P4.5.
   evidence, and acceptance criteria live in
   [CODING_TICKETS.md](CODING_TICKETS.md); report in
   [desktop/docs/review-2026-11-12/REVIEW.md](desktop/docs/review-2026-11-12/REVIEW.md).
-  Not duplicated here.
+  Not duplicated here. **Progress:** NE-010 (redaction coverage across timeline
+  edits) and NE-011 (head-trim ripple independent of drag path) shipped in
+  v0.5.15-alpha (`e1b0839`); NE-012–NE-030 remain open. During the November 15
+  release refresh, NE-010/NE-011 were marked software verified after live
+  confirmation that the tagged CI passed 381 tests and published all installers.
 
 - [ ] **`AudioPreview.sync` stats every narration file on disk ~30×/sec during
   playback (perf; blocks the UI thread on external/iCloud media).**
@@ -296,6 +300,45 @@ by the optimization automation; they are not duplicated into P4.5.
   player entry is created (the missing-file case can reuse the existing
   `failed`/teardown path) rather than on every tick. Affected:
   `ui/audio_preview.py`.
+
+### New findings — 2026-11-13 incremental run (ripple overlay fix `e1b0839`)
+
+- [ ] **Trim-drag rewind runs twice per mouse move (redundant work).**
+  In `TimelineCanvas.mouseMoveEvent` the trim-handle branch calls
+  `self._rewind_trim_drag(clip)` (`ui/editor_panels.py:819`) immediately before
+  `_apply_trim_start` / `_apply_trim_end`, and each of those methods rewinds
+  again at its top (`ui/editor_panels.py:1226` and `:1247`). Those two apply
+  methods have no other callers, so during every trim drag
+  `restore_timeline_positions` — which iterates all clips, slides, audio tracks,
+  transcript segments, markers, and annotations — runs twice per mouse move
+  instead of once. Drop the explicit call at `:819` (the apply methods already
+  self-rewind) to halve the per-move restore cost. Low risk, low-to-moderate
+  payoff (only during an active drag, small n today). Affected:
+  `ui/editor_panels.py`.
+
+- [ ] **Clip reorder re-places only redactions, not other annotations/markers
+  (possible functionality gap — confirm intent).** `_commit_clip_move`
+  (`ui/editor_panels.py:871`) calls `move_redactions_with_clips`, which moves
+  only `type == "redact"` annotations to follow their footage after a reorder.
+  Non-redact annotations (rectangle, arrow, brush, label) and markers keep their
+  absolute timeline time, so after clips are reordered they point at whatever
+  footage now sits at that time rather than the footage they were drawn on —
+  the same class of mis-alignment NE-010 fixed for redactions, but for visual
+  callouts and chapter markers. This may be intentional scope (NE-010 was
+  redaction-specific and privacy-critical), so this is a decision, not a
+  confirmed bug: either extend reorder re-placement to all annotation types +
+  markers, or document the limitation alongside the existing "Known trade-offs"
+  note in HANDOFF. Affected: `models.py` (`move_redactions_with_clips`),
+  `ui/editor_panels.py` (`_commit_clip_move`).
+
+- [ ] **`move_redactions_with_clips` sorts clip spans even when the project has
+  no redactions (minor, one-shot).** The method builds and sorts `moves` before
+  it can short-circuit, and `_commit_clip_move` always constructs `old_spans`
+  for every clip. When `self.annotations` contains no `type == "redact"` entry
+  there is nothing to move; an early return (or skipping `old_spans`
+  construction) when no redaction exists avoids the work. Runs only on a reorder
+  commit, not per tick, so payoff is small — fold into the fix for the item
+  above if that work happens. Affected: `models.py`, `ui/editor_panels.py`.
 
 ## P0 — Unblock and ship the current alpha
 

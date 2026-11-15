@@ -4,23 +4,18 @@ NeuroEdit is a standalone desktop video editor for preparing operative video for
 conference, research, and educational use. Editing and export run locally;
 NeuroEdit does not upload video or audio to a cloud editing service.
 
-Current alpha: [v0.5.14-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.14-alpha)
+Current alpha: [v0.5.16-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.16-alpha)
 
-### What's new in v0.5.14-alpha
+### What's new in v0.5.16-alpha
 
-- Added narration and music can be heard on the editing timeline, including
-  seeking, overlapping tracks, and still intervals. Recordings retain the
-  timeline position where Record was pressed. Closing is blocked while recording
-  or finalization is pending, so narration can finish before saving and leaving.
-- **File → Relink Unavailable Media** repairs a selected video, image, narration,
-  or slide-image reference while preserving edits and requiring fresh privacy
-  review. Split references are repaired individually.
-- Video metadata imports run in the background, preserve selection order, and
-  reject cancelled or stale results. Failed audio probes no longer create
-  guessed five-second tracks.
-- Single-frame SAM cancellation discards cancelled results. Import/export labels
-  fit their controls, and screenshot tooling isolates preferences and verifies
-  the panel being captured.
+- Includes the timeline/redaction updates from v0.5.15-alpha: redactions keep
+  covering their footage through trims, ripple edits, and clip reordering.
+- Head- and tail-trim drags use the timeline state captured at mouse press,
+  keeping ripple results independent of the pointer's path. Snapping and
+  dropping a trimmed clip on the trash use that same starting state.
+- Includes the latest review, backlog, architecture, and release documentation;
+  download links and version defaults now match this alpha. This is a release
+  refresh, not an implementation of the remaining open backlog tickets.
 
 The retained security findings are tracked in [SECURITY_FIXES.md](SECURITY_FIXES.md).
 The original scan had partial coverage; these fixes do not constitute a completed audit.
@@ -61,7 +56,7 @@ The original scan had partial coverage; these fixes do not constitute a complete
 
 ### macOS
 
-Download `NeuroEdit-v0.5.14-alpha-macOS-unsigned.dmg` from the release page.
+Download `NeuroEdit-v0.5.16-alpha-macOS-unsigned.dmg` from the release page.
 Open the DMG, drag `NeuroEdit.app` into Applications, then right-click the app
 and choose `Open` for the first launch.
 
@@ -71,7 +66,7 @@ If macOS blocks launch, open `System Settings` -> `Privacy & Security`, choose
 
 ### Windows
 
-Download `NeuroEdit-v0.5.14-alpha-Windows-Setup.exe` from the release page on a
+Download `NeuroEdit-v0.5.16-alpha-Windows-Setup.exe` from the release page on a
 Windows PC. If SmartScreen warns, choose `More info` -> `Run anyway`, then follow
 the installer.
 

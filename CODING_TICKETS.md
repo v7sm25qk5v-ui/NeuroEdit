@@ -368,8 +368,8 @@ but not executed. **Unmeasured** means the cost is plausible but not profiled.
 
 | Ticket | Priority | Evidence | Status |
 |---|---|---|---|
-| NE-010 Redactions keep covering their footage across timeline edits | P1 | Reproduced | Review approved |
-| NE-011 Head-trim ripple independent of drag path | P1 | Reproduced | Review approved |
+| NE-010 Redactions keep covering their footage across timeline edits | P1 | Reproduced | Verified (software) |
+| NE-011 Head-trim ripple independent of drag path | P1 | Reproduced | Verified (software) |
 | NE-012 Export paints overlays in source-frame space | P1 | Reproduced | Ready |
 | NE-013 Export succeeds when output is on another volume | P1 | Source confirmed | Ready |
 | NE-014 View-only timeline actions leave PHI review and undo alone | P1 | Reproduced | Ready |
@@ -395,6 +395,8 @@ NE-014, NE-013. NE-016, NE-019, and NE-014 share the "what counts as a document
 edit" question and are cheapest to settle in one design pass.
 
 ## NE-010 — Redactions keep covering their footage across timeline edits
+
+**Release status 2026-11-15:** committed in `e1b0839` and included in this release refresh. Live verification of the v0.5.15-alpha installer workflow confirmed Ruff and **381 passing tests**, a clean exit, and all three published installers. Native UI, rendered clinical footage, and Windows interaction checks are still unverified. The November 12 note below is historical.
 
 **Status 2026-11-12: Review approved (uncommitted; not yet checked in the running app).** Fixed in `desktop/src/neuroedit_desktop/models.py` and `ui/editor_panels.py`. Regression tests: `desktop/tests/test_ripple_overlays.py` (40). Full suite on the finished change: 380 passed, 1 failed (the known `test_capture_baseline` 30 s timeout, NE-027). An independent Sonnet review ran randomized property tests (28,000 single edits, 10,000 edit chains, 14,000 mouse drags) and found no case where a redaction stops covering footage it covered; its two actionable findings are fixed (see below).
 - Rules implemented: a redaction strictly after the edit point follows its footage; one that touches or spans a point where footage is revealed keeps its start and grows; when a range is removed, start and end are mapped through the removal; a finite window never becomes 0 (unlimited); a redaction only on removed footage is left in place.
@@ -438,6 +440,8 @@ with a windowed redaction. Preview and export agree. Existing ripple tests for
 labels, captions, and masks still pass.
 
 ## NE-011 — Head-trim ripple independent of drag path
+
+**Release status 2026-11-15:** committed in `e1b0839` and included in this release refresh. Live verification of the v0.5.15-alpha installer workflow confirmed Ruff and **381 passing tests**, a clean exit, and all three published installers. Native UI, rendered clinical footage, and Windows interaction checks are still unverified. The November 12 note below is historical.
 
 **Status 2026-11-12: Review approved (uncommitted; not yet checked in the running app).** Fixed in `desktop/src/neuroedit_desktop/models.py` and `ui/editor_panels.py`. Regression tests: `desktop/tests/test_ripple_overlays.py` (40). Full suite on the finished change: 380 passed, 1 failed (the known `test_capture_baseline` 30 s timeout, NE-027). An independent Sonnet review ran randomized property tests (28,000 single edits, 10,000 edit chains, 14,000 mouse drags) and found no case where a redaction stops covering footage it covered; its two actionable findings are fixed (see below).
 - Both trim handles snapshot `ProjectState.timeline_positions()` at press and re-apply one ripple from that state on every move (`_rewind_trim_drag`). The tail handle had the same defect and is fixed too.

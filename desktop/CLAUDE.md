@@ -92,8 +92,8 @@ python -c "import py_compile; py_compile.compile('src/neuroedit_desktop/<file>.p
 hf auth login
 ```
 
-The suite under `tests/` collects **341 tests** (`python -m pytest tests/ -q`;
-last CI-verified count, 2026-11-10, `docs/engineering-2026-11-10/RELEASE_NOTES.md`).
+The suite under `tests/` collects **381 tests** (`python -m pytest tests/ -q`;
+CI verified for `v0.5.15-alpha`, including `tests/test_ripple_overlays.py`).
 Keep it and `ruff check src tests scripts` green before every release tag.
 `tests/conftest.py` redirects NeuroEdit's application preferences to a temporary
 INI file; tests must not read or write the user's native QSettings store.
@@ -290,17 +290,37 @@ Other PHI safeguards:
   positive-duration, positive-volume active-audio criteria as source-media
   preflight and audio muxing, so inactive narration placeholders do not extend
   otherwise visual exports.
-- **Last reviewed:** 2026-11-12 (HEAD `3e00fc0`) — full-sweep run (prior marker
-  was >30 days stale). Deep-dived the `fdce351..HEAD` change set (v0.5.6→v0.5.14:
-  timeline reorder/drag, labels-in-timeline, narration recording rewrite,
-  background media-import probing, brush annotation, video-transition last-frame
-  hold, keep-in-place external media). One new finding filed: per-tick narration
-  `stat` in `AudioPreview.sync`. Phase 6 modularization remains complete; keep
-  future splits ownership-driven rather than line-count-driven, and keep a true
-  pre-`to_dict()` undo shortcut deferred unless the model gains a trustworthy
-  document revision signal.
+- **Last reviewed:** 2026-11-15 (HEAD `e1b0839`, unchanged) — second consecutive
+  incremental run with an empty code diff: no new commits and no manual code edits
+  since the 2026-11-14 review (HEAD is still the v0.5.15-alpha ripple overlay fix
+  NE-010/NE-011; the only working-tree changes are this automation's own
+  uncommitted markdown). No new findings. The four open optimization items — the
+  three from the 2026-11-13 run plus the `AudioPreview.sync` per-tick `stat` — were
+  re-confirmed as still open and carried forward. When code finally lands past
+  `e1b0839`, deep-dive the diff plus one hop before trusting this empty-diff streak.
+- **Prior incremental review (2026-11-14, `e1b0839`):** incremental run with an
+  empty code diff — no new commits and no manual code edits since the 2026-11-13
+  review. No new findings; the four open items re-confirmed and carried forward.
+- **Prior incremental review (2026-11-13, `e1b0839`):** incremental run over
+  `3e00fc0..HEAD` (single commit: v0.5.15-alpha ripple overlay fix NE-010/NE-011).
+  Deep-dived the new `models.py` redaction-ripple helpers (`_ripple_redaction`,
+  `move_redactions_with_clips`, `timeline_positions` / `restore_timeline_positions`,
+  `_shift_mask_frames`) and the `editor_panels.py` trim-drag rewind path. Three
+  findings filed (see TODO "2026-11-13 incremental run"): double rewind per trim
+  mouse-move (`_rewind_trim_drag` called both in `mouseMoveEvent` and inside the
+  apply methods); reorder re-places only redactions, not other annotations/markers
+  (possible gap — confirm intent); and a minor one-shot sort in
+  `move_redactions_with_clips` when no redactions exist.
+- **Prior full-sweep (2026-11-12, `3e00fc0`):** deep-dived `fdce351..HEAD`
+  (v0.5.6→v0.5.14: timeline reorder/drag, labels-in-timeline, narration recording
+  rewrite, background media-import probing, brush annotation, video-transition
+  last-frame hold, keep-in-place external media). Filed the per-tick narration
+  `stat` finding in `AudioPreview.sync` (still open). Phase 6 modularization
+  remains complete; keep future splits ownership-driven rather than
+  line-count-driven, and keep a true pre-`to_dict()` undo shortcut deferred
+  unless the model gains a trustworthy document revision signal.
 - **Mode:** incremental going forward. Next review should deep-dive files changed
-  after `3e00fc0` plus one hop. (Full-sweep baselines: `22085f9` 2026-06-17 and
+  after `e1b0839` plus one hop. (Full-sweep baselines: `22085f9` 2026-06-17 and
   `3e00fc0` 2026-11-12.)
 - **Out-of-scope paths:** root React/Vite prototype (legacy, superseded by
   `desktop/`); `desktop/dist/` and any build output; `node_modules/`; `*.lock`;
@@ -371,6 +391,20 @@ Other PHI safeguards:
     re-stat-ing before/after to discard metadata if the file changed mid-probe.
     Thread lifecycle (started→run, finished→quit/deleteLater) is wired in
     `main_window._import_media_files`.
+  - Redaction ripple (v0.5.15, NE-010/NE-011, `models.py`): on a ripple edit
+    `ProjectState.ripple_after` routes `type == "redact"` annotations through
+    `_ripple_redaction` (covered footage stays covered; a redaction grows over
+    footage revealed at the edit point; a finite window never collapses to 0,
+    which means "to end of timeline"). Clip reorder routes them through
+    `move_redactions_with_clips`, which re-places each redaction to the smallest
+    single window still holding all its covered footage (so a redaction spanning
+    now-non-adjacent clips widens rather than exposing either piece). Trim drags
+    snapshot the whole timeline at press via `timeline_positions()` and re-apply
+    one ripple from that state per mouse move (`restore_timeline_positions` +
+    `_rewind_trim_drag`), so the result is independent of the drag path; a trim
+    drag dropped on the trash deletes the clip as it was at press. Non-redact
+    annotations/markers are NOT re-placed on reorder — only on ripple trims via
+    `ripple_after` — see the open TODO item questioning whether that is intended.
   - New `brush` freehand annotation type: stored as normalized `points` in
     `geometry`, painted as a round-cap/round-join polyline in both the live canvas
     (`ui/canvas.py:_paint_brush`) and the exporter (`exporter.py:_paint_brush`);
@@ -426,7 +460,10 @@ Other PHI safeguards:
   - Suite is **341 tests** (last CI-verified, 2026-11-10,
     `docs/engineering-2026-11-10/RELEASE_NOTES.md`); gate is
     `ruff check src tests scripts` + `python -m pytest tests/ -q`, both green at
-    the last release marker.
+    the last release marker. v0.5.15-alpha (`e1b0839`) adds
+    `tests/test_ripple_overlays.py` (40 tests; local `tests/` run 380 passed / 1
+    known NE-027 timeout); the v0.5.15 tag's CI run is the gate of record and was
+    still to be confirmed green at release time.
   - torch/SAM stack is lazy by design (venv has no torch → SAM no-ops); the
     cold-start import audit is complete and keeps the exporter out of the normal
     startup module graph.

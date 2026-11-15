@@ -1,5 +1,39 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-15 — v0.5.16-alpha release preparation
+
+- The user requested a new tag/release containing all current updates. Local
+  and remote main were at `e1b083930e24a83de2534d0baf336ac8e7d262bb`, the
+  existing `v0.5.15-alpha` tag. Preserved the pending November 13–15 documentation
+  updates in `HANDOFF.md`, `TODO.md`, and `desktop/CLAUDE.md` for inclusion.
+- Live GitHub verification resolved the previous handoff's pending question:
+  v0.5.15-alpha was published with all three installers. Its tagged workflow
+  [43357686920](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/43357686920)
+  passed Ruff and **381 tests in 454.79 s**, no skips and a clean exit; main
+  quality run 43357680634 also succeeded. No old tag was moved.
+- Prepared numeric version `0.5.16` and release/download labels
+  `v0.5.16-alpha`. Updated README links/notes, current test-count documentation,
+  and the stale NE-010/011 statuses. This refresh carries the implemented
+  timeline/redaction fixes forward; it does not implement NE-012–NE-030 or the
+  open optimization findings. Release notes are in
+  `desktop/docs/releases/v0.5.16-alpha.md`.
+- The prior temporary CLI/runtime had been cleared. Recreated a task-local
+  environment at `/private/tmp/neuroedit-release-20261115` with the existing
+  release constraints and verified the official ARM64 GitHub CLI archive's
+  SHA-256 against its GitHub release metadata. The installed Intel CLI and
+  intentional iCloud-hosted `.venv` were not replaced or modified.
+- Fresh release-candidate checks: **381 passed in 199.33 s**, no skips and clean
+  process exit; full Ruff, source compileall, version/default consistency,
+  macOS build-script shell syntax, and `git diff --check` passed. Used the
+  bundled ARM64 FFmpeg on PATH, Qt offscreen/FFmpeg backend, `PYTHONPATH=src`,
+  and the task-local Python runtime. The capture-baseline test passed here;
+  this does not close the broader NE-027 hardening ticket.
+- The complete native preference snapshot matched before/after validation.
+  No project migration, new QA capture, or application runtime code change was
+  performed. Previously tracked QA artifacts were left unchanged; the private
+  storage-location screenshot remains ignored. Publication/build results for
+  the new tag are recorded separately once they complete.
+
 ## 2026-11-12 — Release v0.5.15-alpha (NE-010/NE-011 fixes + review docs)
 
 **Release:** version bumped 0.5.14 -> 0.5.15 in `desktop/pyproject.toml`, `desktop/src/neuroedit_desktop/__init__.py`,
@@ -2943,3 +2977,65 @@ analyzed this content as uncommitted work). No code changed; markdown only.
 - Updated `desktop/CLAUDE.md`: "Last reviewed" → `3e00fc0` / 2026-11-12, new
   architecture notes (recording, audio preview, media-import worker, brush), and
   new intentionally-not-optimized entries.
+
+## 71. Optimization automation sweep (2026-11-13, docs-only)
+
+- Incremental run over `3e00fc0..HEAD` (`e1b0839`) — single commit, the
+  v0.5.15-alpha ripple overlay fix (NE-010/NE-011). Deep-dived the new
+  `models.py` redaction-ripple helpers (`_ripple_redaction`,
+  `move_redactions_with_clips`, `timeline_positions` /
+  `restore_timeline_positions`, `_shift_mask_frames`) plus their one-hop callers
+  in `ui/editor_panels.py` (trim-drag snapshot/rewind, `_commit_clip_move`).
+- Three new findings filed in `TODO.md` → "New findings — 2026-11-13 incremental
+  run": (1) `_rewind_trim_drag` runs twice per trim mouse-move (redundant
+  `restore_timeline_positions`, `ui/editor_panels.py:819` duplicates the apply
+  methods' own rewind); (2) clip reorder re-places only redactions, not other
+  annotations/markers — possible functionality gap, confirm intent; (3) a minor
+  one-shot sort in `move_redactions_with_clips` when no redactions exist. No code
+  changed (automation is docs-only).
+- Also noted in `TODO.md`: NE-010/NE-011 shipped in `e1b0839`, but their status
+  row in `CODING_TICKETS.md` still reads "Reproduced / Review approved" (stale).
+- Updated `desktop/CLAUDE.md`: "Last reviewed" → `e1b0839` / 2026-11-13; prior
+  full-sweep demoted to its own bullet; added a high-signal redaction-ripple
+  architecture note and a test-suite note for `tests/test_ripple_overlays.py`.
+
+## 72. Optimization automation sweep (2026-11-14, docs-only)
+
+- Incremental run with an **empty code diff**: HEAD is still `e1b0839` (the
+  2026-11-13 marker), `git log e1b0839..HEAD` is empty, and the only working-tree
+  changes are the uncommitted markdown from the §71 run. `git diff
+  e1b0839..HEAD` touches no code. Nothing new to deep-dive, so no findings were
+  invented.
+- Re-confirmed the four open Optimization Backlog items are still open and valid
+  (none could have been implemented — no code changed): the 2026-11-13 trio
+  (double trim-drag rewind; reorder re-places only redactions; one-shot
+  `move_redactions_with_clips` sort) plus the §70 `AudioPreview.sync` per-tick
+  `stat`. The NE-010/NE-011-shipped / stale-`CODING_TICKETS.md`-status note from
+  §71 also still stands.
+- Updated `desktop/CLAUDE.md`: "Last reviewed" → 2026-11-14 (HEAD `e1b0839`,
+  unchanged); demoted the 2026-11-13 detail to a "Prior incremental review"
+  bullet. No change to `TODO.md` (no new findings). Markdown consistency: the
+  files touched this run (`desktop/CLAUDE.md`, `HANDOFF.md`) are tense/term
+  consistent; nothing to correct.
+
+## 73. Optimization automation sweep (2026-11-15, docs-only)
+
+- Incremental run, reviewed range `e1b0839..HEAD` — again an **empty code diff**
+  and the second consecutive empty-diff run. HEAD is still `e1b0839` (the
+  2026-11-13 marker), `git log e1b0839..HEAD` is empty, and the only working-tree
+  changes are this automation's own uncommitted markdown from §71/§72. `git diff
+  e1b0839..HEAD` touches no code; no untracked files. Nothing new to deep-dive, so
+  no findings were invented.
+- Re-confirmed the four open Optimization Backlog items are still open and valid
+  (none could have been implemented — no code changed): the 2026-11-13 trio
+  (double trim-drag rewind; reorder re-places only redactions; one-shot
+  `move_redactions_with_clips` sort) plus the §70 `AudioPreview.sync` per-tick
+  `stat`. The NE-012–NE-030 app-review tickets and the stale
+  `CODING_TICKETS.md` NE-010/NE-011 status note also still stand.
+- Updated `desktop/CLAUDE.md`: "Last reviewed" → 2026-11-15 (HEAD `e1b0839`,
+  unchanged), flagged as the second consecutive empty-diff run; demoted the
+  2026-11-14 detail to a "Prior incremental review" bullet. No change to
+  `TODO.md` (no new findings; see the open items under "New findings — 2026-11-12
+  / 2026-11-13"). Markdown consistency: the files touched this run
+  (`desktop/CLAUDE.md`, `HANDOFF.md`) are tense/term consistent; nothing to
+  correct.
