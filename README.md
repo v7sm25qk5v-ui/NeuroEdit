@@ -6,6 +6,8 @@ NeuroEdit does not upload video or audio to a cloud editing service.
 
 Current alpha: [v0.5.16-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.16-alpha)
 
+[Download the latest build](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/latest).
+
 ### What's new in v0.5.16-alpha
 
 - Includes the timeline/redaction updates from v0.5.15-alpha: redactions keep

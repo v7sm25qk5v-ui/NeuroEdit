@@ -1,5 +1,26 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-15 — Corrected the repository's Latest release display
+
+- The user reported the repository's Releases sidebar still showing v0.5.12.
+  The new v0.5.16-alpha release existed, but its GitHub prerelease category
+  excluded it from Latest. The release checklist had missed this display check.
+- Updated the existing release's metadata with `prerelease: false` and explicit
+  `make_latest: "true"`. Verified `/releases/latest` now returns v0.5.16-alpha
+  and the live repository browser shows "NeuroEdit v0.5.16-alpha Latest".
+  The alpha tag, source commit, installer assets, and unsigned-build notices
+  remain unchanged. This is a publication/discoverability setting, not a claim
+  that the app is production ready.
+- Updated the publication workflow to set Latest explicitly and fail its final
+  check if GitHub's latest tag differs from the published tag. Added a permanent
+  latest-download link to README and the same requirement to desktop/CLAUDE.md.
+  The older September handoff's claim that an alpha suffix inherently prevents
+  Latest is superseded by this live verified result; no new stable tag was needed.
+- The user explicitly requested remembering this requirement for future releases.
+- Validation: workflow YAML/settings checks and Bash syntax passed; the exact
+  new verification script passed against the live GitHub API. No application
+  code or installer changed, so the already verified 381-test release is retained.
+
 ## 2026-11-15 — v0.5.16-alpha published and verified
 
 - Published [NeuroEdit v0.5.16-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.16-alpha)

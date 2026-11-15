@@ -95,6 +95,11 @@ hf auth login
 The suite under `tests/` collects **381 tests** (`python -m pytest tests/ -q`;
 CI verified for `v0.5.15-alpha`, including `tests/test_ripple_overlays.py`).
 Keep it and `ruff check src tests scripts` green before every release tag.
+Every public release must also update GitHub's Latest release and repository
+Releases sidebar. Verify `/releases/latest` resolves to the new tag, alongside
+the installer assets and README links. The publication workflow explicitly sets
+`prerelease: false` and `make_latest: "true"` for visibility; retain alpha and
+unsigned-build labels in the tag and notes when applicable.
 `tests/conftest.py` redirects NeuroEdit's application preferences to a temporary
 INI file; tests must not read or write the user's native QSettings store.
 

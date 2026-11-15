@@ -118,7 +118,10 @@ jobs:
       - name: Create / update the release
         uses: softprops/action-gh-release@v2
         with:
-          prerelease: ${{ contains(github.ref_name, '-alpha') }}
+          # Feature the current build in the repository's Releases sidebar.
+          # Keep alpha status in the tag/notes; GitHub excludes prereleases from Latest.
+          prerelease: false
+          make_latest: "true"
           files: artifacts/**/*
           fail_on_unmatched_files: true
           body: |
@@ -129,3 +132,11 @@ jobs:
               warns, click "More info" -> "Run anyway".
 
             Both installers are built from the same commit and are functionally identical.
+      - name: Verify the repository's Latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          latest_tag=$(gh api "repos/$GH_REPO/releases/latest" --jq '.tag_name')
+          test "$latest_tag" = "$RELEASE_TAG"

@@ -7,7 +7,7 @@
   "published_at": "2026-11-15T20:15:35Z",
   "verified_at": "2026-11-15T20:17:54.283627+00:00",
   "draft": false,
-  "prerelease": true,
+  "prerelease": false,
   "local_validation": {
     "pytest_passed": 381,
     "pytest_skipped": 0,
@@ -74,5 +74,9 @@
     "Unsigned editor-only alpha installers; optional SAM/PyTorch requires a source build.",
     "Physical audio/microphone behavior, installed-app launch, native Windows UI/scaling, clinical footage exports, and actual SAM inference were not verified.",
     "Remaining NE-012 through NE-030 and open optimization findings are not implemented by this release."
-  ]
+  ],
+  "latest_release_verified_at": "2026-11-15T20:36:31.588412+00:00",
+  "latest_release_tag": "v0.5.16-alpha",
+  "repository_sidebar_verified": "NeuroEdit v0.5.16-alpha Latest (live browser accessibility tree)",
+  "publication_metadata_correction": "Initially published as a prerelease; cleared that category and explicitly set make_latest=true after user reported the stale sidebar. Alpha tag and asset bytes unchanged."
 }
