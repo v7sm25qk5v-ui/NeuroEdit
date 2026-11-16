@@ -1,0 +1,90 @@
+{
+  "release_id": 447719778,
+  "tag": "v0.5.17-alpha",
+  "source_commit": "2343eb6f647dfbf0c9681c03a070e4c1d3625664",
+  "annotated_tag_object": "f16aff7537875467bb1649060fbaebd5e79ec147",
+  "release_url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.17-alpha",
+  "published_at": "2026-11-16T22:59:00Z",
+  "verified_at": "2026-11-16T23:00:27.892584+00:00",
+  "draft": false,
+  "prerelease": false,
+  "latest_tag": "v0.5.17-alpha",
+  "sidebar_verified": "v0.5.17-alpha Latest (live browser accessibility tree)",
+  "local_tests_rerun": false,
+  "prior_testing_provenance": "Claude handoff:696 passing tests, three consecutive clean exits; no local tests rerun per owner instruction.",
+  "tagged_workflow": {
+    "id": 43974338054,
+    "url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/43974338054",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "name": "quality / Test and lint desktop app",
+        "conclusion": "success"
+      },
+      {
+        "name": "quality / Test and lint desktop app (Windows, informational)",
+        "conclusion": "failure"
+      },
+      {
+        "name": "Build macOS (.dmg)",
+        "conclusion": "success"
+      },
+      {
+        "name": "Build Windows (Setup.exe)",
+        "conclusion": "success"
+      },
+      {
+        "name": "Publish GitHub Release",
+        "conclusion": "success"
+      }
+    ],
+    "pytest_passed": 696,
+    "pytest_skipped": 0,
+    "pytest_seconds": 86.1,
+    "warnings": 2,
+    "clean_exit": true
+  },
+  "main_workflow": {
+    "id": 43974336747,
+    "url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/43974336747",
+    "conclusion": "success",
+    "pytest_passed": 696,
+    "pytest_seconds": 95.72
+  },
+  "windows_informational": {
+    "conclusion": "failure",
+    "nonblocking": true,
+    "stage": "Pytest fixture setup",
+    "cause": "QSettings.fileName() normalizes slashes to forward slashes; assertion compares it to an unnormalized Windows path.",
+    "summary": "7 skipped,689 setup errors; test execution blocked by session fixture. Ruff passed.",
+    "installer_build": "success; separate from informational tests"
+  },
+  "assets": [
+    {
+      "name": "NeuroEdit-v0.5.17-alpha-macOS-unsigned.dmg",
+      "size": 130588090,
+      "state": "uploaded",
+      "github_reported_digest": "sha256:a9d893ecedb7f0c87f2e6e27a38571d3ed1725b64214eebbfc12b0e1c94323d9",
+      "browser_download_url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/download/v0.5.17-alpha/NeuroEdit-v0.5.17-alpha-macOS-unsigned.dmg",
+      "public_head_http_status": 200
+    },
+    {
+      "name": "NeuroEdit-v0.5.17-alpha-macOS-unsigned.zip",
+      "size": 117608848,
+      "state": "uploaded",
+      "github_reported_digest": "sha256:46f394c28e9ede4cee5443507c632fa88d4b64310c9836fa70acca9ae23d9514",
+      "browser_download_url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/download/v0.5.17-alpha/NeuroEdit-v0.5.17-alpha-macOS-unsigned.zip",
+      "public_head_http_status": 200
+    },
+    {
+      "name": "NeuroEdit-v0.5.17-alpha-Windows-Setup.exe",
+      "size": 100313963,
+      "state": "uploaded",
+      "github_reported_digest": "sha256:111089b87c0d87c35a9a16bf05eb89b4eecfb3266f50e913b070eab34cbbb525",
+      "browser_download_url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/download/v0.5.17-alpha/NeuroEdit-v0.5.17-alpha-Windows-Setup.exe",
+      "public_head_http_status": 200
+    }
+  ],
+  "asset_verification_scope": "Public HTTP HEAD200 and GitHub-reported SHA256; installer bytes not independently downloaded/installed.",
+  "name": "NeuroEdit v0.5.17-alpha"
+}

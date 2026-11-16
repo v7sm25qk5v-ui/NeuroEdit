@@ -391,6 +391,26 @@ but not executed. **Unmeasured** means the cost is plausible but not profiled.
 | NE-030 Small lifecycle and documentation items | P3 | Source confirmed | Verified (local software) |
 | NE-031 Rotated JPEG stills have the same orientation in preview and export | P2 | Reproduced | Verified (local software) |
 
+## Release verification — v0.5.17-alpha (2026-11-16)
+
+All current implemented ticket changes and Claude's follow-up edits are committed
+at `2343eb6f647dfbf0c9681c03a070e4c1d3625664` and published in
+[v0.5.17-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.17-alpha).
+No local test rerun was performed for publication, per the user. Required tagged
+macOS CI passed **696 tests in 86.10 s**, clean exit; main CI passed 696 tests.
+Mac DMG/ZIP and Windows installer builds/publication succeeded; Latest/sidebar
+and all three download links were verified.
+
+**NE-027 follow-up:** the informational Windows pytest job cannot get past the
+session fixture's path separator assertion in `desktop/tests/conftest.py`.
+Normalize `QSettings.fileName()` and `settings_path` before comparing on Windows;
+then inspect any actual platform test failures. Observed 689 setup errors and
+7 skips; Ruff and the separate Windows installer build passed. The existing
+nonblocking policy was preserved. No native Windows interaction result is claimed.
+
+The earlier local verification below is historical; release evidence is in
+`desktop/docs/releases/v0.5.17-alpha-verification.json`.
+
 ## Current verification — 2026-11-16
 
 Resumed Claude's uncommitted implementation, completed missing coding work,

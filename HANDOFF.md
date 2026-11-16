@@ -1,5 +1,38 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-16 — v0.5.17-alpha published, downloads and Latest verified
+
+- Committed all current Codex and Claude updates: **71 files**, commit
+  `2343eb6f647dfbf0c9681c03a070e4c1d3625664`. Pushed main and immutable
+  annotated tag `v0.5.17-alpha` atomically. Tag object:
+  `f16aff7537875467bb1649060fbaebd5e79ec147`. No old tag moved.
+- Published [NeuroEdit v0.5.17-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.17-alpha).
+  GitHub's release category is non-prerelease with explicit Latest so it appears
+  in the sidebar; its alpha/unsigned labels and limits remain visible.
+  Verified the live browser sidebar, Latest API, README links, and three downloads.
+- The user explicitly requested no additional local testing; none was run.
+  Required hosted gates were preserved. Tagged workflow
+  [43974338054](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/43974338054)
+  passed overall: macOS quality **696 passed, 2 warnings in 86.10 s**, clean
+  exit; Ruff, macOS/Windows builds, and publication succeeded. Main workflow
+  [43974336747](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/43974336747)
+  also passed overall: 696 tests in 95.72 s on macOS.
+- The new informational Windows test job failed at session-fixture setup:
+  Qt normalizes `QSettings.fileName()` with forward slashes while the assertion
+  expects the Windows backslash path. Result: 689 setup errors, 7 skips; Ruff
+  passed. The pre-existing nonblocking policy is unchanged, and the separate
+  Windows installer built successfully. Tracked as an NE-027 follow-up; these
+  results do not validate Windows app behavior.
+- Uploaded assets all returned public HEAD HTTP 200: macOS DMG (130588090 bytes),
+  macOS ZIP (117608848 bytes), Windows Setup.exe (100313963 bytes). CI links and
+  GitHub-reported SHA-256 digests are in
+  `desktop/docs/releases/v0.5.17-alpha-verification.json`. Installer bytes were
+  not independently downloaded, installed, or hardware-tested in this session.
+- Final release notes/current CI documentation are published in a documentation-only
+  follow-up commit; the tested tag/source remain unchanged. Real audio/SAM,
+  native Windows UI/scaling, installed-app smoke, real-media export validation,
+  and the other known review follow-ups remain as documented.
+
 ## 2026-11-16 — v0.5.17-alpha release preparation
 
 - The user authorized committing/pushing all current updates and publishing a new

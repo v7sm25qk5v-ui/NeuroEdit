@@ -91,8 +91,10 @@ hf auth login
 ```
 
 The suite under `tests/` collects **696 tests** (`python -m pytest tests/ -q`;
-locally verified with a clean exit on 2026-11-16). Hosted CI for the resumed
-ticket changes has not yet run.
+Claude reports local clean exits on 2026-11-16). Tagged v0.5.17-alpha macOS CI
+also passed all 696 tests with a clean exit; Windows informational pytest is
+blocked by the test fixture's unnormalized path comparison (Qt forward slashes
+versus Windows backslashes). Windows installer packaging passed.
 Keep it and `ruff check src tests scripts` green before every release tag.
 Every public release must also update GitHub's Latest release and repository
 Releases sidebar. Verify `/releases/latest` resolves to the new tag, alongside
