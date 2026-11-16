@@ -81,6 +81,11 @@ def build_caption_cues(
                 end = cursor + duration * (chunk_chars / total_chars)
             cues.append(CaptionCue(start=cursor, end=max(cursor + 0.1, end), lines=chunk))
             cursor = end
+    # The minimum display time must not push a short cue over the next one.
+    for index in range(len(cues) - 1):
+        cue, following = cues[index], cues[index + 1]
+        if cue.end > following.start > cue.start:
+            cues[index] = CaptionCue(cue.start, following.start, cue.lines)
     return cues
 
 
@@ -114,12 +119,18 @@ def cues_to_srt(cues: list[CaptionCue]) -> str:
     return "\n\n".join(blocks) + ("\n" if blocks else "")
 
 
+def _vtt_escape(text: str) -> str:
+    # `&` and `<` start entities/tags in cue text; escaping `>` also removes
+    # any literal `-->`, which would end the cue.
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def cues_to_vtt(cues: list[CaptionCue]) -> str:
     blocks = ["WEBVTT"]
     for cue in cues:
         blocks.append(
             f"{_vtt_timestamp(cue.start)} --> {_vtt_timestamp(cue.end)}\n"
-            + "\n".join(cue.lines)
+            + "\n".join(_vtt_escape(line) for line in cue.lines)
         )
     return "\n\n".join(blocks) + "\n"
 

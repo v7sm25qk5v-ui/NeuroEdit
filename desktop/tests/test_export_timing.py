@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -29,7 +28,9 @@ def qt_app():
 
 @pytest.fixture
 def ffmpeg():
-    executable = shutil.which("ffmpeg")
+    from neuroedit_desktop.exporter import resolve_ffmpeg
+
+    executable = resolve_ffmpeg()
     if executable is None:
         pytest.skip("FFmpeg is required for export timing integration coverage")
     return executable
@@ -167,7 +168,7 @@ def test_render_encoder_reaped_and_pipes_closed(qt_app, tmp_path, monkeypatch, f
         assert len(spawned) == 1
         assert spawned[0].poll() is not None
         assert spawned[0].stdin.closed
-        assert spawned[0].stderr.closed
+        assert spawned[0].stderr is None  # NE-029: stderr is a temp file, not a pipe
     finally:
         for process in spawned:
             if process.poll() is None:

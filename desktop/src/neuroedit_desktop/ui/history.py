@@ -4,6 +4,7 @@ import hashlib
 import json
 
 from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QAbstractSpinBox
 
 from neuroedit_desktop.models import ProjectState, VideoClip
 
@@ -44,7 +45,7 @@ class HistoryMixin:
         self.refresh()
         self._update_title()
 
-    def _mark_project_dirty(self) -> None:
+    def _mark_project_dirty(self, *, history: bool = True) -> None:
         self._invalidate_project_end_time()
         end_time = self._project_end_time()
         if self.project.current_time > end_time:
@@ -54,7 +55,7 @@ class HistoryMixin:
                 self.timeline_clock.stop()
                 self.player.pause()
                 self.play_button.setText("▶")
-        if not self._restoring:
+        if history and not self._restoring:
             self._push_history()
         else:
             self._autosave_snapshot = None
@@ -68,9 +69,60 @@ class HistoryMixin:
         self.timeline.refresh()
         self.media_panel.refresh()
 
+    def _mark_timeline_view_dirty(self) -> None:
+        """Timeline zoom or the active clip changed. It is saved with the
+        project but is not a document edit: no undo step, redo is kept, and
+        a completed PHI review stays confirmed."""
+        self._autosave_snapshot = None
+        self.dirty = True
+        self._update_title()
+        self._sync_player_to_timeline(play=self._timeline_playing)
+        self.timeline.refresh()
+        self.media_panel.refresh()
+
     def _mark_review_relevant_project_dirty(self) -> None:
         self._invalidate_review_attestations()
         self._mark_project_dirty()
+
+    def _mark_review_relevant_live_dirty(self) -> None:
+        """A slider tick or keystroke in the audio/slide panels. The model is
+        already updated; mark it dirty for preview and autosave without an undo
+        step. Review is reset when the gesture begins and again here if an
+        attestation was re-confirmed while the gesture was still open."""
+        project = self.project
+        if (
+            project.phi_review_confirmed
+            or project.deidentified_confirmed
+            or project.audio_reviewed_for_phi
+            or project.phi_review_progress
+        ):
+            self._invalidate_review_attestations()
+        self._mark_project_dirty(history=False)
+
+    def _commit_gesture_edit(self) -> None:
+        """A slider drag or text edit ended: exactly one undo snapshot."""
+        if not self._restoring:
+            self._push_history()
+        self.dirty = True
+        self._update_title()
+
+    def _flush_pending_edits(self) -> None:
+        """Commit any open slider/text gesture before something that changes or
+        replaces the document (undo, redo, save, project switch, close)."""
+        for name in ("audio_panel", "slides_panel", "labels_panel"):
+            panel = getattr(self, name, None)
+            if panel is None:
+                continue
+            # Spinboxes apply typed digits only on Enter or focus-out. A menu
+            # shortcut (Save, Export, Undo, Quit) moves neither, so take the
+            # value now: otherwise the field shows one number and the document
+            # another. A spinbox with nothing typed is unaffected.
+            find_children = getattr(panel, "findChildren", None)
+            for spinbox in find_children(QAbstractSpinBox) if find_children else ():
+                spinbox.interpretText()
+            gesture = getattr(panel, "gesture", None)
+            if gesture is not None:
+                gesture.commit()
 
     def _seed_history(self) -> None:
         """Start a new undo session for the current project document."""
@@ -106,21 +158,19 @@ class HistoryMixin:
             and project_data == self._autosave_snapshot
         ):
             self._autosave_snapshot = project_data
-            self._redo_stack.clear()
-            self._redo_hashes.clear()
-            self._redo_sizes.clear()
             self._update_history_actions()
             return
         snapshot = self._snapshot(project_data)
         snapshot_payload = self._snapshot_payload(snapshot)
         snapshot_hash = self._payload_hash(snapshot_payload)
         self._autosave_snapshot = project_data
-        self._redo_stack.clear()
-        self._redo_hashes.clear()
-        self._redo_sizes.clear()
         if self._undo_hashes and self._undo_hashes[-1] == snapshot_hash:
             self._update_history_actions()
             return
+        # Only a new snapshot invalidates redo; a no-op push must not drop it.
+        self._redo_stack.clear()
+        self._redo_hashes.clear()
+        self._redo_sizes.clear()
         self._undo_stack.append(snapshot_payload)
         self._undo_hashes.append(snapshot_hash)
         self._undo_sizes.append(len(snapshot_payload))
@@ -138,6 +188,7 @@ class HistoryMixin:
         self.redo_action.setEnabled(bool(self._redo_stack))
 
     def undo(self) -> None:
+        self._flush_pending_edits()
         if len(self._undo_stack) <= 1:
             return
         current = self._undo_stack.pop()
@@ -151,6 +202,7 @@ class HistoryMixin:
         self._update_history_actions()
 
     def redo(self) -> None:
+        self._flush_pending_edits()
         if not self._redo_stack:
             return
         snapshot = self._redo_stack.pop()
@@ -213,6 +265,8 @@ class HistoryMixin:
     def _autosave(self) -> None:
         if not self.dirty:
             return
+        if getattr(self, "_autosave_blocked_path", None) == self.store.project_path:
+            return  # an unreadable file we could not move aside lives here
         try:
             if self._autosave_snapshot is not None:
                 self.store.save_data(self._autosave_snapshot)

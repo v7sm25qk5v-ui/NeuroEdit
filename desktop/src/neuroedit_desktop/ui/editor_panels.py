@@ -46,6 +46,7 @@ from neuroedit_desktop.models import (
     new_id,
 )
 from neuroedit_desktop.ui.audio_panel import AudioPanel as AudioPanel
+from neuroedit_desktop.ui.edit_gesture import CommitTextEdit, EditGesture
 from neuroedit_desktop.ui.styles import (
     ACCENT_AMBER,
     ACCENT_CYAN,
@@ -249,6 +250,8 @@ class MediaExplorerPanel(QWidget):
 class TimelineCanvas(QWidget):
     seek_requested = Signal(float)
     project_changed = Signal()
+    # View state saved with the project (active clip) changed; the document did not.
+    view_changed = Signal()
     edit_preview_changed = Signal()
     item_activated = Signal(str, str)  # (kind, item_id)
     selection_changed = Signal(bool)   # True when a timeline item is selected
@@ -290,6 +293,10 @@ class TimelineCanvas(QWidget):
         # (clip id, ProjectState.timeline_positions() at press) while a trim
         # handle is being dragged.
         self._trim_drag_origin: tuple[str, list] | None = None
+        # True while the button is held after pressing empty space: moves seek.
+        self._scrubbing = False
+        # _drag_document_state() at press, so release can tell a click from an edit.
+        self._drag_start_state: tuple | None = None
         self._slide_lanes_key: tuple | None = None
         self._slide_lanes_value: dict[str, int] = {}
         # Widget-level selection only — never serialized or snapshotted.
@@ -318,6 +325,7 @@ class TimelineCanvas(QWidget):
     def set_project(self, project: ProjectState) -> None:
         if project is not self.project:
             self._drag = None
+            self._drag_start_state = None
             self._clear_clip_move()
         self.project = project
         self._prune_selection()
@@ -666,15 +674,18 @@ class TimelineCanvas(QWidget):
                 selected=selected, hovered=hovered,
             )
 
-    def _annotation_timeline_duration(self, annotation) -> float:
-        remaining = max(0.1, project_end_time(self.project) - annotation.frame_time)
+    def _annotation_timeline_duration(self, annotation, end_time: float | None = None) -> float:
+        if end_time is None:
+            end_time = project_end_time(self.project)
+        remaining = max(0.1, end_time - annotation.frame_time)
         if annotation.ann_duration <= 0:
             return remaining
         return min(annotation.ann_duration, remaining)
 
     def _annotation_lanes(self) -> dict[str, int]:
         zoom = max(1.0, self.project.zoom)
-        key = (zoom, project_end_time(self.project), tuple(
+        end_time = project_end_time(self.project)
+        key = (zoom, end_time, tuple(
             (a.id, a.frame_time, a.ann_duration) for a in self.project.annotations
         ))
         if key == self._annotation_lanes_key:
@@ -683,7 +694,7 @@ class TimelineCanvas(QWidget):
         assigned = {}
         for annotation in sorted(self.project.annotations, key=lambda a: (a.frame_time, a.id)):
             start = annotation.frame_time
-            end = start + max(28 / zoom, self._annotation_timeline_duration(annotation))
+            end = start + max(28 / zoom, self._annotation_timeline_duration(annotation, end_time))
             lane = next((i for i, lane_end in enumerate(ends) if start > lane_end), len(ends))
             if lane == len(ends):
                 ends.append(end)
@@ -699,9 +710,24 @@ class TimelineCanvas(QWidget):
         rect.translate(0, self._annotation_lanes()[annotation.id] * self.TRACK_H)
         return rect
 
+    def _annotation_block_rects(self, zoom: float) -> list[tuple]:
+        """Every annotation's rect, with the end time, lanes and row top
+        computed once instead of once per annotation."""
+        end_time = project_end_time(self.project)
+        lanes = self._annotation_lanes()
+        row_top = self._track_y(3) + 6
+        return [
+            (annotation, QRectF(
+                self.LABEL_W + annotation.frame_time * zoom,
+                row_top + lanes[annotation.id] * self.TRACK_H,
+                max(28.0, self._annotation_timeline_duration(annotation, end_time) * zoom),
+                self.TRACK_H - 12,
+            ))
+            for annotation in self.project.annotations
+        ]
+
     def _paint_annotation_blocks(self, painter: QPainter, zoom: float) -> None:
-        for annotation in self.project.annotations:
-            rect = self._annotation_block_rect(annotation, zoom)
+        for annotation, rect in self._annotation_block_rects(zoom):
             selected = self.selected_item == ("annotation", annotation.id)
             hovered = self._hover_item == ("annotation", annotation.id)
             name = annotation.label or annotation.type.replace("-", " ")
@@ -748,6 +774,9 @@ class TimelineCanvas(QWidget):
         if event.button() != Qt.MouseButton.LeftButton:
             return super().mousePressEvent(event)
 
+        # A release can be lost (focus change mid-drag); do not lose its edit.
+        self._report_drag_edit()
+        self._scrubbing = False
         pos = event.position()
         if pos.x() < self.LABEL_W:
             return
@@ -763,13 +792,14 @@ class TimelineCanvas(QWidget):
                 return
             origin_start = self._item_start_time(kind, item_id)
             self._drag = (kind, item_id, offset, origin_start)
+            self._drag_start_state = self._drag_document_state()
             if kind == "clip":
                 self._clip_press_position = QPointF(pos)
             if kind in ("clip-trim-start", "clip-trim-end"):
                 self._trim_drag_origin = (item_id, self.project.timeline_positions())
-            if kind.startswith("clip"):
+            if kind.startswith("clip") and self.project.active_clip_id != item_id:
                 self.project.active_clip_id = item_id
-                self.project_changed.emit()
+                self.view_changed.emit()
             self.update()
             if kind in ("clip-trim-start", "clip-trim-end"):
                 self.setCursor(Qt.CursorShape.SizeHorCursor)
@@ -784,9 +814,14 @@ class TimelineCanvas(QWidget):
         if self.selected_item is not None:
             self._set_selection(None)
             self.update()
+        self._scrubbing = True
         self.seek_requested.emit(min(time_s, project_end_time(self.project)))
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        if self._drag is None and self._scrubbing:
+            time_s = max(0.0, (event.position().x() - self.LABEL_W) / max(1.0, self.project.zoom))
+            self.seek_requested.emit(min(time_s, project_end_time(self.project)))
+            return
         if self._drag is None:
             self._update_hover(event.position())
             return super().mouseMoveEvent(event)
@@ -825,18 +860,22 @@ class TimelineCanvas(QWidget):
                     self._apply_trim_end(clip, time_at)
         elif kind == "audio":
             new_start = max(0.0, time_at - offset)
-            if snap:
-                new_start = self._snap_time(new_start, base_kind, item_id)
             for track in self.project.audio_tracks:
                 if track.id == item_id:
+                    if snap:
+                        new_start = self._snap_time(
+                            new_start, base_kind, item_id, duration=max(0.25, track.duration)
+                        )
                     track.start_time = new_start
                     break
         elif kind == "slide":
             new_start = max(0.0, time_at - offset)
-            if snap:
-                new_start = self._snap_time(new_start, base_kind, item_id)
             for slide in self.project.slides:
                 if slide.id == item_id:
+                    if snap:
+                        new_start = self._snap_time(
+                            new_start, base_kind, item_id, duration=max(0.25, slide.duration)
+                        )
                     slide.start_time = new_start
                     break
 
@@ -928,6 +967,7 @@ class TimelineCanvas(QWidget):
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         drag = self._drag
         self._drag = None
+        self._scrubbing = False
         trim_origin = self._trim_drag_origin
         self._trim_drag_origin = None
         self._snap_indicator_time = None
@@ -938,6 +978,7 @@ class TimelineCanvas(QWidget):
             self.trash_target.set_armed(False)
         if dropped_on_trash:
             # "Dump" the dragged item: delete it instead of committing the move.
+            self._drag_start_state = None  # the delete below reports the edit
             if trim_origin is not None:
                 # Delete the clip as it was at press, not the half-trimmed one.
                 self.project.restore_timeline_positions(trim_origin[1])
@@ -948,7 +989,7 @@ class TimelineCanvas(QWidget):
             if drag[0] == "clip":
                 self._commit_clip_move()
             self.update()
-            self.project_changed.emit()
+            self._report_drag_edit()
         self._clear_clip_move()
         super().mouseReleaseEvent(event)
 
@@ -1002,6 +1043,12 @@ class TimelineCanvas(QWidget):
             self.project.slides = [s for s in self.project.slides if s.id != item_id]
         elif kind == "marker":
             self.project.markers = [m for m in self.project.markers if m.id != item_id]
+        elif kind == "annotation":
+            # Same effect as the Labels panel's delete: drop the annotation and
+            # its selection. Mask files are left for the orphan cleanup, as there.
+            self.project.annotations = [a for a in self.project.annotations if a.id != item_id]
+            if self.project.selected_annotation_id == item_id:
+                self.project.selected_annotation_id = None
         else:
             return
         self._set_selection(None)
@@ -1097,6 +1144,8 @@ class TimelineCanvas(QWidget):
         label, ok = QInputDialog.getText(self, "Edit Marker", "Marker label:", text=marker.label)
         if not ok or not label.strip():
             return
+        if label.strip() == marker.label:
+            return
         marker.label = label.strip()
         self.update()
         self.project_changed.emit()
@@ -1126,6 +1175,8 @@ class TimelineCanvas(QWidget):
     def _rename_clip(self, clip: VideoClip) -> None:
         name, ok = QInputDialog.getText(self, "Rename Clip", "Clip name:", text=clip.name)
         if not ok or not name.strip():
+            return
+        if name.strip() == clip.name:
             return
         clip.name = name.strip()
         self.update()
@@ -1214,6 +1265,33 @@ class TimelineCanvas(QWidget):
                     return annotation.frame_time
         return 0.0
 
+    def _drag_document_state(self) -> tuple[list[str], list[float]]:
+        """Everything a timeline drag can change: clip order and every
+        timeline position."""
+        times: list[float] = []
+        for _item, values in self.project.timeline_positions():
+            for value in values.values():
+                if isinstance(value, list):
+                    times.extend(float(item) for item in value)
+                else:
+                    times.append(float(value))
+        return [clip.id for clip in self.project.clips], times
+
+    def _report_drag_edit(self) -> None:
+        """Emit project_changed if the document changed since the last press.
+        A click, or a drag that ended where it began, is not an edit."""
+        start, self._drag_start_state = self._drag_start_state, None
+        if start is None:
+            return
+        ids, times = self._drag_document_state()
+        if (
+            ids != start[0]
+            or len(times) != len(start[1])
+            # Pixel round trips leave float noise far below one frame.
+            or any(abs(now - before) > 1e-9 for now, before in zip(times, start[1]))
+        ):
+            self.project_changed.emit()
+
     def _rewind_trim_drag(self, clip) -> None:
         """Put the timeline back as it was at press, so every mouse move
         applies one ripple from the drag origin. Rippling move-by-move made
@@ -1279,8 +1357,7 @@ class TimelineCanvas(QWidget):
             rect = self._slide_block_rect(slide, zoom)
             if rect.contains(x, y):
                 return "slide", slide.id, (x - rect.left()) / zoom
-        for annotation in self.project.annotations:
-            rect = self._annotation_block_rect(annotation, zoom)
+        for annotation, rect in self._annotation_block_rects(zoom):
             if rect.contains(x, y):
                 return "annotation", annotation.id, (x - rect.left()) / zoom
         return None
@@ -1354,6 +1431,8 @@ class TimelineScrollArea(QScrollArea):
 class RichTimelineWidget(QWidget):
     seek_requested = Signal(float)
     project_changed = Signal()
+    # Zoom or the active clip changed: saved with the project, not an edit.
+    view_changed = Signal()
     item_activated = Signal(str, str)  # (kind, item_id)
 
     def __init__(self, project: ProjectState, parent: QWidget | None = None) -> None:
@@ -1466,6 +1545,7 @@ class RichTimelineWidget(QWidget):
         self.canvas = TimelineCanvas(project)
         self.canvas.seek_requested.connect(self.seek_requested)
         self.canvas.project_changed.connect(self.project_changed)
+        self.canvas.view_changed.connect(self.view_changed)
         self.canvas.edit_preview_changed.connect(self._refresh_edit_preview)
         self.canvas.item_activated.connect(self.item_activated)
 
@@ -1584,7 +1664,7 @@ class RichTimelineWidget(QWidget):
 
     def _set_zoom(self, value: float) -> None:
         self.project.zoom = max(2.0, min(300.0, value))
-        self.project_changed.emit()
+        self.view_changed.emit()
         self.refresh()
 
     def _snap_toggled(self, checked: bool) -> None:
@@ -1803,6 +1883,8 @@ class SlideEditorPanel(QWidget):
         super().__init__(parent)
         self.project = project
         self._refreshing = False
+        # Typing and spinbox edits mutate the slide live; one undo step per gesture.
+        self.gesture = EditGesture(self)
 
         self.list_widget = QListWidget()
         self.list_widget.setMinimumHeight(112)
@@ -1811,7 +1893,7 @@ class SlideEditorPanel(QWidget):
         self.list_widget.currentItemChanged.connect(self._selection_changed)
         self.preview = SlidePreview()
         self.title_input = QLineEdit()
-        self.content_input = QTextEdit()
+        self.content_input = CommitTextEdit()
         self.content_input.setFixedHeight(76)
         self.duration_input = QDoubleSpinBox()
         self.duration_input.setRange(0.5, 120.0)
@@ -1821,6 +1903,7 @@ class SlideEditorPanel(QWidget):
         self.font_size_input.setRange(10, 96)
         for spin in (self.duration_input, self.font_size_input):
             spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+            spin.setKeyboardTracking(False)
 
         self.font_family_combo = QFontComboBox()
         self.font_family_combo.setEditable(False)
@@ -1833,10 +1916,13 @@ class SlideEditorPanel(QWidget):
             "instead of replacing the frame."
         )
 
-        self.title_input.textChanged.connect(self._apply_fields)
-        self.content_input.textChanged.connect(self._apply_fields)
-        self.duration_input.valueChanged.connect(self._apply_fields)
-        self.font_size_input.valueChanged.connect(self._apply_fields)
+        self.title_input.textChanged.connect(self._apply_fields_live)
+        self.title_input.editingFinished.connect(self.gesture.commit)
+        self.content_input.textChanged.connect(self._apply_fields_live)
+        self.content_input.editingFinished.connect(self.gesture.commit)
+        for spin in (self.duration_input, self.font_size_input):
+            spin.valueChanged.connect(self._apply_fields_live)
+            spin.editingFinished.connect(self.gesture.commit)
         self.font_family_combo.currentFontChanged.connect(self._apply_fields)
         self.bold_check.toggled.connect(self._apply_fields)
         self.italic_check.toggled.connect(self._apply_fields)
@@ -1908,6 +1994,10 @@ class SlideEditorPanel(QWidget):
         self.refresh()
 
     def set_project(self, project: ProjectState) -> None:
+        # A pending edit was committed by the main window before the project
+        # was replaced; anything left belongs to the old project.
+        if project is not self.project:
+            self.gesture.reset()
         self.project = project
         self.refresh()
 
@@ -1962,6 +2052,7 @@ class SlideEditorPanel(QWidget):
 
     def _selection_changed(self) -> None:
         if not self._refreshing:
+            self.gesture.commit()
             self._load_selected()
 
     def _load_selected(self) -> None:
@@ -1996,6 +2087,7 @@ class SlideEditorPanel(QWidget):
         self._refreshing = False
 
     def _create_slide(self) -> None:
+        self.gesture.commit()
         slide = Slide(
             id=new_id(),
             title="New Slide",
@@ -2015,12 +2107,26 @@ class SlideEditorPanel(QWidget):
                 self.list_widget.setCurrentRow(row)
                 break
 
-    def _apply_fields(self) -> None:
+    def _apply_fields_live(self) -> None:
         if self._refreshing:
             return
+        if self._selected_slide() is not None:
+            self.gesture.begin(self.sender())
+        if self._write_fields():
+            self.gesture.tick()
+
+    def _apply_fields(self) -> None:
+        """Discrete controls (font family, bold, italic, overlay): one step each."""
+        if self._refreshing:
+            return
+        self.gesture.commit()
+        if self._write_fields():
+            self.project_changed.emit()
+
+    def _write_fields(self) -> bool:
         slide = self._selected_slide()
         if slide is None:
-            return
+            return False
         slide.title = self.title_input.text()
         slide.content = self.content_input.toPlainText()
         slide.duration = float(self.duration_input.value())
@@ -2031,8 +2137,8 @@ class SlideEditorPanel(QWidget):
         slide.overlay = self.overlay_check.isChecked()
         self.project.duration = project_end_time(self.project)
         self.preview.set_slide(slide)
-        self.project_changed.emit()
         self._refresh_list_labels()
+        return True
 
     def _refresh_list_labels(self) -> None:
         current = self._selected_id()
@@ -2054,6 +2160,7 @@ class SlideEditorPanel(QWidget):
         slide = self._selected_slide()
         if slide is None:
             return
+        self.gesture.commit()
         setattr(slide, field, color)
         self.preview.set_slide(slide)
         self.project_changed.emit()
@@ -2070,6 +2177,7 @@ class SlideEditorPanel(QWidget):
         slide = self._selected_slide()
         if slide is None:
             return
+        self.gesture.commit()
         slide.start_time = self.project.current_time
         self.project.duration = project_end_time(self.project)
         self.project_changed.emit()
@@ -2079,6 +2187,7 @@ class SlideEditorPanel(QWidget):
         slide_id = self._selected_id()
         if slide_id is None:
             return
+        self.gesture.commit()
         self.project.slides = [slide for slide in self.project.slides if slide.id != slide_id]
         self.project.duration = project_end_time(self.project)
         self.project_changed.emit()

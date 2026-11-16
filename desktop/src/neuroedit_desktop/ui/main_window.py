@@ -8,7 +8,7 @@ import shutil
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QMimeData, QThread, Qt, QTimer, QUrl
+from PySide6.QtCore import QEvent, QMimeData, QThread, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -50,7 +50,16 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QSettings
 
 from neuroedit_desktop import __version__, diagnostics
-from neuroedit_desktop.models import Annotation, PanelType, ProjectState, SamPoint, Slide, VideoClip, new_id
+from neuroedit_desktop.models import (
+    SCHEMA_VERSION,
+    Annotation,
+    PanelType,
+    ProjectState,
+    SamPoint,
+    Slide,
+    VideoClip,
+    new_id,
+)
 from neuroedit_desktop.project_store import ProjectStore
 from neuroedit_desktop.sam_backend import SamBackend
 from neuroedit_desktop.ui import styles as ui_styles
@@ -117,7 +126,12 @@ from neuroedit_desktop.ui.styles import (
     BORDER, BORDER_BRIGHT, PRIMARY,
     TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY, VIDEO_CANVAS,
 )
-from neuroedit_desktop.ui.tutorial import TutorialOverlay, build_default_steps
+from neuroedit_desktop.stills import read_upright_image as _read_upright_image
+from neuroedit_desktop.ui.tutorial import (
+    TutorialOverlay,
+    build_default_steps,
+    project_has_user_content,
+)
 from neuroedit_desktop.video_probe import probe_video
 
 __all__ = [
@@ -178,6 +192,10 @@ PANELS: list[tuple[PanelType, str, str]] = [
     ("audio",  "Audio",  ACCENT_RED),
 ]
 
+# Seconds a clip file's stat result is trusted during playback ticks.
+_MEDIA_STAT_TTL = 1.0
+
+
 class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -199,13 +217,20 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self._restoring = False  # True while applying a history snapshot
         self._media_warnings_shown: set[str] = set()
         self._media_problem_cache: dict[tuple[str, str, int, int], str | None] = {}
+        # (clip id, path) -> (monotonic time of last stat, cache key). Keeps the
+        # 33 ms playback tick from stat-ing the clip file every time.
+        self._media_stat_cache: dict[tuple[str, str], tuple[float, tuple[str, str, int, int]]] = {}
         self._project_end_time_cache: float | None = None
 
+        # Set when an unreadable autosave was moved aside: its masks/audio/stills
+        # may still be referenced by that file, so orphan cleanup must not run.
+        self._preserved_unreadable: Path | None = None
+        self._autosave_blocked_path: Path | None = None
         if self.store.project_path.exists():
             try:
                 self.store, self.project = ProjectStore.open(self.store.project_path)
             except Exception as exc:
-                QMessageBox.warning(self, "Autosave restore failed", str(exc))
+                self._preserve_unreadable_autosave(exc)
 
         self.setWindowTitle(f"NeuroEdit — {self.project.project_name}")
         self.setObjectName("mainWindow")
@@ -217,7 +242,9 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self._build_menubar()
         self._build_header()
         self._build_central_ui()
+        QApplication.instance().installEventFilter(self)
         self._build_statusbar()
+        self._warn_if_newer_project(self.project)
         self._build_autosave()
         self._validate_loaded_project_media("Autosave restore")
         self._load_active_clip()
@@ -229,11 +256,56 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self._undo_hashes.append(self._payload_hash(initial_payload))
         self._undo_sizes.append(len(initial_payload))
         self._update_history_actions()
-        QTimer.singleShot(0, self._load_sam_backend)
+        self._startup_sam_timer = QTimer(self)
+        self._startup_sam_timer.setSingleShot(True)
+        self._startup_sam_timer.timeout.connect(self._load_sam_backend)
+        self._startup_sam_timer.start(0)
         # Defer the first-run prompt until the window has actually painted.
-        QTimer.singleShot(400, self._maybe_show_first_run_tutorial)
+        self._startup_tutorial_timer = QTimer(self)
+        self._startup_tutorial_timer.setSingleShot(True)
+        self._startup_tutorial_timer.timeout.connect(self._maybe_show_first_run_tutorial)
+        self._startup_tutorial_timer.start(400)
+
+    def _preserve_unreadable_autosave(self, exc: Exception) -> None:
+        """Move the unreadable autosave aside BEFORE anything can autosave over it."""
+        bad_path = self.store.project_path
+        try:
+            preserved = ProjectStore.preserve_unreadable(bad_path)
+        except Exception as move_exc:  # noqa: BLE001
+            # Keep the store where it is but never autosave over the bad file.
+            self._autosave_blocked_path = bad_path
+            self._preserved_unreadable = bad_path
+            QMessageBox.warning(
+                self, "Autosave restore failed",
+                f"{exc}\n\nThe unreadable autosave could not be read or moved aside "
+                f"({move_exc}):\n{bad_path}\n\nAutosave is off for this session so that "
+                "file is not overwritten. Use Save As to keep any new work.",
+            )
+            return
+        self._preserved_unreadable = preserved
+        QMessageBox.warning(
+            self, "Autosave restore failed",
+            f"{exc}\n\nThe unreadable autosave was kept, unchanged, at:\n{preserved}\n"
+            "Starting a new project.",
+        )
 
     # ── Media ──────────────────────────────────────────────────────────────
+
+    def eventFilter(self, watched, event):  # noqa: N802
+        # Commit a panel's pending keyboard/wheel edit before input elsewhere
+        # can mutate the document (timeline, canvas, another panel, or shortcut).
+        if event.type() in (
+            QEvent.Type.MouseButtonPress, QEvent.Type.KeyPress,
+            QEvent.Type.Wheel, QEvent.Type.Shortcut,
+        ):
+            target = watched
+            while target is not None and not isinstance(target, QWidget):
+                target = target.parent()
+            if target is not None and (target is self or self.isAncestorOf(target)):
+                for panel in (self.audio_panel, self.slides_panel, self.labels_panel):
+                    if target is not panel and not panel.isAncestorOf(target):
+                        panel.gesture.commit()
+        return super().eventFilter(watched, event)
 
     def _build_media(self) -> None:
         self.player = QMediaPlayer(self)
@@ -457,6 +529,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
     def _restyle_theme_widgets(self) -> None:
         for button in getattr(self, "tool_buttons", {}).values():
             button.setStyleSheet(self._tool_btn_css())
+        if hasattr(self, "labels_panel"):
+            self.labels_panel.restyle_presets()
         if hasattr(self, "color_picker_btn"):
             self.color_picker_btn.setStyleSheet(
                 f"QPushButton {{ border-radius: 9px; border: 1px solid {BORDER_BRIGHT}; background: {BG_CARD}; }}"
@@ -830,6 +904,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self.timeline = RichTimelineWidget(self.project)
         self.timeline.seek_requested.connect(self._seek_global)
         self.timeline.project_changed.connect(self._mark_review_relevant_project_dirty)
+        self.timeline.view_changed.connect(self._mark_timeline_view_dirty)
         self.timeline.item_activated.connect(self._timeline_item_activated)
         self.timeline.setMinimumHeight(340)
         self._install_editor_shortcuts()
@@ -896,6 +971,13 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self.tips_panel.project_changed.connect(self._mark_project_metadata_dirty)
         self.slides_panel.project_changed.connect(self._mark_review_relevant_project_dirty)
         self.audio_panel.project_changed.connect(self._mark_review_relevant_project_dirty)
+        # Sliders and text fields mutate live; each gesture is one undo step.
+        for panel in (self.audio_panel, self.slides_panel):
+            panel.gesture.begun.connect(self._invalidate_review_attestations)
+            panel.gesture.changed.connect(self._mark_review_relevant_live_dirty)
+            panel.gesture.committed.connect(self._commit_gesture_edit)
+        self.labels_panel.gesture.begun.connect(self._invalidate_review_attestations)
+        self.labels_panel.gesture.committed.connect(self._commit_gesture_edit)
         self.audio_panel.review_state_changed.connect(self._mark_project_metadata_dirty)
         self.audio_panel.seek_requested.connect(self._seek_global)
         self.audio_panel.export_captions_requested.connect(self._export_captions)
@@ -1095,6 +1177,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         return False
 
     def _confirm_project_replacement(self) -> bool:
+        self._flush_pending_edits()
         if self._has_active_background_job():
             QMessageBox.information(
                 self,
@@ -1119,7 +1202,14 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             return not self.dirty
         return True
 
-    def _activate_project(self, store: ProjectStore, project: ProjectState) -> None:
+    def _activate_project(
+        self, store: ProjectStore, project: ProjectState,
+        *, history: tuple[list[bytes], list[bytes]] | None = None,
+    ) -> None:
+        self._flush_pending_edits()  # record it against the project it belongs to
+        overlay = getattr(self, "_tutorial_overlay", None)
+        if overlay is not None:
+            overlay.close()
         self._timeline_playing = False
         self.timeline_clock.stop()
         self.audio_preview.stop()
@@ -1137,7 +1227,53 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         if hasattr(self, "_media_problem_cache"):
             self._media_problem_cache.clear()
         self._invalidate_project_end_time()
-        self._seed_history()
+        if history is None:
+            self._seed_history()
+            self._warn_if_newer_project(project)
+        else:
+            self._adopt_history(*history)
+
+    def _warn_if_newer_project(self, project: ProjectState) -> None:
+        if project.loaded_schema_version <= SCHEMA_VERSION:
+            return
+        project.loaded_schema_version = SCHEMA_VERSION  # warn once per load
+        QMessageBox.warning(
+            self, "Project from a newer version",
+            "This project was saved by a newer version of NeuroEdit. It opened, but "
+            "some information may not be understood by this version, and saving it "
+            "here may lose that information. Consider keeping a copy of the original "
+            "file before saving.",
+        )
+
+    def _adopt_history(self, undo: list[bytes], redo: list[bytes]) -> None:
+        """Keep an existing undo session (Save As copies the document, it does
+        not start a new one)."""
+        self._undo_stack = list(undo)
+        self._redo_stack = list(redo)
+        self._undo_hashes = [self._payload_hash(p) for p in self._undo_stack]
+        self._redo_hashes = [self._payload_hash(p) for p in self._redo_stack]
+        self._undo_sizes = [len(p) for p in self._undo_stack]
+        self._redo_sizes = [len(p) for p in self._redo_stack]
+        self._autosave_snapshot = None
+        self._update_history_actions()
+
+    def _migrate_history_payloads(
+        self, payloads: list[bytes], old_root: Path, new_root: Path, name: str,
+    ) -> list[bytes]:
+        """Point old undo/redo snapshots at the migrated copies of managed assets
+        (and the new project name). A snapshot that cannot be migrated keeps its
+        old-folder paths, which still resolve because Save As never deletes the
+        original folder's assets."""
+        migrated = []
+        for payload in payloads:
+            try:
+                snapshot_project = ProjectState.from_dict(json.loads(payload))
+                self._migrate_managed_assets(snapshot_project, old_root, new_root)
+                snapshot_project.project_name = name
+                migrated.append(self._snapshot_payload(self._snapshot(snapshot_project.to_dict())))
+            except Exception:
+                migrated.append(payload)
+        return migrated
 
     def _mark_project_metadata_dirty(self) -> None:
         self._autosave_snapshot = None
@@ -1159,8 +1295,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
 
     def _load_tutorial_video(self) -> None:
         """Load the bundled tutorial clip when no clips are present yet."""
-        if self.project.clips:
-            return
+        if self.project.clips or project_has_user_content(self):
+            return  # the tutorial must not add to a project that already has work
         video_path = Path(__file__).parent.parent / "resources" / "tutorial_clip.mp4"
         if not video_path.exists():
             return
@@ -1361,8 +1497,85 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
 
     # ── Project actions ───────────────────────────────────────────────────
 
+    @staticmethod
+    def _has_case_content(project: ProjectState) -> bool:
+        return bool(
+            project.clips or project.audio_tracks or project.slides
+            or project.annotations or project.markers or project.transcript_segments
+            or project.has_case_notes
+        )
+
+    def _is_unsaved_scratch_case(self) -> bool:
+        """A non-empty project that lives only in the autosave folder."""
+        return self.store.project_path.parent == default_project_root() and self._has_case_content(
+            self.project
+        )
+
+    def _resolve_autosave_root_case(self) -> bool:
+        """Before New Project reuses the autosave folder, make sure the case still
+        sitting in its project.json is not overwritten unasked. True = go ahead."""
+        root_file = default_project_root() / "project.json"
+        if self.store.project_path == root_file or not root_file.exists():
+            return True
+        try:
+            store, project = ProjectStore.open(root_file)
+        except Exception:  # noqa: BLE001
+            try:
+                self._preserved_unreadable = ProjectStore.preserve_unreadable(root_file)
+            except Exception as exc:  # noqa: BLE001
+                QMessageBox.warning(
+                    self, "Autosave folder unreadable",
+                    f"The unreadable file {root_file} could not be moved aside ({exc}), "
+                    "so a new project was not started.",
+                )
+                return False
+            return True
+        if not self._has_case_content(project):
+            return True
+        reply = QMessageBox.question(
+            self,
+            "Unsaved case in the autosave folder",
+            "The autosave folder still holds an unsaved case, and a new project would "
+            "replace it.\n\nOpen = open that case instead.  Discard = replace it.",
+            QMessageBox.StandardButton.Open
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+        )
+        if reply == QMessageBox.StandardButton.Open:
+            self._activate_project(store, project)
+            self._validate_loaded_project_media("Autosave restore")
+            self._load_active_clip()
+            self.refresh()
+            self._update_title()
+            return False
+        return reply == QMessageBox.StandardButton.Discard
+
     def _new_project(self) -> None:
-        if not self._confirm_project_replacement():
+        if getattr(self, "_autosave_blocked_path", None) == self.store.project_path:
+            QMessageBox.warning(
+                self, "New Project unavailable",
+                "The autosave file could not be read or moved aside. Use Save As first.",
+            )
+            return
+        if self._is_unsaved_scratch_case() and not self._has_active_background_job():
+            # Saving in place can never keep a scratch case (the new project
+            # reuses its folder), so ask once regardless of the dirty flag.
+            reply = QMessageBox.question(
+                self,
+                "Unsaved Case",
+                "The current case exists only in the autosave folder and has not been saved. "
+                "Save it before starting a new project?",
+                QMessageBox.StandardButton.Save
+                | QMessageBox.StandardButton.Discard
+                | QMessageBox.StandardButton.Cancel,
+            )
+            if reply == QMessageBox.StandardButton.Cancel:
+                return
+            if reply == QMessageBox.StandardButton.Save:
+                self._save_project_as()
+                if self._is_unsaved_scratch_case():
+                    return  # Save As was cancelled or failed; keep the case open
+        elif not self._confirm_project_replacement() or not self._resolve_autosave_root_case():
             return
         self._activate_project(ProjectStore.create(default_project_root()), ProjectState())
         self._load_active_clip()
@@ -1393,7 +1606,9 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self.refresh()
 
     def _save_project(self) -> None:
-        if self.store.project_path.parent == default_project_root():
+        self._flush_pending_edits()
+        if (self.store.project_path.parent == default_project_root()
+                or self.store.project_path == self._autosave_blocked_path):
             # Still in autosave location — prompt for a real save destination
             self._save_project_as()
             return
@@ -1439,6 +1654,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             if reply != QMessageBox.StandardButton.Yes:
                 return
 
+        self._flush_pending_edits()
         old_store = self.store
         old_root = old_store.project_path.parent
         staged_project = copy.deepcopy(self.project)
@@ -1447,10 +1663,15 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             staged_store = ProjectStore.create(project_folder)
             self._migrate_managed_assets(staged_project, old_root, project_folder)
             staged_store.save(staged_project)
+            history = (
+                self._migrate_history_payloads(self._undo_stack, old_root, project_folder, name),
+                self._migrate_history_payloads(self._redo_stack, old_root, project_folder, name),
+            )
         except Exception as exc:
             QMessageBox.critical(self, "Save failed", str(exc))
             return
-        self._activate_project(staged_store, staged_project)
+        self._activate_project(staged_store, staged_project, history=history)
+        self._load_active_clip()  # _activate_project stopped the player; show the frame again
         self.refresh()
         self._update_title()
         self._add_to_recent(self.store.project_path)
@@ -1668,6 +1889,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             self.statusBar().showMessage("An import is already in progress.", 5000)
             return
         videos = [path for path in paths if path.suffix.lower() in VIDEO_EXTENSIONS]
+        self._import_cancel_requested = False
         self._import_paths = paths
         self._import_project = self.project
         self._import_store = self.store
@@ -1677,7 +1899,9 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             return
         progress = QProgressDialog("Reading video metadata...", "Cancel", 0, len(videos), self)
         progress.setMinimumDuration(0)
-        progress.setWindowModality(Qt.WindowModality.NonModal)
+        # Window-modal: edits during the import would discard it, so block them.
+        # The dialog's own Cancel button still works.
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setValue(0)
         self._import_progress = progress
         thread = QThread(self)
@@ -1685,7 +1909,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self._import_thread, self._import_worker = thread, worker
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
-        progress.canceled.connect(lambda: worker.cancel())
+        progress.canceled.connect(self._cancel_media_import)
         worker.progress.connect(progress.setValue)
         worker.finished.connect(self._finish_media_import)
         worker.finished.connect(thread.quit)
@@ -1693,15 +1917,23 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         thread.finished.connect(self._media_import_thread_finished)
         thread.start()
 
+    def _cancel_media_import(self) -> None:
+        # The worker may already have emitted its result. Track late cancellation
+        # on the GUI thread without retaining a lambda tied to a dying QObject.
+        self._import_cancel_requested = True
+        worker = getattr(self, "_import_worker", None)
+        if worker is not None:
+            worker.cancel()
+
     def _media_import_thread_finished(self) -> None:
         thread = self._import_thread
+        thread.wait()  # finished may precede native thread-local cleanup
         self._import_thread = None
         self._import_worker = None
         thread.deleteLater()
 
     def _finish_media_import(self, results, cancelled: bool) -> None:
-        worker = getattr(self, "_import_worker", None)
-        was_cancelled = cancelled or (worker is not None and worker._cancelled)
+        was_cancelled = cancelled or self._import_cancel_requested
         progress = getattr(self, "_import_progress", None)
         if progress is not None:
             progress.canceled.disconnect()
@@ -1728,7 +1960,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
                 else:
                     failures.append(path.name)
             elif suffix in IMAGE_EXTENSIONS:
-                image = QPixmap(str(path))
+                image = _read_upright_image(path)
                 if image.isNull():
                     failures.append(path.name)
                 else:
@@ -1799,7 +2031,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         else:
             if path.suffix.lower() not in IMAGE_EXTENSIONS:
                 return "Choose a supported image file."
-            image = QPixmap(str(path))
+            image = _read_upright_image(path)
             if image.isNull():
                 return "The replacement image could not be read."
             if kind == "slide":
@@ -1947,36 +2179,33 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         return 1920, 1080
 
     def _insert_timeline_gap(self, time_s: float, duration: float) -> None:
-        clips = list(self.project.clips)
-        for clip in clips:
-            start = clip.start_time
-            end = start + clip.display_duration
-            if start < time_s < end:
-                self._split_clip_for_gap(clip, time_s, duration)
-            elif start >= time_s:
-                clip.start_time += duration
+        # A redaction that starts exactly at the insertion point moves after
+        # the gap (the still already shows its frame); ripple_after would keep
+        # its start and grow it instead.
+        at_point = [
+            (ann, ann.frame_time, ann.ann_duration)
+            for ann in self.project.annotations
+            if ann.type == "redact" and time_s <= ann.frame_time <= time_s + 1e-9
+        ]
+        # Everything downstream (clips, slides, audio, captions, markers,
+        # annotations and their mask frames) shifts in one place. Clips that
+        # span the insertion point keep their start and are split below.
+        self.project.ripple_after(time_s, duration)
+        for ann, start, length in at_point:
+            ann.frame_time = start + duration
+            ann.ann_duration = length
 
-        for slide in self.project.slides:
-            if slide.start_time >= time_s:
-                slide.start_time += duration
-        for track in self.project.audio_tracks:
-            if track.start_time >= time_s:
-                track.start_time += duration
-        for marker in self.project.markers:
-            if marker.time >= time_s:
-                marker.time += duration
+        for clip in list(self.project.clips):
+            start = clip.start_time
+            if start < time_s < start + clip.display_duration:
+                self._split_clip_for_gap(clip, time_s, duration)
+
         for ann in self.project.annotations:
-            if ann.frame_time >= time_s:
-                ann.frame_time += duration
-            elif ann.is_visible_at(time_s):
-                if ann.type == "redact":
-                    # Keep the same source footage covered after insertion.
-                    # Unlimited redactions must remain unlimited.
-                    if ann.ann_duration > 0:
-                        ann.ann_duration += duration
-                else:
-                    # Cap normal labels so they don't bleed through the gap.
-                    ann.ann_duration = time_s - ann.frame_time
+            # Cap normal labels so they don't bleed through the gap. Redactions
+            # were already extended by ripple_after, unlimited ones stay so.
+            if ann.type != "redact" and ann.frame_time < time_s and ann.is_visible_at(time_s):
+                ann.ann_duration = time_s - ann.frame_time
+
     def _split_clip_for_gap(self, clip: VideoClip, time_s: float, gap_duration: float) -> None:
         left_duration = time_s - clip.start_time
         split_trim = clip.trim_start + left_duration
@@ -2026,12 +2255,18 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         return None
 
     def _cached_clip_media_problem(self, clip: VideoClip) -> str | None:
-        path = Path(clip.path)
-        try:
-            stat = path.stat()
-            key = (clip.id, clip.path, stat.st_mtime_ns, stat.st_size)
-        except FileNotFoundError:
-            key = (clip.id, clip.path, -1, -1)
+        now = time.monotonic()
+        checked = self._media_stat_cache.get((clip.id, clip.path))
+        if checked is not None and 0 <= now - checked[0] < _MEDIA_STAT_TTL:
+            key = checked[1]
+        else:
+            path = Path(clip.path)
+            try:
+                stat = path.stat()
+                key = (clip.id, clip.path, stat.st_mtime_ns, stat.st_size)
+            except FileNotFoundError:
+                key = (clip.id, clip.path, -1, -1)
+            self._media_stat_cache[(clip.id, clip.path)] = (now, key)
         if key not in self._media_problem_cache:
             self._media_problem_cache[key] = self._clip_media_problem(clip)
         return self._media_problem_cache[key]
@@ -2125,6 +2360,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self._mark_dirty(history=False)
 
     def _set_panel(self, panel: PanelType) -> None:
+        self._flush_pending_edits()
         self.project.active_panel = panel
         diagnostics.log("panel_switch", panel=panel)
         self._mark_dirty(history=False)
@@ -2403,6 +2639,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             return
         duration_s = duration_ms / 1000
         if duration_s > 0:
+            before = self._clip_media_signature(clip)
             old_duration = clip.duration
             clip.duration = duration_s
             if clip.source_in_limit is not None:
@@ -2419,7 +2656,21 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
                 clip.trim_end = source_end
                 self.project.arrange_clips_without_overlap()
             self.project.duration = max(self.project.duration, clip.start_time + clip.display_duration)
-            self._mark_dirty()
+            # Qt re-emits durationChanged whenever a source loads (open, undo,
+            # clip boundaries). Only a corrected value is a project change, and
+            # it is saved without an undo step.
+            if self._clip_media_signature(clip) != before:
+                self._mark_dirty(history=False)
+
+    @staticmethod
+    def _clip_media_signature(clip: VideoClip) -> tuple:
+        return (
+            clip.duration,
+            clip.trim_start,
+            clip.trim_end,
+            clip.source_in_limit,
+            clip.source_out_limit,
+        )
 
     # ── SAM / annotations ─────────────────────────────────────────────────
 
@@ -2450,7 +2701,25 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             if ann.id == annotation_id:
                 ann.ann_duration = max(0.0, duration)
                 break
-        self._mark_dirty(review_relevant=True)
+        self._mark_annotation_inspector_edit()
+
+    def _mark_annotation_inspector_edit(self) -> None:
+        # While a spinbox or slider gesture is open the edit is history-less
+        # (review already reset when it began); the gesture's end pushes the
+        # one undo snapshot. A direct call outside a gesture is a single step.
+        if self.labels_panel.gesture.pending:
+            # Reset review again if it was re-confirmed while this gesture was
+            # still open (the same rule as the audio and slide panels).
+            project = self.project
+            reconfirmed = bool(
+                project.phi_review_confirmed
+                or project.deidentified_confirmed
+                or project.audio_reviewed_for_phi
+                or project.phi_review_progress
+            )
+            self._mark_dirty(history=False, review_relevant=reconfirmed)
+        else:
+            self._mark_dirty(review_relevant=True)
 
     def _find_annotation(self, annotation_id: str) -> Annotation | None:
         return next((a for a in self.project.annotations if a.id == annotation_id), None)
@@ -2477,19 +2746,19 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         ann = self._find_annotation(annotation_id)
         if ann is not None:
             ann.font_size = max(8, int(size))
-            self._mark_dirty(review_relevant=True)
+            self._mark_annotation_inspector_edit()
 
     def _update_annotation_stroke(self, annotation_id: str, width: int) -> None:
         ann = self._find_annotation(annotation_id)
         if ann is not None:
             ann.geometry["width_px"] = float(max(1, int(width)))
-            self._mark_dirty(review_relevant=True)
+            self._mark_annotation_inspector_edit()
 
     def _update_annotation_opacity(self, annotation_id: str, opacity: float) -> None:
         ann = self._find_annotation(annotation_id)
         if ann is not None:
             ann.opacity = max(0.05, min(1.0, float(opacity)))
-            self._mark_dirty(review_relevant=True)
+            self._mark_annotation_inspector_edit()
 
     def _update_annotation_show_label(self, annotation_id: str, show: bool) -> None:
         ann = self._find_annotation(annotation_id)
@@ -2580,6 +2849,10 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         """Delete mask PNGs no longer referenced by the saved/live project or any
         undo/redo snapshot. Runs only at close so deleting a mask annotation stays undoable
         for the whole session."""
+        if getattr(self, "_preserved_unreadable", None) is not None:
+            return  # a preserved unreadable autosave may still reference these assets
+        if any(self.store.project_path.parent.glob("project.unreadable-*.json")):
+            return  # ...including one preserved by an earlier session
         masks_dir = self.store.project_path.parent / "masks"
         history_snapshots = [
             json.loads(snapshot) for snapshot in (*self._undo_stack, *self._redo_stack)
@@ -2599,6 +2872,9 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         a worker stuck in an uninterruptible torch/ffmpeg C call is force-terminated
         after a grace period. Returns True if any thread had to be force-terminated
         (heap may be inconsistent — the caller should exit immediately)."""
+        shutdown_audio = getattr(self.audio_panel, "shutdown_audio_import", None)
+        if shutdown_audio is not None:
+            shutdown_audio()
         pairs = [
             ("_export_thread", "_export_worker"),
             ("_import_thread", "_import_worker"),
@@ -2633,15 +2909,37 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         return force_terminated
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        self._flush_pending_edits()
         if self.audio_panel.recording_pending:
             self.audio_panel.status.setText("Stop recording and wait for it to finish before closing.")
             self.statusBar().showMessage("Stop recording and wait for it to finish before closing.", 6000)
             event.ignore()
             return
+        if self._has_active_background_job():
+            reply = QMessageBox.question(
+                self,
+                "Work in progress",
+                "An export or SAM job is still running. Closing now will cancel it "
+                "and its result will be lost. Close anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
         # Save BEFORE touching threads, while the heap is known-good — if a worker
         # later has to be force-terminated mid-allocation, the project is already
         # safely on disk. Never close silently after a failed dirty save.
         if self.dirty:
+            blocked_path = getattr(self, "_autosave_blocked_path", None)
+            if blocked_path is not None and self.store.project_path == blocked_path:
+                QMessageBox.warning(
+                    self, "Save As required",
+                    "The unreadable autosave could not be moved aside. Use Save As "
+                    "to keep your new work before closing; the original file will be preserved.",
+                )
+                event.ignore()
+                return
             try:
                 self.store.save(self.project)
                 self.dirty = False
@@ -2652,7 +2950,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
                 return
         self._closing = True
         self.audio_preview.stop()
-        for timer_attr in ("autosave_timer", "_sam_heartbeat_timer"):
+        for timer_attr in ("autosave_timer", "_sam_heartbeat_timer",
+                           "_startup_sam_timer", "_startup_tutorial_timer"):
             timer = getattr(self, timer_attr, None)
             if timer is not None:
                 timer.stop()

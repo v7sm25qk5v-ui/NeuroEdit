@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from neuroedit_desktop.captions import build_caption_cues
 from neuroedit_desktop.models import ProjectState
 from neuroedit_desktop.ui.project_library import relative_time
 from neuroedit_desktop.ui.styles import TEXT_MUTED
@@ -239,6 +240,15 @@ class StorageLocationDialog(QDialog):
         return recommended_project_root()
 
 
+# Key in project.phi_review_progress for "caption text was read for PHI". It is
+# cleared with the rest of the progress whenever review-relevant content changes.
+TRANSCRIPT_REVIEW_KEY = "transcript"
+
+
+def project_has_transcript_text(project: ProjectState) -> bool:
+    return any(segment.text.strip() for segment in project.transcript_segments)
+
+
 class PhiReviewDialog(QDialog):
     """Guided PHI review: steps the playhead through each timeline item that
     needs human eyes (clips, stills/slides, audio) with a what-to-look-for hint.
@@ -269,6 +279,7 @@ class PhiReviewDialog(QDialog):
         self.progress_label = QLabel()
         self.progress_label.setProperty("role", "title")
         self.item_label = QLabel()
+        self.item_label.setTextFormat(Qt.TextFormat.PlainText)
         self.item_label.setWordWrap(True)
         self.hint_label = QLabel()
         self.hint_label.setProperty("role", "muted")
@@ -343,6 +354,24 @@ class PhiReviewDialog(QDialog):
                     track.start_time,
                 )
             )
+        if project_has_transcript_text(project):
+            text = "\n".join(cue.text for cue in build_caption_cues(project.transcript_segments))
+            if len(text) > 800:
+                text = text[:800] + "…\n(Only the start is shown here. Read the rest on the Audio panel.)"
+            first = min(
+                (s.start_time for s in project.transcript_segments if s.text.strip()),
+                default=0.0,
+            )
+            stops.append(
+                (
+                    TRANSCRIPT_REVIEW_KEY,
+                    f"Caption text:\n{text}",
+                    "Read the caption text for patient names, MRNs, or dates. "
+                    "Captions can be burned into the video or saved as SRT/VTT "
+                    "files; edit the text on the Audio panel if needed.",
+                    first,
+                )
+            )
         return stops
 
     def progress_dict(self) -> dict:
@@ -408,6 +437,7 @@ class ExportChecklistDialog(QDialog):
         *,
         export_includes_audio: bool,
         keeps_source_audio: bool,
+        burns_captions: bool = False,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -460,7 +490,19 @@ class ExportChecklistDialog(QDialog):
         self.audio_check.toggled.connect(self._update_audio_warning)
         self._update_audio_warning()
 
-        for check in (self.phi_check, self.deid_check, self.consent_check):
+        # Burned-in caption text cannot be covered after export, and it is shown
+        # even when the export has no audio.
+        self._reviews_captions = burns_captions and project_has_transcript_text(project)
+        self.caption_check = QCheckBox(
+            "The caption text was checked for patient information\n"
+            "(names, MRNs, dates)"
+        )
+        self.caption_check.setChecked(
+            bool((project.phi_review_progress or {}).get(TRANSCRIPT_REVIEW_KEY))
+        )
+        self.caption_check.setVisible(self._reviews_captions)
+
+        for check in (self.phi_check, self.deid_check, self.consent_check, self.caption_check):
             check.toggled.connect(self._update_ok_enabled)
 
         self.buttons = QDialogButtonBox(
@@ -481,6 +523,7 @@ class ExportChecklistDialog(QDialog):
         layout.addWidget(self.consent_check)
         layout.addWidget(self.audio_warning)
         layout.addWidget(self.audio_check)
+        layout.addWidget(self.caption_check)
         layout.addWidget(self.buttons)
         self._update_ok_enabled()
 
@@ -493,6 +536,7 @@ class ExportChecklistDialog(QDialog):
             self.phi_check.isChecked()
             and self.deid_check.isChecked()
             and self.consent_check.isChecked()
+            and (not self._reviews_captions or self.caption_check.isChecked())
         )
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(required_ok)
 
@@ -509,6 +553,13 @@ class ExportChecklistDialog(QDialog):
         project.consent_confirmed = self.consent_check.isChecked()
         if self._export_includes_audio:
             project.audio_reviewed_for_phi = self.audio_check.isChecked()
+        if self._reviews_captions:
+            progress = dict(project.phi_review_progress or {})
+            if self.caption_check.isChecked():
+                progress[TRANSCRIPT_REVIEW_KEY] = True
+            else:
+                progress.pop(TRANSCRIPT_REVIEW_KEY, None)
+            project.phi_review_progress = progress
 
 
 def recommended_preset_key(project: ProjectState | None) -> tuple[str, str]:
@@ -653,7 +704,9 @@ class ExportDialog(QDialog):
         self.crf_spin.setRange(12, 32)
         self.crf_spin.setToolTip(
             "Constant Rate Factor: lower = higher quality and bigger files. "
-            "18–23 is the practical range for most exports."
+            "18–23 is the practical range for most exports. Applies to the "
+            "software encoder only: when the Mac hardware encoder is used, "
+            "quality is fixed by resolution and this setting is ignored."
         )
         self.fps_combo = QComboBox()
         for fps_value in (24, 25, 30, 50, 60):

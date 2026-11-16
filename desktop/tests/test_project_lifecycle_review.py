@@ -38,7 +38,8 @@ def test_failed_close_keeps_autosave_and_heartbeat_running(monkeypatch) -> None:
     def fail_save(_project) -> None:
         raise OSError("Disk unavailable")
 
-    window.store = SimpleNamespace(save=fail_save)
+    window.store = SimpleNamespace(save=fail_save, project_path=Path("project.json"))
+    window._autosave_blocked_path = None
     monkeypatch.setattr(module.QMessageBox, "critical", lambda *args: errors.append(args))
     window._shutdown_threads = lambda: pytest.fail("Canceled close must keep workers alive")
 
@@ -122,6 +123,11 @@ def test_new_project_cleanup_preserves_masks_in_saved_autosave(monkeypatch, tmp_
     window._update_title = lambda: None
     window.refresh = lambda: None
     monkeypatch.setattr(module, "default_project_root", lambda: tmp_path)
+    # A clean non-empty scratch case is now asked about (NE-018); choose Discard.
+    monkeypatch.setattr(
+        module.QMessageBox, "question",
+        lambda *a, **k: module.QMessageBox.StandardButton.Discard,
+    )
 
     window._new_project()
 

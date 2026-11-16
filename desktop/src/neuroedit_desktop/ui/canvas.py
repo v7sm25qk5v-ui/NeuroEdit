@@ -4,7 +4,16 @@ import math
 import time
 
 from PySide6.QtCore import QPointF, QRectF, QSizeF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QFont, QFontMetricsF, QPainter, QPen, QPixmap, QPolygonF
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QFont,
+    QFontMetricsF,
+    QPainter,
+    QPen,
+    QPixmap,
+    QPolygonF,
+)
 from PySide6.QtMultimedia import QVideoFrame
 from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 from PySide6.QtWidgets import QFrame, QGraphicsObject, QGraphicsPixmapItem, QGraphicsScene, QGraphicsView, QWidget
@@ -12,6 +21,7 @@ from PySide6.QtWidgets import QFrame, QGraphicsObject, QGraphicsPixmapItem, QGra
 from neuroedit_desktop import diagnostics
 from neuroedit_desktop.captions import CaptionCue, build_caption_cues, cue_at_time, paint_caption
 from neuroedit_desktop.models import Annotation, ProjectState, new_id
+from neuroedit_desktop.stills import read_upright_image
 
 
 def _distance_to_segment(
@@ -894,7 +904,8 @@ class VideoGraphicsView(QGraphicsView):
             self.image_item.setVisible(False)
             self.video_item.setVisible(True)
             return
-        pix = QPixmap(path)
+        # Same decoder as import and export, so orientation always agrees.
+        pix = QPixmap.fromImage(read_upright_image(path))
         if pix.isNull():
             self.image_item.setVisible(False)
             self.video_item.setVisible(True)
@@ -954,14 +965,14 @@ class VideoGraphicsView(QGraphicsView):
         ):
             self.annotation_item.update()
 
-    def _scene_to_norm(self, event_pos) -> tuple[float, float] | None:
+    def _scene_to_norm(self, event_pos, clamp: bool = False) -> tuple[float, float] | None:
         scene_pos = self.mapToScene(event_pos)
         rect = self.video_item.boundingRect()
         if rect.width() <= 0 or rect.height() <= 0:
             return None
         x = scene_pos.x() / rect.width()
         y = scene_pos.y() / rect.height()
-        if x < 0 or x > 1 or y < 0 or y > 1:
+        if not clamp and (x < 0 or x > 1 or y < 0 or y > 1):
             return None
         return max(0.0, min(1.0, x)), max(0.0, min(1.0, y))
 
@@ -1067,7 +1078,8 @@ class VideoGraphicsView(QGraphicsView):
                     return
             self.setCursor(Qt.CursorShape.ArrowCursor)
         if self._drag_start and project.active_tool in {"rect", "ellipse", "arrow", "redact"}:
-            norm = self._scene_to_norm(event.position().toPoint())
+            # Once started, the drag follows the pointer along the frame edge.
+            norm = self._scene_to_norm(event.position().toPoint(), clamp=True)
             if norm is not None:
                 self._drag_current = norm
                 preview = self._build_drag_annotation(project, self._drag_start, norm)
@@ -1101,7 +1113,7 @@ class VideoGraphicsView(QGraphicsView):
                 self.edit_committed.emit()
             return
         if self._drag_start and project.active_tool in {"rect", "ellipse", "arrow", "redact"}:
-            end_norm = self._scene_to_norm(event.position().toPoint())
+            end_norm = self._scene_to_norm(event.position().toPoint(), clamp=True)
             start_norm = self._drag_start
             self._drag_start = None
             self._drag_current = None

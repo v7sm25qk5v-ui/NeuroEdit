@@ -5,13 +5,18 @@
 # branches. Keep feature work in src/ so it carries to all platforms automatically.
 
 import sys
-import os
+import tomllib
+from importlib.metadata import version
+
+from PyInstaller.utils.hooks import copy_metadata
 from pathlib import Path
 
 IS_MACOS = sys.platform == "darwin"
 IS_WINDOWS = sys.platform == "win32"
 # Keep alpha labels in artifact names; platform bundle versions stay numeric.
-APP_VERSION = os.environ.get("NEUROEDIT_VERSION", "0.5.16").removeprefix("v").split("-")[0]
+APP_VERSION = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+if version("neuroedit-desktop") != APP_VERSION:
+    raise ValueError("Installed package version does not match pyproject.toml")
 APP_BUILD_VERSION = APP_VERSION
 
 ROOT = Path.cwd()
@@ -26,7 +31,7 @@ elif IS_WINDOWS:
 else:
     APP_ICON = str(RESOURCES / "icon_256.png") if (RESOURCES / "icon_256.png").exists() else None
 
-datas = []
+datas = copy_metadata("neuroedit-desktop")
 if RESOURCES.exists():
     datas.append((str(RESOURCES), "neuroedit_desktop/resources"))
 

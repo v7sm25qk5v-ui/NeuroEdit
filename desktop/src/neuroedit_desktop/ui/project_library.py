@@ -30,22 +30,22 @@ def _clip_display_duration(clip: dict) -> float:
     return max(0.0, float(clip.get("trim_end") or 0.0) - float(clip.get("trim_start") or 0.0))
 
 
-def relative_time(ts: float) -> str:
+def relative_time(ts: float, verb: str = "Opened") -> str:
     now = datetime.datetime.now()
     dt = datetime.datetime.fromtimestamp(ts)
     delta = now - dt
     days = delta.days
     if days < 1:
-        return "Opened today"
+        return f"{verb} today"
     if days == 1:
-        return "Opened yesterday"
+        return f"{verb} yesterday"
     if days < 7:
-        return f"Opened {days} days ago"
+        return f"{verb} {days} days ago"
     if days < 14:
-        return "Opened last week"
+        return f"{verb} last week"
     if days < 28:
         weeks = days // 7
-        return f"Opened {weeks} weeks ago"
+        return f"{verb} {weeks} weeks ago"
     # No strftime "%-d": that flag is platform-specific and raises on Windows.
     return f"{dt.strftime('%b')} {dt.day}, {dt.year}"
 
@@ -243,7 +243,7 @@ class ProjectLibraryDialog(QDialog):
             meta = entry["meta"]
             project_name = self._entry_display_name(entry)
 
-            modified = relative_time(entry["mtime"]) if entry["mtime"] else ""
+            modified = relative_time(entry["mtime"], "Modified") if entry["mtime"] else ""
 
             dur = meta["total_duration"]
             if dur > 0:

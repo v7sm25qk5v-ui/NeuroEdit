@@ -20,16 +20,9 @@ from PySide6.QtWidgets import (
 )
 
 from neuroedit_desktop.models import Annotation, ProjectState
-from neuroedit_desktop.ui.styles import (
-    BG_CARD,
-    BG_HOVER,
-    BORDER,
-    BORDER_BRIGHT,
-    DANGER,
-    TEXT_MUTED,
-    TEXT_PRIMARY,
-    TEXT_SECONDARY,
-)
+from neuroedit_desktop.ui.edit_gesture import EditGesture
+# Read tokens as styles.NAME at use time (see restyle_presets).
+from neuroedit_desktop.ui import styles
 
 SWATCH_COLORS = [
     "#00e5ff",
@@ -111,8 +104,11 @@ class LabelsPanel(QWidget):
         super().__init__(parent)
         self.project = project
         self._refreshing = False
+        # Spinbox and slider edits mutate the annotation live; one undo step per gesture.
+        self.gesture = EditGesture(self)
         self.list_widget = QListWidget()
         self.list_widget.itemDoubleClicked.connect(self._seek_item)
+        self.list_widget.currentItemChanged.connect(self._commit_before_selection)
         self.list_widget.currentItemChanged.connect(self._load_selected)
         self.list_widget.currentItemChanged.connect(self._emit_selection)
 
@@ -129,6 +125,7 @@ class LabelsPanel(QWidget):
         self.duration_input.setSuffix(" s")
         self.duration_input.setToolTip("0 seconds keeps the label visible for the rest of the timeline.")
         self.duration_input.valueChanged.connect(self._duration_changed)
+        self.duration_input.editingFinished.connect(self.gesture.commit)
 
         self.font_size_input = QDoubleSpinBox()
         self.font_size_input.setDecimals(0)
@@ -136,6 +133,7 @@ class LabelsPanel(QWidget):
         self.font_size_input.setSingleStep(1)
         self.font_size_input.setSuffix(" pt")
         self.font_size_input.valueChanged.connect(self._font_size_changed)
+        self.font_size_input.editingFinished.connect(self.gesture.commit)
 
         self.stroke_input = QDoubleSpinBox()
         self.stroke_input.setDecimals(0)
@@ -143,10 +141,15 @@ class LabelsPanel(QWidget):
         self.stroke_input.setSingleStep(1)
         self.stroke_input.setSuffix(" px")
         self.stroke_input.valueChanged.connect(self._stroke_changed)
+        self.stroke_input.editingFinished.connect(self.gesture.commit)
 
         self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self.opacity_slider.setRange(10, 100)
         self.opacity_slider.valueChanged.connect(self._opacity_slider_changed)
+        self.opacity_slider.sliderPressed.connect(self.gesture.commit)
+        self.opacity_slider.sliderReleased.connect(self.gesture.commit)
+        for spin in (self.duration_input, self.font_size_input, self.stroke_input):
+            spin.setKeyboardTracking(False)
 
         self._color_row = QHBoxLayout()
         self._color_row.setSpacing(4)
@@ -173,11 +176,7 @@ class LabelsPanel(QWidget):
 
         self._presets_toggle = QPushButton("▸  Quick Label Presets")
         self._presets_toggle.setCheckable(True)
-        self._presets_toggle.setStyleSheet(
-            f"QPushButton {{ text-align: left; border: none; background: transparent;"
-            f"  color: {TEXT_MUTED}; padding: 2px 0; font-size: 11px; }}"
-            f"QPushButton:hover {{ color: {TEXT_PRIMARY}; }}"
-        )
+        self._presets_toggle.setStyleSheet(self._toggle_css())
         self._presets_toggle.clicked.connect(self._toggle_presets)
         layout.addWidget(self._presets_toggle)
 
@@ -195,6 +194,7 @@ class LabelsPanel(QWidget):
         self._builtin_grid.setContentsMargins(0, 0, 0, 0)
         self._builtin_grid.setHorizontalSpacing(6)
         self._builtin_grid.setVerticalSpacing(6)
+        self._builtin_buttons: list[tuple[QPushButton, str]] = []
         for idx, (label, color) in enumerate(ANATOMY_PRESETS):
             btn = QPushButton(label)
             btn.setToolTip(f"Use label: {label}")
@@ -203,12 +203,8 @@ class LabelsPanel(QWidget):
                     self.preset_selected.emit(preset_label, c)
                 )
             )
-            btn.setStyleSheet(
-                f"QPushButton {{ color: {color}; border: 1px solid {BORDER};"
-                f" background: {BG_CARD}; border-radius: 10px;"
-                f" padding: 5px 7px; font-size: 10px; text-align: left; }}"
-                f"QPushButton:hover {{ border-color: {color}; background: {BG_HOVER}; }}"
-            )
+            btn.setStyleSheet(self._builtin_css(color))
+            self._builtin_buttons.append((btn, color))
             self._builtin_grid.addWidget(btn, idx // 2, idx % 2)
         presets_layout.addWidget(builtin_grid_widget)
 
@@ -302,6 +298,10 @@ class LabelsPanel(QWidget):
         layout.addWidget(self._inspector)
 
     def set_project(self, project: ProjectState) -> None:
+        # A pending edit was committed by the main window before the project
+        # was replaced; anything left belongs to the old project.
+        if project is not self.project:
+            self.gesture.reset()
         self.project = project
         self.refresh()
 
@@ -322,6 +322,8 @@ class LabelsPanel(QWidget):
         self._load_selected()
 
     def set_selected_annotation(self, ann_id: str | None) -> None:
+        if ann_id != self._selected_id():
+            self.gesture.commit()
         self._refreshing = True
         if ann_id is None:
             self.list_widget.setCurrentItem(None)
@@ -344,6 +346,30 @@ class LabelsPanel(QWidget):
             return None
         return next((ann for ann in self.project.annotations if ann.id == ann_id), None)
 
+    @staticmethod
+    def _toggle_css() -> str:
+        return (
+            f"QPushButton {{ text-align: left; border: none; background: transparent;"
+            f"  color: {styles.TEXT_MUTED}; padding: 2px 0; font-size: 11px; }}"
+            f"QPushButton:hover {{ color: {styles.TEXT_PRIMARY}; }}"
+        )
+
+    @staticmethod
+    def _builtin_css(color: str) -> str:
+        return (
+            f"QPushButton {{ color: {color}; border: 1px solid {styles.BORDER};"
+            f" background: {styles.BG_CARD}; border-radius: 10px;"
+            f" padding: 5px 7px; font-size: 10px; text-align: left; }}"
+            f"QPushButton:hover {{ border-color: {color}; background: {styles.BG_HOVER}; }}"
+        )
+
+    def restyle_presets(self) -> None:
+        """Re-apply the preset button styles after a theme switch."""
+        self._presets_toggle.setStyleSheet(self._toggle_css())
+        for btn, color in self._builtin_buttons:
+            btn.setStyleSheet(self._builtin_css(color))
+        self._refresh_custom_grid()
+
     def _toggle_presets(self) -> None:
         visible = self._presets_toggle.isChecked()
         self._presets_container.setVisible(visible)
@@ -365,18 +391,18 @@ class LabelsPanel(QWidget):
                 lambda _=False, pl=preset_label: self.preset_selected.emit(pl, self.project.draw_color)
             )
             btn.setStyleSheet(
-                f"QPushButton {{ color: {TEXT_SECONDARY}; border: 1px solid {BORDER};"
-                f" background: {BG_CARD}; border-radius: 10px;"
+                f"QPushButton {{ color: {styles.TEXT_SECONDARY}; border: 1px solid {styles.BORDER};"
+                f" background: {styles.BG_CARD}; border-radius: 10px;"
                 f" padding: 5px 7px; font-size: 10px; text-align: left; }}"
-                f"QPushButton:hover {{ border-color: {BORDER_BRIGHT}; background: {BG_HOVER}; }}"
+                f"QPushButton:hover {{ border-color: {styles.BORDER_BRIGHT}; background: {styles.BG_HOVER}; }}"
             )
             remove_btn = QPushButton("×")
             remove_btn.setFixedSize(18, 18)
             remove_btn.setToolTip(f"Remove preset: {preset_label}")
             remove_btn.setStyleSheet(
-                f"QPushButton {{ color: {TEXT_MUTED}; border: none; background: transparent;"
+                f"QPushButton {{ color: {styles.TEXT_MUTED}; border: none; background: transparent;"
                 f" font-size: 12px; padding: 0; }}"
-                f"QPushButton:hover {{ color: {DANGER}; }}"
+                f"QPushButton:hover {{ color: {styles.DANGER}; }}"
             )
             remove_btn.clicked.connect(lambda _=False, pl=preset_label: self._remove_custom_preset(pl))
             row_layout.addWidget(btn, 1)
@@ -437,11 +463,16 @@ class LabelsPanel(QWidget):
                 f"QPushButton:hover {{ border-color: white; }}"
             )
 
+    def _commit_before_selection(self) -> None:
+        if not self._refreshing:
+            self.gesture.commit()
+
     def _duration_changed(self, value: float) -> None:
         if self._refreshing:
             return
         ann_id = self._selected_id()
         if ann_id:
+            self.gesture.begin(self.sender())
             self.duration_changed.emit(ann_id, float(value))
 
     def _label_text_edited(self) -> None:
@@ -449,11 +480,13 @@ class LabelsPanel(QWidget):
             return
         ann_id = self._selected_id()
         if ann_id:
+            self.gesture.commit()
             self.label_text_changed.emit(ann_id, self.label_edit.text())
 
     def _color_clicked(self, color: str) -> None:
         ann_id = self._selected_id()
         if ann_id:
+            self.gesture.commit()
             self.color_changed.emit(ann_id, color)
 
     def _font_size_changed(self, value: float) -> None:
@@ -461,6 +494,7 @@ class LabelsPanel(QWidget):
             return
         ann_id = self._selected_id()
         if ann_id:
+            self.gesture.begin(self.sender())
             self.font_size_changed.emit(ann_id, int(value))
 
     def _show_label_changed(self, checked: bool) -> None:
@@ -468,6 +502,7 @@ class LabelsPanel(QWidget):
             return
         ann_id = self._selected_id()
         if ann_id:
+            self.gesture.commit()
             self.show_label_changed.emit(ann_id, checked)
 
     def _stroke_changed(self, value: float) -> None:
@@ -475,6 +510,7 @@ class LabelsPanel(QWidget):
             return
         ann_id = self._selected_id()
         if ann_id:
+            self.gesture.begin(self.sender())
             self.stroke_width_changed.emit(ann_id, int(value))
 
     def _opacity_slider_changed(self, value: int) -> None:
@@ -482,7 +518,11 @@ class LabelsPanel(QWidget):
             return
         ann_id = self._selected_id()
         if ann_id:
+            self.gesture.begin(self.sender())
             self.opacity_changed.emit(ann_id, float(value) / 100.0)
+            if not self.opacity_slider.isSliderDown():
+                # Arrow key, wheel or page click: no sliderReleased will follow.
+                self.gesture.touch_idle()
 
     def _emit_selection(self) -> None:
         if self._refreshing:
@@ -496,21 +536,25 @@ class LabelsPanel(QWidget):
     def _delete_selected(self) -> None:
         item = self.list_widget.currentItem()
         if item:
+            self.gesture.commit()
             self.delete_requested.emit(str(item.data(Qt.ItemDataRole.UserRole)))
 
     def _duplicate_selected(self) -> None:
         ann_id = self._selected_id()
         if ann_id:
+            self.gesture.commit()
             self.duplicate_requested.emit(ann_id)
 
     def _set_start_to_playhead(self) -> None:
         ann_id = self._selected_id()
         if ann_id:
+            self.gesture.commit()
             self.set_start_to_playhead.emit(ann_id)
 
     def _set_end_to_playhead(self) -> None:
         ann_id = self._selected_id()
         if ann_id:
+            self.gesture.commit()
             self.set_end_to_playhead.emit(ann_id)
 
     def _seek_item(self, item: QListWidgetItem) -> None:

@@ -1,9 +1,14 @@
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QUrl, Signal
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 
 from neuroedit_desktop.models import ProjectState
+
+
+# Seconds a narration file's existence check is trusted between playback ticks.
+_EXISTS_TTL = 1.0
 
 
 class AudioPreview(QObject):
@@ -15,6 +20,15 @@ class AudioPreview(QObject):
         super().__init__(parent)
         self._players = {}
         self._project = None
+        self._exists_cache: dict[str, tuple[float, bool]] = {}
+
+    def _file_exists(self, path: str, now: float, *, fresh: bool) -> bool:
+        cached = self._exists_cache.get(path)
+        if not fresh and cached is not None and 0 <= now - cached[0] < _EXISTS_TTL:
+            return cached[1]
+        exists = Path(path).exists()
+        self._exists_cache[path] = (now, exists)
+        return exists
 
     def stop(self) -> None:
         for entry in self._players.values():
@@ -22,18 +36,20 @@ class AudioPreview(QObject):
             entry["player"].deleteLater()
             entry["output"].deleteLater()
         self._players.clear()
+        self._exists_cache.clear()
 
     def sync(self, project: ProjectState, playing: bool, *, seek: bool = False) -> None:
         if self._project is not project:
             self.stop()
             self._project = project
+        now = time.monotonic()
         active = (
             {
                 track.id: track
                 for track in project.audio_tracks
                 if track.duration > 0
                 and track.volume > 0
-                and Path(track.path).exists()
+                and self._file_exists(track.path, now, fresh=seek)
                 and track.start_time <= project.current_time < track.start_time + track.duration
             }
             if playing

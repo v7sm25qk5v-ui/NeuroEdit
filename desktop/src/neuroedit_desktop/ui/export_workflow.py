@@ -13,9 +13,11 @@ from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox, QProgressDialog
 from neuroedit_desktop import diagnostics
 from neuroedit_desktop.models import ProjectState
 from neuroedit_desktop.ui.dialogs import (
+    TRANSCRIPT_REVIEW_KEY,
     ExportChecklistDialog,
     ExportDialog,
     ExportHistoryDialog,
+    project_has_transcript_text,
     record_export_history,
 )
 from neuroedit_desktop.ui.editor_panels import (
@@ -35,6 +37,7 @@ def project_export_includes_audio(project: ProjectState, *, keeps_source_audio: 
 
 class ExportWorkflowMixin:
     def _export_project(self) -> None:
+        self._flush_pending_edits()  # an open slider/text edit belongs in this export's history
         self.project.duration = self._project_end_time()
         if self.project.duration <= 0 or (not self.project.clips and not self.project.slides):
             QMessageBox.information(self, "Export", "Add at least one clip or slide before exporting.")
@@ -76,6 +79,7 @@ class ExportWorkflowMixin:
             self.project,
             export_includes_audio=includes_audio,
             keeps_source_audio=keeps_source_audio,
+            burns_captions=dialog.burn_captions_check.isChecked(),
             parent=self,
         )
         if checklist.exec() != QDialog.DialogCode.Accepted:
@@ -108,6 +112,8 @@ class ExportWorkflowMixin:
     def _export_captions(self) -> None:
         from neuroedit_desktop.captions import build_caption_cues, cues_to_srt, cues_to_vtt
 
+        self._flush_pending_edits()
+
         if not self.project.transcript_segments:
             QMessageBox.information(
                 self,
@@ -116,6 +122,24 @@ class ExportWorkflowMixin:
                 "Audio panel first.",
             )
             return
+        if project_has_transcript_text(self.project) and not (
+            self.project.phi_review_progress or {}
+        ).get(TRANSCRIPT_REVIEW_KEY):
+            reply = QMessageBox.question(
+                self,
+                "Export Captions",
+                "Caption files contain the full transcript text.\n\n"
+                "Have you checked it for patient names, MRNs, and dates?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            self.project.phi_review_progress = {
+                **(self.project.phi_review_progress or {}),
+                TRANSCRIPT_REVIEW_KEY: True,
+            }
+            self._mark_dirty(history=False)
         default_name = self._safe_export_name(self.project.project_name)
         default_path = Path.home() / "Movies" / f"{default_name}.srt"
         path_str, selected_filter = QFileDialog.getSaveFileName(
@@ -179,6 +203,7 @@ class ExportWorkflowMixin:
         self._export_worker_settings = settings
         self._export_started_perf = time.perf_counter()
         self._export_first_progress_logged = False
+        diagnostics.log_ffmpeg()
         diagnostics.log(
             "export_start",
             width=settings.width, height=settings.height,
@@ -284,19 +309,12 @@ class ExportWorkflowMixin:
         report_path = output_path.with_suffix(".export-report.txt")
         preflight = project_preflight_warnings(project)
         lines = [
-            f"NeuroEdit Export Report: {project.project_name}",
-            f"Video goal: {project.video_goal}",
-            f"Audience: {project.intended_audience or 'Not specified'}",
+            "NOTE: This report may contain case notes and is not de-identified. "
+            "Review it before sharing it outside your team.",
+            "NeuroEdit Export Report",
             f"Timeline duration: {format_time(project.duration)}",
-            "",
-            "Storyboard",
-            f"Objective: {project.storyboard_objective or 'Not specified'}",
-            f"Case context: {project.storyboard_case_context or 'Not specified'}",
-            f"Key anatomy: {project.storyboard_key_anatomy or 'Not specified'}",
-            f"Operative steps: {project.storyboard_steps or 'Not specified'}",
-            f"Decision points: {project.storyboard_decision_points or 'Not specified'}",
-            f"Pearl/pitfall: {project.storyboard_teaching_pearl or 'Not specified'}",
-            f"Final point: {project.storyboard_final_point or 'Not specified'}",
+            "Free-text fields (project name, video goal, audience, storyboard, "
+            "edit disclosure) are not included.",
             "",
             "Privacy / distribution",
             f"Consent/authorization confirmed: {project.consent_confirmed}",
@@ -304,7 +322,6 @@ class ExportWorkflowMixin:
             f"De-identified: {project.deidentified_confirmed}",
             f"PHI review completed: {project.phi_review_confirmed}",
             f"Audio reviewed for spoken PHI: {project.audio_reviewed_for_phi}",
-            f"Edit disclosure: {project.edit_disclosure or 'Not specified'}",
             "",
             "Timeline counts",
             f"Video/image clips: {len(project.clips)}",

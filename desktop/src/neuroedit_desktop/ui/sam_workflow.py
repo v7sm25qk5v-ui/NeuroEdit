@@ -116,6 +116,18 @@ class SamWorkflowMixin:
                 cancel()
                 self.statusBar().showMessage("SAM: cancel requested…", 3000)
 
+    def _sam_thread_finished(self) -> None:
+        # A worker result can arrive before its QThread has actually stopped.
+        # Keep both references until this signal so closeEvent can always wait.
+        thread = self.sender()
+        thread.wait()  # finished may precede native thread-local cleanup
+        for job in ("probe", "download", "segment", "propagation"):
+            thread_attr = f"_sam_{job}_thread"
+            if getattr(self, thread_attr, None) is thread:
+                setattr(self, thread_attr, None)
+                setattr(self, f"_sam_{job}_worker", None)
+                break
+
     def _load_sam_backend(self) -> None:
         # Guard against double-calls while a probe is already in flight
         if getattr(self, "_sam_probe_thread", None) is not None:
@@ -132,6 +144,7 @@ class SamWorkflowMixin:
         self._sam_probe_worker.progress.connect(self._on_sam_probe_progress)
         self._sam_probe_worker.finished.connect(self._on_sam_probe_finished)
         self._sam_probe_worker.finished.connect(self._sam_probe_thread.quit)
+        self._sam_probe_thread.finished.connect(self._sam_thread_finished)
         self._sam_probe_thread.finished.connect(self._sam_probe_worker.deleteLater)
         self._sam_probe_thread.finished.connect(self._sam_probe_thread.deleteLater)
         self._sam_probe_thread.start()
@@ -142,8 +155,6 @@ class SamWorkflowMixin:
 
     def _on_sam_probe_finished(self, info) -> None:  # type: ignore[no-untyped-def]
         self._stop_sam_heartbeat()
-        self._sam_probe_thread = None
-        self._sam_probe_worker = None
         diagnostics.log("sam_job", job="probe", state="finished", status=info.status)
         cached = self.sam_backend.is_weights_cached()
         self.sam_panel.set_weights_cached(cached)
@@ -205,6 +216,8 @@ class SamWorkflowMixin:
         self._start_sam_download(dlg.token())
 
     def _start_sam_download(self, token: str) -> None:
+        if getattr(self, "_sam_download_thread", None) is not None:
+            return
         self.sam_panel.set_status("Downloading SAM3 weights…")
         self.sam_panel.set_busy(True)
         self.statusBar().showMessage("SAM3: downloading weights…")
@@ -216,14 +229,13 @@ class SamWorkflowMixin:
         self._sam_download_worker.progress.connect(self._on_sam_probe_progress)
         self._sam_download_worker.finished.connect(self._on_sam_download_finished)
         self._sam_download_worker.finished.connect(self._sam_download_thread.quit)
+        self._sam_download_thread.finished.connect(self._sam_thread_finished)
         self._sam_download_thread.finished.connect(self._sam_download_worker.deleteLater)
         self._sam_download_thread.finished.connect(self._sam_download_thread.deleteLater)
         self._sam_download_thread.start()
 
     def _on_sam_download_finished(self, info) -> None:  # type: ignore[no-untyped-def]
         self._stop_sam_heartbeat()
-        self._sam_download_thread = None
-        self._sam_download_worker = None
         diagnostics.log("sam_job", job="download", state="finished", status=info.status)
         cached = self.sam_backend.is_weights_cached()
         self.sam_panel.set_weights_cached(cached)
@@ -237,12 +249,28 @@ class SamWorkflowMixin:
         self.sam_panel.set_busy(False)
 
     def _delete_sam_weights(self) -> None:
-        import shutil
-        cache = self.sam_backend.weights_cache_dir()
+        busy = any(
+            getattr(self, attr, None) is not None
+            for attr in (
+                "_sam_segment_thread",
+                "_sam_propagation_thread",
+                "_sam_probe_thread",
+                "_sam_download_thread",
+            )
+        )
+        if busy:
+            QMessageBox.information(
+                self,
+                "SAM is busy",
+                "A SAM job is still running. Wait for it to finish or cancel it, "
+                "then delete the weights.",
+            )
+            return
         reply = QMessageBox.question(
             self,
             "Delete SAM3 weights?",
-            "This will permanently delete ~3.2 GB of cached SAM3 model weights.\n\n"
+            "This will permanently delete the cached SAM3 model weights (~3.2 GB) "
+            "and the SAM1 fallback weights, if present.\n\n"
             "SAM3 features will stop working until you re-download them.\n\n"
             "Delete the weights?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
@@ -250,12 +278,24 @@ class SamWorkflowMixin:
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        try:
-            shutil.rmtree(cache, ignore_errors=True)
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Delete failed", str(exc))
+        removed, failed = self.sam_backend.delete_weights()
+        # Trust the disk, not the delete call: re-check what is actually cached.
+        self.sam_panel.set_weights_cached(self.sam_backend.is_weights_cached())
+        if failed:
+            details = "\n".join(f"{path}: {reason}" for path, reason in failed)
+            diagnostics.log("sam_job", job="delete_weights", state="failed", count=len(failed))
+            self.sam_panel.set_status("Could not delete all SAM weights.")
+            self.statusBar().showMessage("SAM weights could not be fully deleted", 5000)
+            QMessageBox.critical(
+                self,
+                "Delete failed",
+                "Some SAM weight folders could not be removed:\n\n" + details,
+            )
             return
-        self.sam_panel.set_weights_cached(False)
+        if not removed:
+            self.sam_panel.set_status("No cached SAM weights found.")
+            self.statusBar().showMessage("No cached SAM weights found", 4000)
+            return
         self.sam_panel.set_status("SAM3 weights deleted. Re-open the SAM panel to set up again.")
         self.statusBar().showMessage("SAM3 weights deleted", 4000)
 
@@ -308,6 +348,7 @@ class SamWorkflowMixin:
         self._sam_segment_worker.progress.connect(self._on_segment_progress)
         self._sam_segment_worker.finished.connect(self._on_segment_finished)
         self._sam_segment_worker.finished.connect(self._sam_segment_thread.quit)
+        self._sam_segment_thread.finished.connect(self._sam_thread_finished)
         self._sam_segment_thread.finished.connect(self._sam_segment_worker.deleteLater)
         self._sam_segment_thread.finished.connect(self._sam_segment_thread.deleteLater)
         self._sam_segment_thread.start()
@@ -318,8 +359,6 @@ class SamWorkflowMixin:
 
     def _on_segment_finished(self, result, error) -> None:  # type: ignore[no-untyped-def]
         self._stop_sam_heartbeat()
-        self._sam_segment_thread = None
-        self._sam_segment_worker = None
         self.sam_panel.set_busy(False)
         context = getattr(self, "_sam_job_context", None) or {}
         if context.get("cancelled") or error == "cancelled":
@@ -520,6 +559,7 @@ class SamWorkflowMixin:
         self._sam_propagation_worker.progress.connect(self._on_propagation_progress)
         self._sam_propagation_worker.finished.connect(self._on_propagation_finished)
         self._sam_propagation_worker.finished.connect(self._sam_propagation_thread.quit)
+        self._sam_propagation_thread.finished.connect(self._sam_thread_finished)
         self._sam_propagation_thread.finished.connect(self._sam_propagation_worker.deleteLater)
         self._sam_propagation_thread.finished.connect(self._sam_propagation_thread.deleteLater)
         self._sam_propagation_thread.start()
@@ -541,8 +581,6 @@ class SamWorkflowMixin:
 
     def _on_propagation_finished(self, result, error) -> None:  # type: ignore[no-untyped-def]
         self._stop_sam_heartbeat()
-        self._sam_propagation_thread = None
-        self._sam_propagation_worker = None
         self.sam_panel.set_busy(False)
         context = getattr(self, "_sam_job_context", None) or {}
         if not self._sam_context_is_current(context):

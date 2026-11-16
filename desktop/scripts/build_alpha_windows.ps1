@@ -6,16 +6,19 @@ with its packaging extra, runs PyInstaller against the shared NeuroEdit.spec,
 then wraps the result in an Inno Setup installer.
 
 Usage (from the desktop/ folder, on a Windows machine):
-    .\scripts\build_alpha_windows.ps1 -Version alpha-001
+    .\scripts\build_alpha_windows.ps1 -Version dev
 
 Requires: Python 3.12 on PATH, and Inno Setup 6 (ISCC.exe) installed or on PATH.
 Produces: release\NeuroEdit-<version>-Windows-Setup.exe
 #>
 param(
-    [string]$Version = "0.5.16"
+    [string]$Version = "dev"
 )
 
 $ErrorActionPreference = "Stop"
+if ($Version -notmatch '^[a-zA-Z0-9][a-zA-Z0-9._-]*$') {
+    throw "Invalid artifact label: $Version"
+}
 
 # Resolve the desktop/ root (parent of this scripts/ folder) and work from there.
 $Root = Split-Path -Parent $PSScriptRoot
@@ -37,7 +40,6 @@ Remove-Item -Recurse -Force "build", "dist" -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $ReleaseDir | Out-Null
 
 # 3. PyInstaller -> dist\NeuroEdit\NeuroEdit.exe
-$env:NEUROEDIT_VERSION = $Version.TrimStart('v')
 & ".\.venv\Scripts\pyinstaller.exe" --clean --noconfirm NeuroEdit.spec
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller failed (exit $LASTEXITCODE)."
@@ -63,8 +65,12 @@ if (-not $Iscc) {
     throw "Inno Setup compiler (ISCC.exe) not found. Install Inno Setup 6 from https://jrsoftware.org/isdl.php"
 }
 
-# 5. Compile the installer.
-& $Iscc "/DMyAppVersion=$Version" "installer\NeuroEdit.iss"
+# 5. Compile with the numeric project version and a separate artifact label.
+$AppVersion = & ".\.venv\Scripts\python.exe" -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])"
+if ($LASTEXITCODE -ne 0 -or $AppVersion -notmatch '^\d+\.\d+\.\d+$') {
+    throw "Could not read a numeric version from pyproject.toml."
+}
+& $Iscc "/DMyAppVersion=$AppVersion" "/DArtifactLabel=$Version" "installer\NeuroEdit.iss"
 if ($LASTEXITCODE -ne 0) {
     throw "Inno Setup compile failed (exit $LASTEXITCODE)."
 }

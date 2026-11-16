@@ -236,7 +236,9 @@ def test_editing_annotation_creates_undo_entry() -> None:
     assert window.dirty is True
 
 
-def test_net_zero_document_mutation_clears_redo_stack() -> None:
+def test_net_zero_document_mutation_keeps_redo_stack() -> None:
+    """NE-019: a push that adds no snapshot is not a new edit, so redo survives
+    (spurious pushes used to wipe it, e.g. after an undo changed the source)."""
     project = ProjectState()
     project.annotations.append(_annotation())
     window = _window(project)
@@ -247,9 +249,9 @@ def test_net_zero_document_mutation_clears_redo_stack() -> None:
     window._push_history()
 
     assert len(window._undo_stack) == 1
-    assert window._redo_stack == []
-    assert window._redo_hashes == []
-    assert window._redo_sizes == []
+    assert window._redo_stack == [b'{"annotations":[{"label":"future"}]}']
+    assert window._redo_hashes == ["future"]
+    assert window._redo_sizes == [100]
 
 
 def test_history_dedup_uses_snapshot_hash() -> None:
@@ -282,9 +284,10 @@ def test_cached_snapshot_dedup_skips_payload_reserialize(
     window._push_history()
 
     assert len(window._undo_stack) == 2
-    assert window._redo_stack == []
-    assert window._redo_hashes == []
-    assert window._redo_sizes == []
+    # NE-019: the unchanged-document push adds no snapshot, so redo is kept.
+    assert window._redo_stack == [b'{"annotations":[{"label":"future"}]}']
+    assert window._redo_hashes == ["future"]
+    assert window._redo_sizes == [100]
 
 
 def test_activating_another_project_reseeds_history() -> None:

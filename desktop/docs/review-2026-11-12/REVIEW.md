@@ -157,10 +157,10 @@ QT_QPA_PLATFORM=offscreen PYTHONPATH=src python -m pytest docs/review-2026-11-12
 
 `repros/conftest.py` applies the suite's settings isolation (the redirect of
 application settings to a temporary INI file) and `test_00_guard.py` asserts it
-before any window is built. Expected after the NE-010/NE-011 fix: 8 failed,
-1 passed (on `3e00fc0` it was 11 failed, 1 passed, with three tests since moved
-to `tests/test_ripple_overlays.py`). When a ticket is fixed, move its test into
-`tests/` as the regression test.
+before any window is built. Expected after the NE-010, NE-011, NE-012, and
+NE-014 fixes: 6 failed, 1 passed (on `3e00fc0` it was 11 failed, 1 passed; the
+five fixed repros moved into `tests/`, and `test_pure.py` is gone). When a
+ticket is fixed, move its test into `tests/` as the regression test.
 
 **Correction, 2026-11-12 (later the same day).** As first written, these repros
 relied on a `-p conftest` flag for settings isolation, and a bare `pytest` from

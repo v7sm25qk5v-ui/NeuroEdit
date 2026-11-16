@@ -79,6 +79,22 @@ def log(event: str, duration_ms: float | None = None, **fields) -> None:
         pass
 
 
+def log_crash(text: str) -> None:
+    """Append an unhandled-error record to crash.log in the per-user log dir.
+
+    Unlike log(), this always writes (not gated on the diagnostics switch). The
+    caller must pass PHI-safe text: no exception messages, paths, or project data.
+    """
+    try:
+        path = log_dir() / "crash.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.datetime.now().isoformat(timespec="seconds")
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(f"--- {stamp}\n{text}\n")
+    except OSError:
+        pass
+
+
 class timed:
     """Context manager: `with diagnostics.timed("project_load", clips=3): ...`"""
 
@@ -118,3 +134,12 @@ def record_paint(event: str, elapsed_ms: float, **fields) -> None:
             **fields,
         )
         _paint_stats[event] = [0.0, 0.0, 0.0]
+
+
+def log_ffmpeg() -> None:
+    """Record which ffmpeg the app uses: the tool's path only, never media."""
+    if not _enabled:
+        return
+    from neuroedit_desktop.exporter import resolve_ffmpeg  # noqa: PLC0415
+
+    log("ffmpeg", path=resolve_ffmpeg() or "none")

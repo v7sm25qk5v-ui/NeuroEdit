@@ -1,12 +1,15 @@
 ; Inno Setup script for the NeuroEdit Windows installer.
-; Compile with: ISCC.exe /DMyAppVersion=alpha-001 installer\NeuroEdit.iss
+; Compile via scripts/build_alpha_windows.ps1 to provide both required defines.
 ; Produces a friendly double-click Setup.exe wizard for non-technical testers:
 ; installs per-user (no admin / UAC prompt), adds a Start-menu shortcut, and
 ; registers an uninstaller in "Apps & features".
 
 #define MyAppName "NeuroEdit"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.5.16"
+  #error MyAppVersion must be passed from pyproject.toml
+#endif
+#ifndef ArtifactLabel
+  #error ArtifactLabel must be passed by the build script
 #endif
 #define MyAppPublisher "NeuroEdit"
 #define MyAppExeName "NeuroEdit.exe"
@@ -25,7 +28,7 @@ DefaultDirName={autopf}\NeuroEdit
 DefaultGroupName=NeuroEdit
 DisableProgramGroupPage=yes
 OutputDir=..\release
-OutputBaseFilename=NeuroEdit-{#MyAppVersion}-Windows-Setup
+OutputBaseFilename=NeuroEdit-{#ArtifactLabel}-Windows-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern

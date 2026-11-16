@@ -4,7 +4,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-VERSION="${1:-alpha}"
+VERSION="${1:-dev}"
+if [[ ! "$VERSION" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]]; then
+  echo "Invalid artifact label: $VERSION" >&2
+  exit 1
+fi
 ARCHIVE_DIR="$ROOT/release"
 APP_PATH="$ROOT/dist/NeuroEdit.app"
 ZIP_PATH="$ARCHIVE_DIR/NeuroEdit-${VERSION}-macOS-unsigned.zip"
@@ -21,7 +25,7 @@ python -m pip install -c requirements-release.txt -e ".[package]"
 rm -rf build dist "$ARCHIVE_DIR"
 mkdir -p "$ARCHIVE_DIR"
 
-NEUROEDIT_VERSION="${VERSION#v}" pyinstaller --clean --noconfirm NeuroEdit.spec
+pyinstaller --clean --noconfirm NeuroEdit.spec
 
 if [[ ! -d "$APP_PATH" ]]; then
   echo "Build failed: $APP_PATH was not created." >&2

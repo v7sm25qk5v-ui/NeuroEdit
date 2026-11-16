@@ -37,9 +37,12 @@ assert module.SamBackend.probe is original_probe
 assert snapshot() == before
 '''
     env = dict(os.environ, QT_QPA_PLATFORM="offscreen", TMPDIR=str(tmp_path))
+    # Cold imports of PySide6 from a slow (e.g. iCloud-hosted) venv can take
+    # well over 30 s; the child normally finishes far sooner, so this is only a
+    # hang guard.
     proc = subprocess.run(
         [sys.executable, "-c", code, str(script), str(tmp_path / "output")],
-        env=env, capture_output=True, text=True, timeout=30, check=False,
+        env=env, capture_output=True, text=True, timeout=180, check=False,
     )
     assert proc.returncode == 0, proc.stderr
     assert not list(tmp_path.glob("neuroedit_baseline_*"))

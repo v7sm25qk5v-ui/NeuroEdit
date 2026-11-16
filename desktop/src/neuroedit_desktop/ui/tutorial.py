@@ -10,7 +10,8 @@ highlighted control.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from pathlib import Path
+from dataclasses import dataclass, replace
 from typing import Callable
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
@@ -25,9 +26,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from neuroedit_desktop.ui.styles import (
-    ACCENT_CYAN, BG_TERTIARY, BORDER_BRIGHT, PRIMARY, TEXT_PRIMARY, TEXT_SECONDARY,
-)
+# Read tokens as styles.NAME at use time: a name imported here would keep the
+# colours of whichever theme was active at import.
+from neuroedit_desktop.ui import styles
 
 
 @dataclass
@@ -44,6 +45,33 @@ class TutorialStep:
     practice_mode: bool = False
 
 
+def project_has_user_content(window) -> bool:
+    """True when the open project holds work the tutorial must not touch.
+
+    The bundled sample clip alone does not count: that is the empty-project
+    first run, which stays hands-on.
+    """
+    project = getattr(window, "project", None)
+    if project is None:
+        return False
+    sample_path = Path(__file__).parent.parent / "resources" / "tutorial_clip.mp4"
+    for clip in project.clips:
+        # A pristine bundled sample remains identifiable after an app restart.
+        # An edited sample is user work and must get the read-only tour.
+        if (Path(clip.path) != sample_path or clip.name != sample_path.stem
+                or clip.start_time != 0 or clip.trim_start != 0
+                or clip.trim_end != clip.duration or clip.source_in_limit is not None
+                or clip.source_out_limit is not None or clip.fade_in or clip.fade_out
+                or clip.media_type != "video"):
+            return True
+    if len(project.clips) > 1:
+        return True
+    return bool(
+        project.annotations or project.markers or project.slides
+        or project.audio_tracks or project.transcript_segments or project.has_case_notes
+    )
+
+
 class TutorialCard(QFrame):
     next_clicked = Signal()
     skip_clicked = Signal()
@@ -53,40 +81,40 @@ class TutorialCard(QFrame):
         self.setObjectName("tutorialCard")
         self.setStyleSheet(f"""
             QFrame#tutorialCard {{
-                background: {BG_TERTIARY};
-                border: 1px solid {ACCENT_CYAN};
+                background: {styles.BG_TERTIARY};
+                border: 1px solid {styles.ACCENT_CYAN};
                 border-radius: 12px;
             }}
             QLabel#tutorialTitle {{
-                color: {TEXT_PRIMARY};
+                color: {styles.TEXT_PRIMARY};
                 font-size: 14px;
                 font-weight: 700;
             }}
             QLabel#tutorialBody {{
-                color: {TEXT_SECONDARY};
+                color: {styles.TEXT_SECONDARY};
                 font-size: 12px;
             }}
             QLabel#tutorialProgress {{
-                color: {TEXT_SECONDARY};
+                color: {styles.TEXT_SECONDARY};
                 font-size: 11px;
             }}
             QPushButton#tutorialNext {{
-                background: {PRIMARY};
+                background: {styles.PRIMARY};
                 color: white;
                 border: none;
                 border-radius: 6px;
                 padding: 6px 14px;
                 font-weight: 600;
             }}
-            QPushButton#tutorialNext:hover {{ background: {ACCENT_CYAN}; }}
+            QPushButton#tutorialNext:hover {{ background: {styles.ACCENT_CYAN}; }}
             QPushButton#tutorialSkip {{
                 background: transparent;
-                color: {TEXT_SECONDARY};
-                border: 1px solid {BORDER_BRIGHT};
+                color: {styles.TEXT_SECONDARY};
+                border: 1px solid {styles.BORDER_BRIGHT};
                 border-radius: 6px;
                 padding: 6px 12px;
             }}
-            QPushButton#tutorialSkip:hover {{ color: {TEXT_PRIMARY}; }}
+            QPushButton#tutorialSkip:hover {{ color: {styles.TEXT_PRIMARY}; }}
         """)
         self.setMinimumWidth(280)
         self.setMaximumWidth(360)
@@ -130,9 +158,14 @@ class TutorialCard(QFrame):
 class TutorialOverlay(QWidget):
     finished = Signal()
 
-    def __init__(self, parent: QWidget, steps: list[TutorialStep]) -> None:
+    def __init__(
+        self, parent: QWidget, steps: list[TutorialStep], read_only: bool | None = None,
+    ) -> None:
         super().__init__(parent)
         self.steps = steps
+        # Read-only (tour only): nothing the user does while the overlay is up
+        # reaches the project. Defaults to whether the project has user content.
+        self.read_only = project_has_user_content(parent) if read_only is None else read_only
         self.index = 0
         self._target_rect = QRect()
         self._pulse_t = 0.0
@@ -140,7 +173,9 @@ class TutorialOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setFocusPolicy(
+            Qt.FocusPolicy.StrongFocus if self.read_only else Qt.FocusPolicy.NoFocus
+        )
         self.setMouseTracking(True)
         self.setGeometry(parent.rect())
         parent.installEventFilter(self)
@@ -156,6 +191,20 @@ class TutorialOverlay(QWidget):
         self._apply_step()
         self.show()
         self.raise_()
+        project = getattr(parent, "project", None)
+        self._view_before = (
+            (project.active_panel, project.active_tool)
+            if self.read_only and project is not None else None
+        )
+        if self.read_only:
+            # Qt offers a dropped file to the nearest widget that accepts
+            # drops; claiming that role (and never accepting) keeps a drop
+            # from reaching the window's import handler.
+            self.setAcceptDrops(True)
+            # Take the keyboard so editing shortcuts (Delete, Ctrl+B, tool keys)
+            # cannot change the project while the tour is open.
+            self.setFocus()
+            self.grabKeyboard()
 
     def _tick_animation(self) -> None:
         self._pulse_t += 0.10
@@ -175,7 +224,18 @@ class TutorialOverlay(QWidget):
             self._refresh_target_rect()
             self._position_card()
             self._update_input_mask()
+        if self.read_only and watched is self.parent():
+            # A dialog opened from the menu bar must be able to take typing.
+            if event.type() == QEvent.Type.WindowDeactivate:
+                self.releaseKeyboard()
+            elif event.type() == QEvent.Type.WindowActivate and self.isVisible():
+                self.grabKeyboard()
         return False
+
+    def hideEvent(self, event) -> None:  # noqa: N802
+        if self.read_only:
+            self.releaseKeyboard()
+        super().hideEvent(event)
 
     def _resolve_target(self) -> QWidget | None:
         step = self.steps[self.index]
@@ -197,7 +257,7 @@ class TutorialOverlay(QWidget):
         self._target_rect = QRect(top_left_local, size)
 
     def _input_cutout_rect(self) -> QRect:
-        if self._target_rect.isEmpty():
+        if self.read_only or self._target_rect.isEmpty():
             return QRect()
         return self._target_rect.adjusted(-8, -8, 8, 8).intersected(self.rect())
 
@@ -291,7 +351,7 @@ class TutorialOverlay(QWidget):
             full = full.subtracted(cutout)
         painter.fillPath(full, QColor(0, 0, 0, 170))
         if not self._target_rect.isEmpty():
-            pen = QPen(QColor(ACCENT_CYAN), 3)
+            pen = QPen(QColor(styles.ACCENT_CYAN), 3)
             painter.setPen(pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRoundedRect(self._target_rect.adjusted(-6, -6, 6, 6), 10, 10)
@@ -372,7 +432,21 @@ class TutorialOverlay(QWidget):
         )
         QApplication.sendEvent(target, forwarded)
 
+    def event(self, event):  # noqa: N802
+        if self.read_only:
+            # Accepting ShortcutOverride stops window shortcuts/actions firing.
+            if event.type() == QEvent.Type.ShortcutOverride:
+                event.accept()
+                return True
+            if event.type() in (QEvent.Type.Wheel, QEvent.Type.ContextMenu):
+                event.accept()
+                return True
+        return super().event(event)
+
     def mousePressEvent(self, event) -> None:  # noqa: N802
+        if self.read_only:
+            event.accept()
+            return
         if self._target_rect.contains(event.pos()):
             w = self._real_widget_at(event.pos())
             if w is not None:
@@ -397,7 +471,7 @@ class TutorialOverlay(QWidget):
         event.accept()
 
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
-        if self._target_rect.contains(event.pos()):
+        if not self.read_only and self._target_rect.contains(event.pos()):
             w = self._real_widget_at(event.pos())
             if w is not None:
                 self._forward_mouse(w, event)
@@ -406,13 +480,37 @@ class TutorialOverlay(QWidget):
             event.accept()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
+        if self.read_only:
+            # The keyboard is grabbed, so it must still be able to drive and
+            # leave the tour.
+            if event.key() == Qt.Key.Key_Escape:
+                self.close()
+            elif event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Right):
+                self.advance()
+            event.accept()
+            return
         focused = QApplication.focusWidget()
         if focused is not None and focused is not self:
             QApplication.sendEvent(focused, event)
         else:
             event.ignore()
 
+    def _restore_view(self) -> None:
+        """The tour switched panels and tools to show them; put the user's
+        own back, or their next click on the video would use the tour's tool."""
+        project = getattr(self.parent(), "project", None)
+        if self._view_before is None or project is None:
+            return
+        project.active_panel, project.active_tool = self._view_before
+        self._view_before = None
+        refresh = getattr(self.parent(), "refresh", None)
+        if callable(refresh):
+            refresh()
+
     def keyReleaseEvent(self, event) -> None:  # noqa: N802
+        if self.read_only:
+            event.accept()
+            return
         focused = QApplication.focusWidget()
         if focused is not None and focused is not self:
             QApplication.sendEvent(focused, event)
@@ -421,6 +519,9 @@ class TutorialOverlay(QWidget):
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self._anim_timer.stop()
+        if self.read_only:
+            self.releaseKeyboard()
+            self._restore_view()
         if self.parent() is not None:
             self.parent().removeEventFilter(self)
         self.finished.emit()
@@ -428,7 +529,13 @@ class TutorialOverlay(QWidget):
 
 
 def build_default_steps(window) -> list[TutorialStep]:
-    """Construct a hands-on sample-clip walkthrough for NeuroEdit."""
+    """Construct the NeuroEdit walkthrough.
+
+    On an empty project (or just the sample clip) it is hands-on. When the
+    project already has work it is a tour only: see _as_tour_only.
+    """
+    tour_only = project_has_user_content(window)
+
     def _tool(name):
         return getattr(window, "tool_buttons", {}).get(name)
 
@@ -456,6 +563,8 @@ def build_default_steps(window) -> list[TutorialStep]:
         return _action
 
     def _prepare_label() -> None:
+        if tour_only:
+            return
         label_input = getattr(window, "label_input", None)
         if label_input is not None and not label_input.currentText().strip():
             label_input.setEditText("practice target")
@@ -465,8 +574,9 @@ def build_default_steps(window) -> list[TutorialStep]:
         if project is not None:
             project.active_panel = "sam"
             project.active_tool = "sam"
-            project.sam_points_enabled = True
-            project.sam_mode = "positive"
+            if not tour_only:
+                project.sam_points_enabled = True
+                project.sam_mode = "positive"
             _refresh_window()
         sam_panel = getattr(window, "sam_panel", None)
         if sam_panel is not None:
@@ -476,10 +586,10 @@ def build_default_steps(window) -> list[TutorialStep]:
         player = getattr(window, "player", None)
         if player is not None:
             player.pause()
-        if hasattr(window, "_seek_global"):
+        if hasattr(window, "_seek_global") and not tour_only:
             window._seek_global(0.0)
 
-    return [
+    steps = [
         TutorialStep(
             title="Start With the Sample Clip",
             body=(
@@ -634,6 +744,29 @@ def build_default_steps(window) -> list[TutorialStep]:
             practice_mode=True,
         ),
     ]
+    return _as_tour_only(steps) if tour_only else steps
+
+
+_TOUR_ONLY_INTRO = (
+    "Your project already has work in it, so this is a tour only: the highlighted "
+    "controls are shown and explained, and clicks, keys, and dropped files in this "
+    "window do nothing while it is open (menu-bar commands still act on your "
+    "project). To practise hands-on, run Help > Tutorial from a "
+    "new, empty project. The tour covers a normal edit from scratch: scrub, label, "
+    "draw, review the timeline, make a still, add a slide, and export."
+)
+
+
+def _as_tour_only(steps: list[TutorialStep]) -> list[TutorialStep]:
+    """Show-don't-do copy of the steps: no 'click here' rings, honest text."""
+    tour = []
+    for i, step in enumerate(steps):
+        body = _TOUR_ONLY_INTRO if i == 0 else (
+            f"{step.body}\n\n(Tour only: your project is not changed.)"
+            if step.practice_mode else step.body
+        )
+        tour.append(replace(step, body=body, practice_mode=False))
+    return tour
 
 
 def build_practice_steps(window) -> list[TutorialStep]:

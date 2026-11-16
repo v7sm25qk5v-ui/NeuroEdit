@@ -17,7 +17,7 @@ the cloud (`.github/workflows/build.yml`):
   git tag v0.2.0-alpha
   git push origin v0.2.0-alpha
   ```
-- Or use the Actions tab -> "Build alpha installers" -> "Run workflow" to produce
+- Or use the Actions tab -> "Build installers" -> "Run workflow" to produce
   test artifacts without cutting a release.
 
 ### Building locally on Windows (optional)
@@ -25,11 +25,12 @@ the cloud (`.github/workflows/build.yml`):
 If you ever have a Windows machine, from the `desktop` folder:
 
 ```powershell
-.\scripts\build_alpha_windows.ps1 -Version alpha-001
+.\scripts\build_alpha_windows.ps1 -Version dev
 ```
 
-Requires Python 3.12 and [Inno Setup 6](https://jrsoftware.org/isdl.php). Produces
-`release\NeuroEdit-alpha-001-Windows-Setup.exe`.
+The artifact label is independent of the numeric app version, which is read from
+`pyproject.toml`. Requires Python 3.12 and [Inno Setup 6](https://jrsoftware.org/isdl.php). Produces
+`release\NeuroEdit-dev-Windows-Setup.exe`.
 
 ## Tester Install Instructions
 

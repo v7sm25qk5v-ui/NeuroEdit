@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,37 @@ class ProjectStore:
         with project_path.open("r", encoding="utf-8") as handle:
             data = json.load(handle)
         return cls(project_path=project_path), ProjectState.from_dict(data)
+
+    @staticmethod
+    def preserve_unreadable(project_path: Path) -> Path:
+        """Move an unreadable project file aside so nothing can overwrite it.
+
+        Returns the preserved path. The bytes are never altered. If an identical
+        preserved copy already exists (repeated launches), the original is
+        dropped and that copy is returned instead of piling up duplicates.
+        """
+        stem = project_path.stem
+        try:
+            data = project_path.read_bytes()
+        except OSError:
+            data = None  # e.g. chmod 000: renaming needs directory, not file, permission
+        for existing in sorted(project_path.parent.glob(f"{stem}.unreadable-*.json")):
+            if data is None:
+                break
+            try:
+                if existing.read_bytes() == data:
+                    project_path.unlink()
+                    return existing
+            except OSError:
+                continue
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        target = project_path.with_name(f"{stem}.unreadable-{stamp}.json")
+        counter = 1
+        while target.exists():
+            counter += 1
+            target = project_path.with_name(f"{stem}.unreadable-{stamp}-{counter}.json")
+        os.replace(project_path, target)
+        return target
 
     def save(self, project: ProjectState) -> None:
         self.save_data(project.to_dict())

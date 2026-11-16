@@ -1,0 +1,399 @@
+{
+  "date": "2026-11-16",
+  "recorded_at_utc": "2026-11-16T21:35:44.677599+00:00",
+  "base_commit": "3e24301e10225c82d8d22c85cb5df1830993e5ec",
+  "uncommitted": true,
+  "tickets": "NE-012 through NE-031",
+  "code_configuration_digest": {
+    "sha256": "cd22b21011f4e3404128d87f5c1fc0cdf08c57e4efb3323fa7ae06e2a5ca073b",
+    "algorithm": "SHA-256 of compact JSON array of sorted [repository-relative path, file SHA-256] pairs",
+    "file_count": 85,
+    "files": [
+      [
+        ".github/workflows/build.yml",
+        "88cdd9c94c6b22451bec7a35de7df20dcca0679846d402d15025a97736e5b234"
+      ],
+      [
+        ".github/workflows/quality.yml",
+        "ab81bb1f4e31fa1ee5f885657dac59338af4be9513c9a03f32170f8bbff8eec9"
+      ],
+      [
+        "desktop/NeuroEdit.spec",
+        "fd0a29c2aba11197879e24d9b6f320f15c42602359076b9d1ea86a461b0f54a0"
+      ],
+      [
+        "desktop/installer/NeuroEdit.iss",
+        "f1ef3a0ed999fa0e6cb8a79ddee36b3df570e22b982fb731c1add7651b8a1cf7"
+      ],
+      [
+        "desktop/pyproject.toml",
+        "ceb50662b12fada311adda577f8ec02f0cf154cdb65dda0905f55106793bb5f2"
+      ],
+      [
+        "desktop/requirements-release.txt",
+        "47ee1b13bf9609d44e0831a7cfabee61cb6b40bc571d4dfba46f809250eebd2d"
+      ],
+      [
+        "desktop/scripts/benchmark_export_decode.py",
+        "49a1f5055595e79d22d70c39504ccc1ce5dc2909991c0b1d52e5954af7ff8735"
+      ],
+      [
+        "desktop/scripts/benchmark_static_export.py",
+        "0a445a28c958f32e9002541ae8c50e4a03ab1d6e754801a4a928098df9206120"
+      ],
+      [
+        "desktop/scripts/build_alpha_macos.sh",
+        "1a801804c69ebefc0fb01c675261deea44bbaedcc411d9f4f90de1871677a3a2"
+      ],
+      [
+        "desktop/scripts/build_alpha_windows.ps1",
+        "ddbb65d2554bcba573ab1fa177daeabb64b801c8f245280d96fd9034cacb5fd2"
+      ],
+      [
+        "desktop/scripts/capture_baseline_screenshots.py",
+        "698b82f380898991b4ffdd896b13203e48eb3f476585245b83f1f45073044e11"
+      ],
+      [
+        "desktop/scripts/generate_icons.py",
+        "855eca576056fb24405d9f47fec4a5e6f0278f2d690b7c3edc701143ff86fb8b"
+      ],
+      [
+        "desktop/scripts/make_smoothness_fixture.py",
+        "8fe6432a778d4c2c9b5c42cbc827c1e4142e916a79cd10f50a7db840547e04be"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/__init__.py",
+        "69f624b522831fc356c7814eaa6e3d5e8e07947a521bdcc2ac5bcbaa2699d980"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/__main__.py",
+        "1c81173dc60028d03f10d0762644ce646a995330156ff167649906ab227cfdc1"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/captions.py",
+        "465aa4852aa4a7442744f5dcda60565df8cf2facf671678b063d595912d0baeb"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/diagnostics.py",
+        "e79f0acd6204ecaf74b5402e90c78e29cd5752cff5eb5534ac1413c53fe1ca82"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/exporter.py",
+        "7b3b97cd1c083ec333dfcbc88f689191b7cddac73fdfdb463448b2a669eb3022"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/models.py",
+        "fa9b8312c93fd4f1d25602d5900daa5d049a7770d5ca45815bbee422b5300908"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/project_store.py",
+        "ca8aef3aea046a431b86e4b823df2e585594a50aefaa983d7e0eac3f0a7f625b"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/sam_backend.py",
+        "9f5f8e68ee1d36d0f8fa5ad45167b9350422d7e7f0982a6e946b3ec09fd27793"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/stills.py",
+        "46660f3322bdd7e06f9d0eab5e3fe60d5f255837a37f3d7c2bd7017cec18239b"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/ui/__init__.py",
+        "d9448275db4ffc81421ac4edfc871c8560495e397e93d5aea046dca85e5c0735"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/ui/audio_panel.py",
+        "bbba77622849d61b72cfdbca8a0978ff03b99eae304430964ee4b04b6daf379d"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/ui/audio_preview.py",
+        "87ed28e835df9ce0fa7f25539559a3a113b02f19ebb68882a198ef458d9c6cb7"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/ui/branding.py",
+        "f1638421bebe40e9a0b8f1d40815a20e791d35156437238749c7b009244bddaa"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/ui/canvas.py",
+        "86595c18af4578927a61d6f73391ca84fa0a02d487e3ea7501da4baefb08c3ee"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/ui/dialogs.py",
+        "638903f73cce6441fda4781164ae7434d71247b5d47de74d4769a32cea824f11"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/ui/edit_gesture.py",
+        "caef1f97a14e17c3d2c298017974a4d16a9e16bb8e6d031b3dbec1167e0c5f72"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/ui/editor_panels.py",
+        "eb174c852476de926cd05b52f3791c13e1dbfd8962d33ab5eea033c63647d2d4"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/ui/export_worker.py",
+        "c0b0e6db8603fcb4441a6b37e7179ce729f685bd22d373834449d02b78a4614f"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/ui/export_workflow.py",
+        "31cefcc4dbb73e9f4b2a8e3a7aae1db054c89ade1151d94547b583d516c29985"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/ui/history.py",
+        "faf73c9be96f14994478c606419865df8576dcbd7271d3f4a2de893febb466e3"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/ui/labels_panel.py",
+        "5802ea9cdf1693c43205b5a913a374e96c73bac61f7985dac6cfa1af323df1d4"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/ui/main_window.py",
+        "623002e4b978edc170ba4950baf54546eb2ace1aeb1679e76f5eff014c795bd3"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/ui/main_window_utils.py",
+        "761e88615cf182acfc289cda20bf41ea54fe62f89349252e52ed3e1281e77239"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/ui/media_import_worker.py",
+        "8001ea06a0681489221fcfdd59bee57957df152f8fe2035b6aab8e2b69e45290"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/ui/project_library.py",
+        "91414d4413e42c8088a5963f1adb4a06ced880df67c7d909ca581411c8d28524"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/ui/sam_panel.py",
+        "e6febcdaf9244269b85208b33f994f4b2630f476c120f032c79ade24539bcea8"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/ui/sam_workers.py",
+        "e1a62a76e2d5fb16f9ef67785ec4f60ce228a4a4daf44437eacfe1b54d8d8bb9"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/ui/sam_workflow.py",
+        "fbddd06f7c95ae6d65ad553b07b4632162671a0f622be91c1d9c212afb8a569b"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/ui/styles.py",
+        "fe4e79fc7b82ca8d9cffabcda987e7ab8b94ee6c5310249f97a9946a4d3573f8"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/ui/timeline_utils.py",
+        "799100a44e95a3eebfd3fb84a9e9ace35f0dc763e43afd21f327ab06faa741a0"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/ui/tutorial.py",
+        "6ed483f834e2a5c7795b4ff0953a4fa55ce7fbffa1d7a9f84517fbd3558498f0"
+      ],
+      [
+        "desktop/src/neuroedit_desktop/video_probe.py",
+        "941ca233c8c711caa837af96ed6cc58cd52166e36117623a02e44d5724110c63"
+      ],
+      [
+        "desktop/tests/conftest.py",
+        "9c1e7c8dee9c543964b911c032d7909b22f9bd5f8be13c025028dcd41c0e52de"
+      ],
+      [
+        "desktop/tests/test_audio_import.py",
+        "585ecbbd4100593762483bc89692f51887e9c24948e1b9809cc8b158ea75ebbb"
+      ],
+      [
+        "desktop/tests/test_audio_preview.py",
+        "8950812be8f5f46330013290baddd29bd45483e9b3acbffb18ee57c08a90ab75"
+      ],
+      [
+        "desktop/tests/test_canvas_drag_clamp.py",
+        "eaad687e6f2b36bf4eeb74c7a81f66ad01adfde80b8488b1259a4bc4deda54a0"
+      ],
+      [
+        "desktop/tests/test_caption_phi_gate.py",
+        "8dd52d7b5c65c57384f24b9075e5fbd9ff853c1a355fc2f091727d7c6c180b49"
+      ],
+      [
+        "desktop/tests/test_captions.py",
+        "1a56cdace7ea842eb960a2534d9a43f48de0992be80d754763ce79994ff5209b"
+      ],
+      [
+        "desktop/tests/test_capture_baseline.py",
+        "d60373a0edd1f77dc6e09870776223f43256e2b1b65c120cf3d334445546eb17"
+      ],
+      [
+        "desktop/tests/test_design_tokens.py",
+        "1cbed4592d02d41163faeca0f5b740b1561e25e64f414673976a577211761416"
+      ],
+      [
+        "desktop/tests/test_diagnostics.py",
+        "e4c8b77a2492bf115543d2b46b2837ca65348404be229c4b2047f534b1dccaed"
+      ],
+      [
+        "desktop/tests/test_duration_events.py",
+        "17e240baaffd28d2feaeaec1335f930385b55b227fde4aa143088ed6771718ff"
+      ],
+      [
+        "desktop/tests/test_export_dialog.py",
+        "e8669a0efce23bc4e23045ee38994ce3b759d015c2b779b4d581c094ab4d2803"
+      ],
+      [
+        "desktop/tests/test_export_frame_selection.py",
+        "9935048bf28cec661ebe60431605db2293ef2432d29d370b93a29a51cc58d418"
+      ],
+      [
+        "desktop/tests/test_export_output_and_ffmpeg.py",
+        "a6ec7669e74890331014c490674302c04c606a06cb314e80a8d76b02f14e027e"
+      ],
+      [
+        "desktop/tests/test_export_overlay_placement.py",
+        "018db1e220e6ce1fe4c41a57ea6c5c56b6c261aba9e70cb595bb286a948faaea"
+      ],
+      [
+        "desktop/tests/test_export_robustness.py",
+        "d1d980e6bd832a04ca54c00d64f6f501f1146b80ab1e990183da268385f396b8"
+      ],
+      [
+        "desktop/tests/test_export_timing.py",
+        "4382923486421f4b6acf7423327491ab72b9efb1984a20bad9fae53929a20170"
+      ],
+      [
+        "desktop/tests/test_export_workflow.py",
+        "7f1e8177a96a863d56adf7e718055250839f2a8db82221bf32e1f43d7d238b66"
+      ],
+      [
+        "desktop/tests/test_main_window_headless.py",
+        "4827a04621459a64ce607ed58ed8d64479adbbaffe90d8d5d5ae0e55f5eb8aa1"
+      ],
+      [
+        "desktop/tests/test_phi_review.py",
+        "69fdabd3e8b2a56e87d8d1e7bf61c01af59ff312951f0317e606be0a0ceae375"
+      ],
+      [
+        "desktop/tests/test_project_library.py",
+        "deb3415e3ad8c0984352decc3cd1b64ae0b9f09a9c2a5b39b8f398d4d6d7654f"
+      ],
+      [
+        "desktop/tests/test_project_lifecycle_review.py",
+        "99fe2d7ac12dec97d2286239e749c745ba13cd3844688102c06eea5f470d5c6f"
+      ],
+      [
+        "desktop/tests/test_project_store_recovery.py",
+        "64002d961189b1c2a64e47e46e72bdc163ffeeb4d8e34c7d70dc5fe6c60ece25"
+      ],
+      [
+        "desktop/tests/test_recording_lifecycle.py",
+        "0e59fd3890cf2354dbb4da36b0832650bad7fcf0244db13ce2e72daea38b946c"
+      ],
+      [
+        "desktop/tests/test_redaction_export.py",
+        "c7a2c1cb965558fa952396e9ae0a7b26177163c05f8014ee8a5b7ed03cc21dd6"
+      ],
+      [
+        "desktop/tests/test_regressions.py",
+        "daf7d4eb3f094724641ef34d340e88562c5380b32803f64869ec7bbb528949d8"
+      ],
+      [
+        "desktop/tests/test_ripple_overlays.py",
+        "c43e7f2cbb41e68baa289d94f0ce1ded7ea7d7c4e7466728316d8a6cea9d2cff"
+      ],
+      [
+        "desktop/tests/test_sam_lifecycle.py",
+        "f98720d753a342d342fb4294051085e4680ac7bf1f2e7ab6331efed8efabc63f"
+      ],
+      [
+        "desktop/tests/test_sam_workflow.py",
+        "342a3eef66b7744a51946515c7f4639ec13974bc6f90e0de115bcdeccbbec23a"
+      ],
+      [
+        "desktop/tests/test_security_ui.py",
+        "18198296ef6e0be1e5104355b654920f42dccdf4ec2faa8236e3355ccc80c4b0"
+      ],
+      [
+        "desktop/tests/test_small_lifecycle_items.py",
+        "c3492b8ad2ac9ca5f83666a5eb6a6bbb89c9dde9ca2136fbe23b747452fa2f08"
+      ],
+      [
+        "desktop/tests/test_smoothness_fixture.py",
+        "591d6018a3cb00fdd67cffe24ae3a83c85a4212f78617021ae2dfa9d4b29962f"
+      ],
+      [
+        "desktop/tests/test_still_orientation.py",
+        "9b244b4e04bde696d2b92316ccf91d0a64d44da01b1d3145e31943d13eb85d77"
+      ],
+      [
+        "desktop/tests/test_storage_security.py",
+        "63b3709cd50696ddda69ef30c7926410fd66bd55ca3a047a457521b7415e23ea"
+      ],
+      [
+        "desktop/tests/test_take_still_gap.py",
+        "70ac44ff3620d8f3b8646796d751dd3ac1771431d0951fd4c3b61c02c3fda89d"
+      ],
+      [
+        "desktop/tests/test_timeline_editing.py",
+        "056994c03f97b631f0df35db9c46c9502491bc2cb9183d10833ea273477f692a"
+      ],
+      [
+        "desktop/tests/test_timeline_polish.py",
+        "0ba3d73750e79994ec92879f94fab2e39d1681e3ba8a0e436e0b7f8f32c06b4c"
+      ],
+      [
+        "desktop/tests/test_tutorial_project_safety.py",
+        "a2b37c5b80bcc691f12cfd8936a02049afaafc333bd99fb5b88b3c0c9703186f"
+      ],
+      [
+        "desktop/tests/test_undo_coalescing.py",
+        "669a1a553adff38cd7916aa093b6974ef577839c91439733de8dc84475343d43"
+      ],
+      [
+        "desktop/tests/test_undo_history.py",
+        "daaba5cf953e3419da5b492dbc36206b0619b6b2ff4e9047e963cb208d96f700"
+      ],
+      [
+        "desktop/tests/test_version_consistency.py",
+        "a16dd2c7f1b9224f7a3ebc1898e992dff06fe9cc50f06e75017a808510c653b4"
+      ]
+    ]
+  },
+  "full_suite": {
+    "passed": 691,
+    "skipped": 0,
+    "warnings": 2,
+    "warning_category": "Existing Qt QMouseEvent.pos() deprecations",
+    "strict_unraisable_and_unhandled_thread_warnings": true,
+    "coordinator_runs": [
+      {
+        "exit_code": 0,
+        "seconds": 40.56
+      },
+      {
+        "exit_code": 0,
+        "seconds": 39.69
+      }
+    ],
+    "engineer_run_seconds": 40.02
+  },
+  "independent_lifecycle_stress": {
+    "processes": 20,
+    "passed": 100,
+    "clean_exits": 20,
+    "unhandled_thread_warnings_as_errors": true
+  },
+  "checks": {
+    "ruff": "passed",
+    "compileall": "passed",
+    "pip_check": "passed",
+    "bash_syntax": "passed",
+    "actionlint_v1.7.12": "passed",
+    "git_diff_check": "passed",
+    "native_app_preferences": "unchanged",
+    "existing_autosave_hash": "unchanged"
+  },
+  "native_crash_history": "Intermediate run segfaulted; independently reproduced SAM lifetime/deferred-startup faults repaired. Final full/stress runs clean; precise attribution of original crash unproven.",
+  "not_run": [
+    "Hosted CI",
+    "Native Windows UI/scaling",
+    "Frozen/installed-app smoke",
+    "Installer builds",
+    "Physical audio/microphone validation",
+    "Actual SAM/GPU inference",
+    "Real operative-recording benchmarks"
+  ],
+  "release_action": "None; no commit/push/version bump/tag/release in this continuation."
+}

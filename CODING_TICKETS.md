@@ -356,9 +356,9 @@ signing, and manual hardware/platform certification are excluded.
 Source: [the November 12 app review](desktop/docs/review-2026-11-12/REVIEW.md) at
 baseline `3e00fc0` (v0.5.14-alpha). Four Sonnet reviewers, a Haiku docs/CI
 auditor, a Haiku test runner, and a Sonnet verification engineer; the
-coordinator read the cited source for every ticket. All tickets are **Ready**
-and unassigned. Nothing here has been implemented. The status progression at
-the top of this file applies.
+coordinator read the cited source for every ticket. The original findings below
+are retained; the status table tracks subsequent implementation and verification.
+The status progression at the top of this file applies.
 
 Evidence labels: **Reproduced** means a test in
 `desktop/docs/review-2026-11-12/repros/` asserts the desired behaviour and fails
@@ -370,27 +370,53 @@ but not executed. **Unmeasured** means the cost is plausible but not profiled.
 |---|---|---|---|
 | NE-010 Redactions keep covering their footage across timeline edits | P1 | Reproduced | Verified (software) |
 | NE-011 Head-trim ripple independent of drag path | P1 | Reproduced | Verified (software) |
-| NE-012 Export paints overlays in source-frame space | P1 | Reproduced | Ready |
-| NE-013 Export succeeds when output is on another volume | P1 | Source confirmed | Ready |
-| NE-014 View-only timeline actions leave PHI review and undo alone | P1 | Reproduced | Ready |
-| NE-015 Caption text passes a PHI gate before leaving the app | P2 | Source confirmed | Ready |
-| NE-016 One undo step per slider drag or text edit | P2 | Reproduced | Ready |
-| NE-017 Preserve an unreadable autosave | P2 | Reproduced | Ready |
-| NE-018 New Project does not overwrite the scratch case silently | P2 | Reproduced | Ready |
-| NE-019 Media duration events do not dirty an unchanged project | P2 | Reproduced | Ready |
-| NE-020 Take Still shifts captions and tracked-mask frames | P2 | Reproduced | Ready |
-| NE-021 Confirm before closing during export or SAM | P2 | Source confirmed | Ready |
-| NE-022 Shape drags released outside the frame clamp to the edge | P2 | Reproduced | Ready |
-| NE-023 Prefer and validate the bundled ffmpeg | P2 | Observed in test run | Ready |
-| NE-024 SAM weight and model lifecycle | P2 | Source confirmed | Ready |
-| NE-025 Tutorial runs without changing the user's project | P2 | Source confirmed | Ready |
-| NE-026 Export render-loop cost | P2 | Unmeasured | Ready (measure first) |
-| NE-027 Release and CI hardening | P3 | Verified by reading | Ready |
-| NE-028 Timeline polish | P3 | Source confirmed | Ready |
-| NE-029 Export and caption robustness | P3 | Source confirmed | Ready |
-| NE-030 Small lifecycle and documentation items | P3 | Source confirmed | Ready |
+| NE-012 Export paints overlays in source-frame space | P1 | Reproduced | Verified (local software) |
+| NE-013 Export succeeds when output is on another volume | P1 | Source confirmed | Verified (local software) |
+| NE-014 View-only timeline actions leave PHI review and undo alone | P1 | Reproduced | Verified (local software) |
+| NE-015 Caption text passes a PHI gate before leaving the app | P2 | Source confirmed | Verified (local software) |
+| NE-016 One undo step per slider drag or text edit | P2 | Reproduced | Verified (local software) |
+| NE-017 Preserve an unreadable autosave | P2 | Reproduced | Verified (local software) |
+| NE-018 New Project does not overwrite the scratch case silently | P2 | Reproduced | Verified (local software) |
+| NE-019 Media duration events do not dirty an unchanged project | P2 | Reproduced | Verified (local software) |
+| NE-020 Take Still shifts captions and tracked-mask frames | P2 | Reproduced | Verified (local software) |
+| NE-021 Confirm before closing during export or SAM | P2 | Source confirmed | Verified (local software) |
+| NE-022 Shape drags released outside the frame clamp to the edge | P2 | Reproduced | Verified (local software) |
+| NE-023 Prefer and validate the bundled ffmpeg | P2 | Observed in test run | Verified (local software) |
+| NE-024 SAM weight and model lifecycle | P2 | Source confirmed | Verified (stubbed; real SAM follow-up) |
+| NE-025 Tutorial runs without changing the user's project | P2 | Source confirmed | Verified (local software) |
+| NE-026 Export render-loop cost | P2 | Measured (synthetic) | Verified (synthetic; real-media follow-up) |
+| NE-027 Release and CI hardening | P3 | Verified by reading | Verified locally; native/hosted follow-up |
+| NE-028 Timeline polish | P3 | Source confirmed | Verified (local software) |
+| NE-029 Export and caption robustness | P3 | Source confirmed | Verified (local software) |
+| NE-030 Small lifecycle and documentation items | P3 | Source confirmed | Verified (local software) |
+| NE-031 Rotated JPEG stills have the same orientation in preview and export | P2 | Reproduced | Verified (local software) |
 
-Suggested order: NE-010 and NE-011 together (same function), then NE-012,
+## Current verification — 2026-11-16
+
+Resumed Claude's uncommitted implementation, completed missing coding work,
+and fixed independent senior-review findings. Final strict integration runs passed **691 tests in 40.56 s and 39.69 s**,
+both with clean exits and no skips, plus Ruff, source compilation, dependency checks,
+Bash syntax, and actionlint. These are local software results, not a new hosted
+CI or installer run. The older dated notes below describe historical checkpoints.
+
+Later the same day (Claude follow-up): three more review findings were fixed — typed spinbox values now reach the document before save/export/undo/close (NE-016), a label edit after review was re-confirmed resets review again (NE-016), and the unhandled-error notice is shown on the GUI thread (NE-030) — and the audio-import tests now dispose of their panels deterministically, which removed an intermittent native crash in full-suite runs. Final: **696 passed** three times in a row with clean exits.
+
+Evidence, review outcomes, and ticket-to-test mapping:
+[November 16 verification](desktop/docs/engineering-2026-11-16/VERIFICATION.md).
+NE-026 retains measured sequential decoding; static composition caching was
+not added after profiling showed only about 0.5–0.6 ms/frame maximum savings
+before invalidation/bookkeeping costs. Real long-GOP media, physical audio,
+real SAM/GPU inference, native Windows UI, hosted jobs, and rebuilt/frozen
+installers remain explicitly unverified. Export filenames still use the project
+name; the export report warns about case notes and omits its specified free text.
+No new tag, release, commit, or push was made in this continuation.
+
+An intermediate native Qt crash led to deterministic SAM/thread and deferred
+startup lifecycle regressions and repairs. The final full runs above and 100
+lifecycle checks across 20 fresh processes passed; the initial crash's precise
+native cause remains unproven. NE-027 retains native/hosted smoke follow-ups.
+
+Original implementation order: NE-010 and NE-011 together (same function), then NE-012,
 NE-014, NE-013. NE-016, NE-019, and NE-014 share the "what counts as a document
 edit" question and are cheapest to settle in one design pass.
 
@@ -466,6 +492,13 @@ item to its starting position. Do this with NE-010; both change the same call.
 
 ## NE-012 — Export paints overlays in source-frame space
 
+**Status 2026-11-15: Review approved (uncommitted; not yet checked in the running app).** Fixed in `desktop/src/neuroedit_desktop/exporter.py`: `_render_frame` passes the decoded frame size to `_paint_qt`, which translates and scales the painter onto the fitted source rectangle and calls `_paint_annotations` with the source's own pixel size, as the preview does. Regression tests: `desktop/tests/test_export_overlay_placement.py` (21; 14 of the first 17 fail on `3e24301`). Suite on the fix: 397 passed, 1 failed (the known `test_capture_baseline` timeout, NE-027); the four tests added afterwards were run on their own.
+- Unchanged, verified pixel for pixel against `3e24301`: every overlay type when source and export are the same size; full-frame slides; empty timeline; redaction, fade, and caption painting.
+- Changed on purpose: when the export size differs from the source size, strokes and label text now scale with the picture, so they look the same relative to the frame as in the preview (a 4K source at 1080p is no longer twice as heavy; a 720p source at 1080p is no longer too thin).
+- Independent Sonnet review: no defect in the fix. The exporter's output matched the real preview painter (`AnnotationGraphicsItem.paint`) with zero difference through the same transform across 380 cases, and within about 3 px against a native-size render scaled down. Its mutation run found two untested behaviours, both now covered.
+- Deviation from the acceptance text: the original repro required nothing to be painted outside the picture. Overlays are not clipped, so half of a stroke on the picture edge, or a label placed at the edge, can extend into the letterbox bars, as it can in the preview's margins. Clipping would cut labels off.
+- Still different from the preview (out of scope here): over a full-frame slide or an empty timeline the exporter keeps unscaled output pixels. EXIF-rotated stills are NE-031.
+
 **Problem and evidence.** The preview paints annotations in the video's native
 pixel space (`ui/canvas.py:94-122`, sized from the video item). The exporter
 letterboxes the source with `_fitted_source_rect` (`exporter.py:674-678`) but
@@ -517,6 +550,13 @@ with a complete output and no leftover partial file. A manual export to an
 external volume succeeds. Cancel leaves nothing in the output directory.
 
 ## NE-014 — View-only timeline actions leave PHI review and undo alone
+
+**Status 2026-11-15: Review approved (uncommitted; not yet checked in the running app).** `TimelineCanvas` and `RichTimelineWidget` have a new `view_changed` signal (`desktop/src/neuroedit_desktop/ui/editor_panels.py`). Zoom and a change of active clip emit it instead of `project_changed`; `MainWindow` routes it to `HistoryMixin._mark_timeline_view_dirty` (`ui/history.py`), which saves the view state without an undo step, without clearing redo, and without touching the PHI attestations. Mouse release emits `project_changed` only when clip order or any timeline position changed since the press (`_report_drag_edit`). Regression tests: 15 in `desktop/tests/test_main_window_headless.py` and 6 in `desktop/tests/test_timeline_editing.py` (13 of the first 16 fail on `3e24301`). Full suite on the finished change: 422 passed, 1 failed (the known `test_capture_baseline` timeout, NE-027).
+- Now true: zoom, Fit, a click on any block, a click on a trim handle, and a drag that ends where it began leave the attestations, undo stack, and redo stack untouched. Trim, move, split, delete, and fade still reset the review and create exactly one undo step (trim, move, and delete-by-key used to create two).
+- Independent Sonnet review: no missed edit in 9,000 randomized drags compared against the full project state, and nothing stale in the UI. Two weaknesses it found are fixed: float noise from a drag out and back counted as an edit (now a 1e-9 tolerance), and an edit whose mouse release was lost went unreported (now reported on the next press).
+- Not done from the ticket's problem statement: a zoom tick still re-syncs the player and refreshes the timeline twice. It no longer serializes or hashes the project.
+- Unchanged on purpose: zoom and active-clip changes still mark the project unsaved, so the title shows the unsaved marker and replacing the project asks to confirm. With real playback sync, clicking a clip that is not under the playhead marks the project unsaved each time, as it did before.
+- `active_clip_id` is part of undo snapshots, so undoing a later edit can also restore the previously active clip.
 
 **Problem and evidence.** `RichTimelineWidget.project_changed` is wired to
 `_mark_review_relevant_project_dirty` (`ui/main_window.py:832`), which calls
@@ -820,6 +860,10 @@ the constant-frame-rate fixture; VFR tests unchanged.
 
 ## NE-028 — Timeline polish
 
+- Editing a marker or renaming a clip and confirming the unchanged text still
+  reports an edit, which resets the PHI review and adds an undo step
+  (`_edit_marker`, `_rename_clip` in `ui/editor_panels.py`). Found in the NE-014
+  review; skip the emit when the text is the same.
 - Delete and the trash control do nothing for label blocks:
   `_delete_selected_item` ends in `else: return` for the annotation kind
   (`ui/editor_panels.py:998-999`).
@@ -857,6 +901,10 @@ the constant-frame-rate fixture; VFR tests unchanged.
   storyboard free text (`ui/export_workflow.py:99-100`, `:235-277`), and the
   report sits beside the MP4. Add a "contains case notes" header or leave the
   free text out by default.
+- A label with `font_size == 0` is drawn at 15 pt in the preview
+  (`ann.font_size or 15`, `ui/canvas.py`) and at the 8 pt floor in the exporter
+  (`max(8, int(ann.font_size))`). Probably unreachable from the UI; found in the
+  NE-012 review.
 
 ## NE-030 — Small lifecycle and documentation items
 
@@ -886,3 +934,26 @@ the constant-frame-rate fixture; VFR tests unchanged.
   still use `alpha-001` examples; `HANDOFF.md` is 174 KB and could move entries
   older than v0.5.12 to an archive file; `desktop/.venv 2` is a dangling
   symlink.
+
+## NE-031 — Rotated JPEG stills have the same orientation in preview and export
+
+Found during the NE-012 review on 2026-11-15. Not caused by that fix.
+
+**Problem and evidence.** The preview loads an image clip with `QPixmap(path)`
+(`ui/canvas.py`, `set_image`), which ignores EXIF orientation. The exporter loads
+it with `cv2.imread(path, cv2.IMREAD_COLOR)` (`exporter.py`, `_frame_for_clip`),
+which applies it. **Reproduced** by the reviewer: a 200x100 JPEG with EXIF
+orientation 6 is 200x100 in the preview and 100x200 in the exporter. Labels and
+redactions are stored as fractions of the frame, so on such a still they are
+placed on a landscape picture in the preview and exported onto a portrait one.
+Phone photos are the usual source of rotated JPEGs. Redactions are affected the
+same way, so this can leave PHI uncovered on an imported photo.
+
+**Scope.** Pick one orientation rule for stills and use it in both places:
+either apply EXIF orientation in the preview (`QImageReader.setAutoTransform`)
+or ignore it in the exporter (`cv2.IMREAD_IGNORE_ORIENTATION`). Applying it is
+what users expect. Check the import probe and Take Still for the same rule.
+
+**Acceptance.** A test with EXIF orientations 1, 3, 6, and 8 shows the same
+picture size in preview and export, and a redaction drawn on a corner in the
+preview covers the same corner in the exported frame.

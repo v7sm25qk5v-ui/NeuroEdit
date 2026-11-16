@@ -23,6 +23,11 @@ AnnotationType = Literal[
 SamPointType = Literal["positive", "negative"]
 
 
+# Version of the project.json layout this build reads and writes. Bump it only
+# when a change would make older builds lose or misread data.
+SCHEMA_VERSION = 1
+
+
 def new_id() -> str:
     return str(uuid4())
 
@@ -228,6 +233,7 @@ def _ripple_redaction(annotation: Annotation, anchor: float, delta: float) -> No
 
 @dataclass
 class ProjectState:
+    schema_version: int = SCHEMA_VERSION
     project_name: str = "Untitled Case"
     video_type: VideoType = "educational"
     video_goal: str = "talk-adjunct"
@@ -284,6 +290,20 @@ class ProjectState:
     # and audio tracks already marked reviewed. Lets a paused review resume
     # where it left off; phi_review_confirmed stays the single completion flag.
     phi_review_progress: dict = field(default_factory=dict)
+
+    # Not a dataclass field (no annotation): the version recorded in the file
+    # this state was loaded from. Greater than SCHEMA_VERSION means a newer
+    # build wrote it and saving here would drop fields this build does not know.
+    loaded_schema_version = SCHEMA_VERSION
+
+    @property
+    def has_case_notes(self) -> bool:
+        return any((
+            self.storyboard_objective, self.storyboard_case_context,
+            self.storyboard_key_anatomy, self.storyboard_steps,
+            self.storyboard_decision_points, self.storyboard_teaching_pearl,
+            self.storyboard_final_point, self.intended_audience, self.edit_disclosure,
+        ))
 
     @property
     def active_clip(self) -> VideoClip | None:
@@ -578,6 +598,10 @@ class ProjectState:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ProjectState:
+        try:
+            loaded_version = int(data.get("schema_version", 1))
+        except (TypeError, ValueError):
+            loaded_version = 1
         project = cls(
             project_name=data.get("project_name", "Untitled Case"),
             video_type=data.get("video_type", "educational"),
@@ -621,6 +645,7 @@ class ProjectState:
             sam_last_run=data.get("sam_last_run", {}) or {},
             phi_review_progress=data.get("phi_review_progress", {}) or {},
         )
+        project.loaded_schema_version = loaded_version
         project.clips = [_from_dict_tolerant(VideoClip, clip) for clip in data.get("clips", [])]
         project.audio_tracks = [
             _from_dict_tolerant(AudioTrack, track) for track in data.get("audio_tracks", [])

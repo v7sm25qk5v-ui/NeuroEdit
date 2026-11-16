@@ -5,6 +5,7 @@ import re
 import subprocess
 import time
 import wave
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
@@ -26,13 +27,15 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QProgressDialog,
     QSlider,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from neuroedit_desktop.models import AudioTrack, ProjectState, TranscriptSegment, new_id
+from neuroedit_desktop.ui.edit_gesture import CommitTextEdit, EditGesture
+from neuroedit_desktop.ui.history import HistoryMixin
 from neuroedit_desktop.ui.styles import TEXT_PRIMARY
 from neuroedit_desktop.ui.timeline_utils import fmt_time, project_end_time
 
@@ -48,6 +51,14 @@ class AudioPanel(QWidget):
         self.project = project
         self.audio_dir = audio_dir
         self._refreshing = False
+        self._audio_import_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="audio-import")
+        self._audio_import_future = None
+        self._audio_import_cancelled = False
+        self._audio_import_timer = QTimer(self)
+        self._audio_import_timer.setInterval(30)
+        self._audio_import_timer.timeout.connect(self._poll_audio_import)
+        # Slider drags and typing mutate the project live; one undo step per gesture.
+        self.gesture = EditGesture(self)
         self._recording_path: Path | None = None
         self._recording_started = 0.0
         self._recording_start_time = 0.0
@@ -88,6 +99,7 @@ class AudioPanel(QWidget):
         self.list_widget.currentItemChanged.connect(self._selection_changed)
         self.track_name = QLineEdit()
         self.track_name.textChanged.connect(self._apply_track_fields)
+        self.track_name.editingFinished.connect(self.gesture.commit)
         self.start_input = QDoubleSpinBox()
         self.start_input.setRange(0.0, 24 * 60 * 60)
         self.start_input.setSingleStep(0.5)
@@ -99,9 +111,13 @@ class AudioPanel(QWidget):
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(100)
-        self.start_input.valueChanged.connect(self._apply_track_fields)
-        self.duration_input.valueChanged.connect(self._apply_track_fields)
-        self.volume_slider.valueChanged.connect(self._apply_track_fields)
+        for spin in (self.start_input, self.duration_input):
+            spin.setKeyboardTracking(False)
+            spin.valueChanged.connect(self._apply_track_fields)
+            spin.editingFinished.connect(self.gesture.commit)
+        self.volume_slider.valueChanged.connect(self._volume_changed)
+        self.volume_slider.sliderPressed.connect(self.gesture.commit)
+        self.volume_slider.sliderReleased.connect(self.gesture.commit)
         delete_btn = QPushButton("Delete Track")
         delete_btn.setProperty("variant", "danger")
         delete_btn.clicked.connect(self._delete_selected)
@@ -152,14 +168,18 @@ class AudioPanel(QWidget):
         self.segment_end.setSuffix(" s")
         self.segment_speaker = QLineEdit()
         self.segment_speaker.setPlaceholderText("Narrator, surgeon...")
-        self.segment_text = QTextEdit()
+        self.segment_text = CommitTextEdit()
         self.segment_text.setAcceptRichText(False)
         self.segment_text.setPlaceholderText("Transcript text...")
         self.segment_text.setFixedHeight(72)
-        self.segment_start.valueChanged.connect(self._apply_transcript_fields)
-        self.segment_end.valueChanged.connect(self._apply_transcript_fields)
+        for spin in (self.segment_start, self.segment_end):
+            spin.setKeyboardTracking(False)
+            spin.valueChanged.connect(self._apply_transcript_fields)
+            spin.editingFinished.connect(self.gesture.commit)
         self.segment_speaker.textChanged.connect(self._apply_transcript_fields)
+        self.segment_speaker.editingFinished.connect(self.gesture.commit)
         self.segment_text.textChanged.connect(self._apply_transcript_fields)
+        self.segment_text.editingFinished.connect(self.gesture.commit)
 
         seek_segment_btn = QPushButton("Jump to Segment")
         seek_segment_btn.clicked.connect(self._seek_selected_transcript)
@@ -243,6 +263,11 @@ class AudioPanel(QWidget):
         self.refresh()
 
     def set_project(self, project: ProjectState, audio_dir: Path | None = None) -> None:
+        # The main window commits a pending edit before replacing the project;
+        # anything left belongs to the old project and must not be recorded
+        # against the new one.
+        if project is not self.project:
+            self.gesture.reset()
         self.project = project
         if audio_dir is not None:
             self.audio_dir = audio_dir
@@ -258,12 +283,14 @@ class AudioPanel(QWidget):
     def _apply_audio_phi_flag(self, checked: bool) -> None:
         if self._refreshing:
             return
+        self.gesture.commit()
         self.project.audio_reviewed_for_phi = checked
         self.review_state_changed.emit()
 
     def _apply_caption_fields(self) -> None:
         if self._refreshing:
             return
+        self.gesture.commit()
         self.project.captions_enabled = self.captions_enabled_check.isChecked()
         self.project.caption_size = str(self.caption_size_combo.currentData())
         self.project.caption_position = str(self.caption_position_combo.currentData())
@@ -320,6 +347,7 @@ class AudioPanel(QWidget):
 
     def _selection_changed(self) -> None:
         if not self._refreshing:
+            self.gesture.commit()
             self._load_selected_track()
 
     def _load_selected_track(self) -> None:
@@ -349,7 +377,7 @@ class AudioPanel(QWidget):
             self.status.setText("No microphone available.")
             return
         self.audio_dir.mkdir(parents=True, exist_ok=True)
-        self._recording_path = self.audio_dir / f"voice_{int(time.time())}.m4a"
+        self._recording_path = self._unique_recording_path()
         self._recording_project = self.project
         self._recording_start_time = self.project.current_time
         self._recording_error = ""
@@ -362,6 +390,16 @@ class AudioPanel(QWidget):
         self.stop_btn.setEnabled(True)
         self.status.setText("Recording...")
         self.recorder.record()
+
+    def _unique_recording_path(self) -> Path:
+        # Never reuse an existing take, even when two start in the same second.
+        stamp = int(time.time())
+        path = self.audio_dir / f"voice_{stamp}.m4a"
+        suffix = 2
+        while path.exists():
+            path = self.audio_dir / f"voice_{stamp}_{suffix}.m4a"
+            suffix += 1
+        return path
 
     def _stop_recording(self) -> None:
         self.clock.stop()
@@ -397,6 +435,7 @@ class AudioPanel(QWidget):
         elif project is not self.project:
             self.status.setText(f"Recording saved at {path}; project changed before it finished.")
         else:
+            self.gesture.commit()
             name = self.name_input.text().strip() or f"Voice {time.strftime('%H:%M:%S')}"
             self.project.audio_tracks.append(
                 AudioTrack(
@@ -422,6 +461,8 @@ class AudioPanel(QWidget):
         self.timer_label.setText(fmt_time(elapsed))
 
     def _import_audio(self) -> None:
+        if self._audio_import_future is not None:
+            return
         path_str, _ = QFileDialog.getOpenFileName(
             self,
             "Import Audio",
@@ -431,8 +472,50 @@ class AudioPanel(QWidget):
         if not path_str:
             return
         path = Path(path_str)
-        duration = self._probe_audio_duration(path)
-        if duration <= 0:
+        self.gesture.commit()
+        self._audio_import_project = self.project
+        self._audio_import_snapshot = self._audio_import_document_state()
+        self._audio_import_start_time = self.project.current_time
+        self._audio_import_path = path
+        self._audio_import_cancelled = False
+        self._audio_import_progress = QProgressDialog("Reading audio metadata...", "Cancel", 0, 0, self)
+        self._audio_import_progress.setWindowModality(Qt.WindowModality.WindowModal)
+        self._audio_import_progress.setMinimumDuration(0)
+        self._audio_import_progress.canceled.connect(self._cancel_audio_import)
+        self._audio_import_future = self._audio_import_executor.submit(self._probe_audio_duration, path)
+        self._audio_import_timer.start()
+        self._audio_import_progress.show()
+
+    def _cancel_audio_import(self) -> None:
+        self._audio_import_cancelled = True
+        if self._audio_import_future is not None:
+            self._audio_import_future.cancel()
+
+    def _audio_import_document_state(self) -> dict:
+        state = self.project.to_dict()
+        for key in (*HistoryMixin._TRANSIENT_SNAPSHOT_KEYS, "active_clip_id", "playback_rate"):
+            state.pop(key, None)
+        return state
+
+    def _poll_audio_import(self) -> None:
+        future = self._audio_import_future
+        if future is None or not future.done():
+            return
+        self._audio_import_timer.stop()
+        self._audio_import_future = None
+        self._audio_import_progress.canceled.disconnect(self._cancel_audio_import)
+        self._audio_import_progress.close()
+        if (self._audio_import_cancelled or future.cancelled()
+                or self.project is not self._audio_import_project
+                or self._audio_import_document_state() != self._audio_import_snapshot):
+            self.status.setText("Audio import cancelled or project changed; no file added.")
+            return
+        path = self._audio_import_path
+        try:
+            duration = future.result()
+        except Exception:  # noqa: BLE001
+            duration = 0.0
+        if not math.isfinite(duration) or duration <= 0:
             self.status.setText(f"Could not read audio duration for {path.name}. Choose a valid audio file and try again.")
             return
         self.project.audio_tracks.append(
@@ -440,7 +523,7 @@ class AudioPanel(QWidget):
                 id=new_id(),
                 path=str(path),
                 name=path.stem,
-                start_time=self.project.current_time,
+                start_time=self._audio_import_start_time,
                 duration=duration,
                 type="music",
                 volume=1.0,
@@ -449,6 +532,18 @@ class AudioPanel(QWidget):
         self.project.duration = project_end_time(self.project)
         self.project_changed.emit()
         self.refresh()
+
+    def shutdown_audio_import(self) -> None:
+        """Discard any result and stop polling before the window is destroyed."""
+        self._cancel_audio_import()
+        self._audio_import_timer.stop()
+        if self._audio_import_future is not None:
+            self._audio_import_progress.close()
+        self._audio_import_executor.shutdown(wait=False, cancel_futures=True)
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        self.shutdown_audio_import()
+        super().closeEvent(event)
 
     def _probe_audio_duration(self, path: Path) -> float:
         if path.suffix.lower() == ".wav":
@@ -459,16 +554,16 @@ class AudioPanel(QWidget):
                         return duration
             except Exception:  # noqa: BLE001
                 pass
-        # Non-wav (m4a/mp3/aac): probe with the bundled ffmpeg. Falling back to
+        # Non-wav (m4a/mp3/aac): probe with the shared, validated ffmpeg. Falling back to
         # a guessed 5.0 s silently truncated imported audio in the export mix.
         duration = self._ffmpeg_audio_duration(path)
         return duration if duration > 0 and math.isfinite(duration) else 0.0
 
     def _ffmpeg_audio_duration(self, path: Path) -> float:
         try:
-            import imageio_ffmpeg  # noqa: PLC0415
+            from neuroedit_desktop.exporter import require_ffmpeg  # noqa: PLC0415
 
-            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+            ffmpeg = require_ffmpeg()
             proc = subprocess.run(
                 [ffmpeg, "-hide_banner", "-i", str(path)],
                 capture_output=True,
@@ -486,18 +581,25 @@ class AudioPanel(QWidget):
             pass
         return 0.0
 
+    def _volume_changed(self) -> None:
+        self._apply_track_fields()
+        if not self.volume_slider.isSliderDown():
+            # Arrow key, wheel or page click: no sliderReleased will follow.
+            self.gesture.touch_idle()
+
     def _apply_track_fields(self) -> None:
         if self._refreshing:
             return
         track = self._selected_track()
         if track is None:
             return
+        self.gesture.begin(self.sender())
         track.name = self.track_name.text()
         track.start_time = float(self.start_input.value())
         track.duration = float(self.duration_input.value())
         track.volume = self.volume_slider.value() / 100.0
         self.project.duration = project_end_time(self.project)
-        self.project_changed.emit()
+        self.gesture.tick()
         self._refresh_list_labels()
 
     def _refresh_list_labels(self) -> None:
@@ -538,6 +640,7 @@ class AudioPanel(QWidget):
 
     def _transcript_selection_changed(self) -> None:
         if not self._refreshing:
+            self.gesture.commit()
             self._load_selected_transcript()
 
     def _load_selected_transcript(self) -> None:
@@ -566,11 +669,12 @@ class AudioPanel(QWidget):
         segment = self._selected_transcript()
         if segment is None:
             return
+        self.gesture.begin(self.sender())
         segment.start_time = float(self.segment_start.value())
         segment.end_time = max(segment.start_time + 0.1, float(self.segment_end.value()))
         segment.speaker = self.segment_speaker.text()
         segment.text = self.segment_text.toPlainText()
-        self.project_changed.emit()
+        self.gesture.tick()
         self._refresh_transcript_list_labels()
 
     def _refresh_transcript_list_labels(self) -> None:
@@ -592,6 +696,7 @@ class AudioPanel(QWidget):
             )
 
     def _add_transcript_segment(self) -> None:
+        self.gesture.commit()
         track = self._selected_track()
         start = track.start_time if track else self.project.current_time
         end = start + 3.0
@@ -648,6 +753,7 @@ class AudioPanel(QWidget):
             )
             for start, end, speaker, segment_text in segments
         ]
+        self.gesture.commit()
         self.project.transcript_segments.extend(imported)
         self.status.setText(f"Imported {len(imported)} transcript segment(s).")
         self.project_changed.emit()
@@ -747,6 +853,7 @@ class AudioPanel(QWidget):
         segment_id = self._selected_transcript_id()
         if segment_id is None:
             return
+        self.gesture.commit()
         self.project.transcript_segments = [
             segment for segment in self.project.transcript_segments if segment.id != segment_id
         ]
@@ -757,6 +864,7 @@ class AudioPanel(QWidget):
         track_id = self._selected_id()
         if track_id is None:
             return
+        self.gesture.commit()
         self.project.audio_tracks = [track for track in self.project.audio_tracks if track.id != track_id]
         # Keep unattached segments (audio_track_id is None); only drop the
         # deleted track's own segments.

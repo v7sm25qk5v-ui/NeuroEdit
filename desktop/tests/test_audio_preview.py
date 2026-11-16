@@ -98,6 +98,12 @@ def test_failed_import_and_recording_probe_do_not_add_track(app, tmp_path, monke
                         lambda *args: (str(path), ''))
     monkeypatch.setattr(panel, '_ffmpeg_audio_duration', lambda path: 0)
     panel._import_audio()
+    from PySide6.QtTest import QTest
+    for _ in range(200):
+        if panel._audio_import_future is None:
+            break
+        QTest.qWait(10)
+    assert panel._audio_import_future is None
     assert not project.audio_tracks
     assert 'Could not read audio duration' in panel.status.text()
     panel._recording_path = path

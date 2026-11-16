@@ -281,11 +281,13 @@ by the optimization automation; they are not duplicated into P4.5.
   [desktop/docs/review-2026-11-12/REVIEW.md](desktop/docs/review-2026-11-12/REVIEW.md).
   Not duplicated here. **Progress:** NE-010 (redaction coverage across timeline
   edits) and NE-011 (head-trim ripple independent of drag path) shipped in
-  v0.5.15-alpha (`e1b0839`); NE-012–NE-030 remain open. During the November 15
+  v0.5.15-alpha (`e1b0839`). NE-012–NE-031 now have local implementations and
+  passing integration checks (2026-11-16); see the coding queue for hardware,
+  real-media, and hosted-CI follow-ups. During the November 15
   release refresh, NE-010/NE-011 were marked software verified after live
   confirmation that the tagged CI passed 381 tests and published all installers.
 
-- [ ] **`AudioPreview.sync` stats every narration file on disk ~30×/sec during
+- [x] **`AudioPreview.sync` stats every narration file on disk ~30×/sec during
   playback (perf; blocks the UI thread on external/iCloud media).**
   `ui/audio_preview.py:30-41` rebuilds its `active` set on every call, and the
   comprehension evaluates `Path(track.path).exists()` for each positive-duration,
@@ -299,7 +301,8 @@ by the optimization automation; they are not duplicated into P4.5.
   existence does not change within a playback session: check it once when the
   player entry is created (the missing-file case can reuse the existing
   `failed`/teardown path) rather than on every tick. Affected:
-  `ui/audio_preview.py`.
+  `ui/audio_preview.py`. Fixed 2026-11-16: a one-second existence cache avoids
+  per-tick filesystem calls, while seek/source changes recheck immediately.
 
 ### New findings — 2026-11-13 incremental run (ripple overlay fix `e1b0839`)
 

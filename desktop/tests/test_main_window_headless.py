@@ -9,12 +9,12 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QMimeData, QSettings, QTimer, QUrl
+from PySide6.QtCore import QCoreApplication, QEvent, QMimeData, QSettings, QTimer, QUrl
 from PySide6.QtGui import QImage
 from PySide6.QtTest import QTest
 from PySide6.QtGui import QKeySequence
 from PySide6.QtMultimedia import QMediaPlayer
-from PySide6.QtWidgets import QApplication, QPushButton
+from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
 from neuroedit_desktop.models import Annotation, ProjectState, VideoClip, new_id
 from neuroedit_desktop.project_store import ProjectStore
@@ -32,6 +32,20 @@ def app():
     yield instance
 
 
+def _forbid_modal_dialogs(monkeypatch):
+    """An un-stubbed QMessageBox blocks forever offscreen; fail loudly instead.
+    Tests that expect a dialog override these with their own monkeypatch."""
+    from PySide6.QtWidgets import QMessageBox
+
+    def make(name):
+        def forbidden(*args, **kwargs):
+            raise AssertionError(f"un-stubbed QMessageBox.{name} opened in a test")
+        return forbidden
+
+    for name in ("question", "information", "warning", "critical"):
+        monkeypatch.setattr(QMessageBox, name, staticmethod(make(name)))
+
+
 @pytest.fixture()
 def window(app, tmp_path, monkeypatch):
     """A real MainWindow whose autosave root is redirected to tmp_path so tests
@@ -46,6 +60,7 @@ def window(app, tmp_path, monkeypatch):
     # A bound single-shot callback can outlive this fixture and run after its
     # settings are restored, opening an offscreen modal in a later UI test.
     monkeypatch.setattr(MainWindow, "_maybe_show_first_run_tutorial", lambda self: None)
+    _forbid_modal_dialogs(monkeypatch)
     settings = QSettings("NeuroEdit", "Desktop")
     original_root = settings.value("storage/projectRoot", "")
     original_prompt = settings.value("storage/promptShown", False, type=bool)
@@ -69,6 +84,9 @@ def window(app, tmp_path, monkeypatch):
             probe_thread.quit()
             probe_thread.wait(5_000)
         win.close()
+        win.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
         settings.setValue("storage/projectRoot", original_root)
         settings.setValue("storage/promptShown", original_prompt)
         settings.setValue("tutorial/seen", original_tutorial)
@@ -580,13 +598,18 @@ def test_autosave_restore_round_trip(tmp_path):
     assert restored.captions_enabled is True
 
 
-def test_new_project_resets_state(window, app):
+def test_new_project_resets_state(window, app, monkeypatch):
     window.project.project_name = "Old Case"
     window.project.clips.append(
         VideoClip(id=new_id(), path="/tmp/a.mp4", name="A", duration=4.0,
                   start_time=0.0, trim_start=0.0, trim_end=4.0)
     )
     window.dirty = False  # skip the save prompt
+    # A non-empty case that only exists in the autosave folder must be asked
+    # about (NE-018); this test exercises the Discard path.
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Discard
+    )
     window._new_project()
     assert window.project.project_name == "Untitled Case"
     assert window.project.clips == []
@@ -713,13 +736,14 @@ def test_different_source_transition_seeks_even_if_load_is_synchronous(window, m
 
 
 def test_real_video_cuts_do_not_render_black_between_sources(window, tmp_path):
-    import shutil
     import subprocess
     import time
 
     from PySide6.QtTest import QTest
 
-    ffmpeg = shutil.which('ffmpeg')
+    from neuroedit_desktop.exporter import resolve_ffmpeg
+
+    ffmpeg = resolve_ffmpeg()
     if not ffmpeg:
         pytest.skip('Real decoder smoke test requires ffmpeg')
     paths = [tmp_path / 'red.mp4', tmp_path / 'blue.mp4']
@@ -964,3 +988,798 @@ def test_relink_menu_repairs_the_selected_reference(window, tmp_path, monkeypatc
     window.relink_media_action.trigger()
     assert first.path.endswith("first.mov")
     assert second.path == str(replacement)
+
+
+# --- NE-014: view-only timeline actions are not document edits --------------
+
+
+def _timeline_mouse(canvas, kind, time_s, *, buttons):
+    from PySide6.QtCore import QEvent, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+
+    x = canvas.LABEL_W + time_s * canvas.project.zoom
+    y = canvas._track_y(0) + 20
+    event = QMouseEvent(
+        kind, QPointF(x, y), QPointF(x, y),
+        Qt.MouseButton.NoButton if kind == QEvent.Type.MouseMove else Qt.MouseButton.LeftButton,
+        buttons, Qt.KeyboardModifier.NoModifier,
+    )
+    {
+        QEvent.Type.MouseButtonPress: canvas.mousePressEvent,
+        QEvent.Type.MouseMove: canvas.mouseMoveEvent,
+        QEvent.Type.MouseButtonRelease: canvas.mouseReleaseEvent,
+    }[kind](event)
+
+
+def _timeline_drag(window, *times):
+    """Press at the first time, move through the rest, release at the last."""
+    from PySide6.QtCore import QEvent, Qt
+
+    canvas = window.timeline.canvas
+    down, none = Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton
+    _timeline_mouse(canvas, QEvent.Type.MouseButtonPress, times[0], buttons=down)
+    for time_s in times[1:]:
+        _timeline_mouse(canvas, QEvent.Type.MouseMove, time_s, buttons=down)
+    _timeline_mouse(canvas, QEvent.Type.MouseButtonRelease, times[-1], buttons=none)
+
+
+@pytest.fixture()
+def reviewed(window, tmp_path, monkeypatch):
+    """Two 10 s clips, a completed PHI review, and one step on the redo stack."""
+    monkeypatch.setattr(window, "_sync_player_to_timeline", lambda **_kwargs: None)
+    monkeypatch.setattr(window, "_load_active_clip", lambda: None)
+    for name in ("first", "second"):
+        window.project.add_clip(tmp_path / f"{name}.mov", duration=10, width=100, height=100)
+    window.project.active_clip_id = window.project.clips[0].id
+    window.project.phi_review_confirmed = True
+    window.project.deidentified_confirmed = True
+    window.project.audio_reviewed_for_phi = True
+    window.project.phi_review_progress = {window.project.clips[0].id: True}
+    window._seed_history()
+    window.project.project_name = "renamed"
+    window._push_history()
+    window.undo()
+    window.dirty = False
+    window.timeline.canvas.snap_enabled = False
+    assert _review_state(window) == (True, True, True, True, 1, 1)
+    return window
+
+
+def _review_state(window):
+    project = window.project
+    return (
+        project.phi_review_confirmed,
+        project.deidentified_confirmed,
+        project.audio_reviewed_for_phi,
+        bool(project.phi_review_progress),
+        len(window._undo_stack),
+        len(window._redo_stack),
+    )
+
+
+@pytest.mark.parametrize("action", ["zoom", "zoom_in_button", "fit", "fit_twice"])
+def test_timeline_zoom_keeps_phi_review_and_history(reviewed, action):
+    timeline = reviewed.timeline
+    before = _review_state(reviewed)
+    zoom_before = reviewed.project.zoom
+
+    if action == "zoom":
+        timeline._set_zoom(120.0)
+    elif action == "zoom_in_button":
+        timeline._set_zoom(reviewed.project.zoom * 1.25)
+    else:
+        timeline._zoom_to_fit()
+        if action == "fit_twice":
+            timeline._zoom_to_fit()
+            timeline._set_zoom(37.0)
+
+    assert reviewed.project.zoom != zoom_before
+    assert _review_state(reviewed) == before
+    assert reviewed.dirty, "the new zoom is still saved with the project"
+
+
+@pytest.mark.parametrize("time_s", [
+    pytest.param(15.0, id="click-other-clip"),
+    pytest.param(5.0, id="click-active-clip"),
+    pytest.param(10.03, id="click-trim-handle"),
+])
+def test_timeline_click_keeps_phi_review_and_history(reviewed, time_s):
+    before = _review_state(reviewed)
+
+    _timeline_drag(reviewed, time_s)
+
+    assert _review_state(reviewed) == before
+    assert reviewed.timeline.canvas.selected_item is not None
+
+
+def test_trim_dragged_out_and_back_is_not_an_edit(reviewed):
+    before = _review_state(reviewed)
+
+    _timeline_drag(reviewed, 19.97, 16.0, 14.0, 20.0)
+
+    assert reviewed.project.clips[1].trim_end == pytest.approx(10.0)
+    assert _review_state(reviewed) == before
+
+
+def _edit_trim(window):
+    _timeline_drag(window, 19.97, 18.0, 16.0)
+    assert window.project.clips[1].trim_end == pytest.approx(6.0)
+
+
+def _edit_move(window):
+    first = window.project.clips[0].id
+    _timeline_drag(window, 5.0, 12.0, 18.0)
+    assert window.project.clips[1].id == first
+
+
+def _edit_split(window):
+    window.project.current_time = 4.0
+    window.timeline._cut_active_clip()
+    assert len(window.project.clips) == 3
+
+
+def _edit_delete(window):
+    canvas = window.timeline.canvas
+    canvas.selected_item = ("clip", window.project.clips[1].id)
+    canvas._delete_selected_item()
+    assert len(window.project.clips) == 1
+
+
+def _edit_fade(window):
+    window.timeline._set_fade("in", 1.5)
+    assert window.project.active_clip.fade_in == 1.5
+
+
+@pytest.mark.parametrize("edit", [_edit_trim, _edit_move, _edit_split, _edit_delete, _edit_fade])
+def test_timeline_edits_still_reset_review_with_one_undo_step(reviewed, edit):
+    edit(reviewed)
+
+    # Review invalidated, exactly one new undo step, redo discarded.
+    assert _review_state(reviewed) == (False, False, False, False, 2, 0)
+    assert reviewed.dirty
+
+
+def test_selecting_another_clip_then_undoing_an_edit_restores_the_document(reviewed):
+    _timeline_drag(reviewed, 15.0)          # select the second clip: no undo step
+    _edit_trim(reviewed)                     # one undo step
+    reviewed.undo()
+
+    assert reviewed.project.clips[1].trim_end == pytest.approx(10.0)
+    assert reviewed.project.phi_review_confirmed
+    assert len(reviewed._undo_stack) == 1
+
+
+def test_zoom_is_autosaved_even_after_a_cached_history_snapshot(reviewed):
+    import json
+
+    reviewed._push_history()                 # leaves a cached autosave snapshot
+    reviewed.timeline._set_zoom(150.0)
+    reviewed._autosave()
+
+    saved = json.loads(reviewed.store.project_path.read_text())
+    assert saved["zoom"] == 150.0
+    assert saved["phi_review_confirmed"] is True
+    assert not reviewed.dirty
+
+
+# ── NE-017 / NE-018 / NE-021 ──────────────────────────────────────────────
+
+@pytest.fixture()
+def make_window_with_autosave(app, tmp_path, monkeypatch):
+    """Factory: build a MainWindow whose autosave project.json holds given bytes."""
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(SamBackend, "probe", lambda self: SamBackendInfo("missing", "none", "stubbed"))
+    monkeypatch.setattr(MainWindow, "_maybe_show_first_run_tutorial", lambda self: None)
+    _forbid_modal_dialogs(monkeypatch)
+    settings = QSettings("NeuroEdit", "Desktop")
+    keys = ("storage/projectRoot", "storage/promptShown", "tutorial/seen")
+    original = {key: settings.value(key) for key in keys}
+    settings.setValue("storage/projectRoot", str(tmp_path / "Autosave"))
+    settings.setValue("storage/promptShown", True)
+    settings.setValue("tutorial/seen", True)
+    made = []
+    readonly_dirs = []
+
+    def make(payload: bytes | None, warnings: list, readonly: bool = False):
+        monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warnings.append(a[1:]))
+        bad = tmp_path / "Autosave" / "project.json"
+        bad.parent.mkdir(parents=True, exist_ok=True)
+        if payload is not None:
+            bad.write_bytes(payload)
+        if readonly:
+            for name in ("masks", "audio", "stills"):
+                (bad.parent / name).mkdir(exist_ok=True)
+            readonly_dirs.append(bad.parent)
+            bad.parent.chmod(0o555)
+        try:
+            win = MainWindow()
+        finally:
+            if readonly:
+                bad.parent.chmod(0o755)
+        made.append(win)
+        if readonly:
+            bad.parent.chmod(0o555)
+        return win
+
+    yield make
+    for directory in readonly_dirs:
+        directory.chmod(0o755)
+    QApplication.processEvents()
+    for win in made:
+        thread = getattr(win, "_sam_probe_thread", None)
+        if thread is not None:
+            thread.quit()
+            thread.wait(5_000)
+        win.close()
+        win.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
+    for key, value in original.items():
+        settings.setValue(key, value if value is not None else "")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [b'{"clips": "not-a-list"', b"", b'{"clips": 5, "slides": "x"}'],
+    ids=["truncated", "zero-byte", "wrong-types"],
+)
+def test_unreadable_autosave_is_preserved_before_autosave(make_window_with_autosave, tmp_path, payload):
+    warnings = []
+    win = make_window_with_autosave(payload, warnings)
+    root = tmp_path / "Autosave"
+
+    win._mark_dirty()
+    win._autosave()
+
+    kept = sorted(root.glob("project.unreadable-*.json"))
+    assert len(kept) == 1 and kept[0].read_bytes() == payload
+    assert win.store.project_path.read_text() != payload.decode("utf-8", "ignore")
+    assert str(kept[0]) in warnings[0][1]  # the warning names the preserved file
+
+
+def test_unreadable_autosave_skips_orphan_mask_cleanup(make_window_with_autosave, tmp_path):
+    win = make_window_with_autosave(b"{broken", [])
+    mask = tmp_path / "Autosave" / "masks" / "maybe-referenced.png"
+    mask.write_bytes(b"png")
+
+    win._cleanup_orphan_masks()
+
+    assert mask.exists()
+
+
+def test_clean_start_does_not_warn_or_preserve(window, tmp_path):
+    assert window._preserved_unreadable is None
+    assert not list((tmp_path / "Autosave").glob("*.unreadable-*"))
+
+
+def _scratch_case(window, tmp_path):
+    window.project.add_clip(tmp_path / "case.mov", duration=10, width=100, height=100)
+    window._mark_dirty()
+    window._autosave()
+    assert not window.dirty
+
+
+@pytest.mark.parametrize("answer", ["cancel", "discard", "save"])
+def test_new_project_asks_before_replacing_clean_scratch_case(window, tmp_path, monkeypatch, answer):
+    from PySide6.QtWidgets import QMessageBox
+
+    _scratch_case(window, tmp_path)
+    old_project = window.project
+    prompts = []
+    button = {
+        "cancel": QMessageBox.StandardButton.Cancel,
+        "discard": QMessageBox.StandardButton.Discard,
+        "save": QMessageBox.StandardButton.Save,
+    }[answer]
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: prompts.append(a[1]) or button)
+    saved_as = []
+    monkeypatch.setattr(window, "_save_project_as", lambda: saved_as.append(True))
+    monkeypatch.setattr(window, "_load_active_clip", lambda: None)
+
+    window._new_project()
+
+    assert len(prompts) == 1
+    if answer == "discard":
+        assert window.project is not old_project and window.project.clips == []
+    else:
+        assert window.project is old_project  # nothing replaced, nothing deleted
+        assert (window.store.project_path.parent / "project.json").exists()
+    # "save" with Save As not actually moving the store keeps the case open.
+    assert bool(saved_as) == (answer == "save")
+
+
+def test_new_project_after_successful_save_as_starts_fresh(window, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    _scratch_case(window, tmp_path)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Save)
+
+    def fake_save_as():
+        window.store = ProjectStore.create(tmp_path / "Saved")
+
+    monkeypatch.setattr(window, "_save_project_as", fake_save_as)
+    monkeypatch.setattr(window, "_load_active_clip", lambda: None)
+
+    window._new_project()
+
+    assert window.project.clips == []
+
+
+def test_new_project_does_not_prompt_for_empty_scratch_or_saved_project(window, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    prompts = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: prompts.append(a[1]) or QMessageBox.StandardButton.Cancel)
+    monkeypatch.setattr(window, "_load_active_clip", lambda: None)
+
+    window._new_project()  # empty scratch project
+    window.store = ProjectStore.create(tmp_path / "Elsewhere")
+    window.project.add_clip(tmp_path / "case.mov", duration=10, width=100, height=100)
+    window.dirty = False
+    window._new_project()  # clean project saved outside the autosave folder
+
+    assert prompts == []
+    assert window.project.clips == []
+
+
+class _RunningThread:
+    def __init__(self, running=True):
+        self.running = running
+
+    def isRunning(self):  # noqa: N802
+        return self.running
+
+    def quit(self):
+        self.running = False
+
+    def wait(self, _ms):
+        return True
+
+
+class _Worker:
+    def __init__(self):
+        self.cancelled = False
+
+    def cancel(self):
+        self.cancelled = True
+
+
+@pytest.mark.parametrize("thread_attr", ["_export_thread", "_sam_segment_thread", "_sam_propagation_thread"])
+def test_close_during_job_keep_working_ignores_close(window, monkeypatch, thread_attr):
+    from PySide6.QtGui import QCloseEvent
+    from PySide6.QtWidgets import QMessageBox
+
+    thread, worker = _RunningThread(), _Worker()
+    monkeypatch.setattr(window, thread_attr, thread, raising=False)
+    monkeypatch.setattr(window, "_export_worker", worker, raising=False)
+    prompts = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: prompts.append(a[1]) or QMessageBox.StandardButton.No)
+    event = QCloseEvent()
+
+    window.closeEvent(event)
+
+    assert len(prompts) == 1
+    assert not event.isAccepted()
+    assert thread.running and not worker.cancelled
+    assert not getattr(window, "_closing", False)
+    monkeypatch.setattr(window, thread_attr, None)  # let fixture teardown close cleanly
+
+
+def test_close_during_export_close_anyway_runs_shutdown(window, monkeypatch):
+    from PySide6.QtGui import QCloseEvent
+    from PySide6.QtWidgets import QMessageBox
+
+    thread, worker = _RunningThread(), _Worker()
+    monkeypatch.setattr(window, "_export_thread", thread, raising=False)
+    monkeypatch.setattr(window, "_export_worker", worker, raising=False)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    event = QCloseEvent()
+
+    window.closeEvent(event)
+
+    assert event.isAccepted()
+    assert worker.cancelled and not thread.running
+    assert window._closing
+
+
+def test_close_without_job_does_not_prompt(window, monkeypatch):
+    from PySide6.QtGui import QCloseEvent
+    from PySide6.QtWidgets import QMessageBox
+
+    prompts = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: prompts.append(a) or QMessageBox.StandardButton.No)
+    event = QCloseEvent()
+
+    window.closeEvent(event)
+
+    assert prompts == []
+    assert event.isAccepted()
+
+
+def _stub_question(monkeypatch, answer):
+    prompts = []
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        lambda *a, **k: prompts.append(a[1]) or answer,
+    )
+    return prompts
+
+
+def _dirty_scratch_case(window, tmp_path):
+    window.project.add_clip(tmp_path / "case.mov", duration=10, width=100, height=100)
+    window._mark_dirty()
+    assert window.dirty and window._is_unsaved_scratch_case()
+
+
+def test_dirty_scratch_save_runs_save_as_then_starts_new_project(window, tmp_path, monkeypatch):
+    _dirty_scratch_case(window, tmp_path)
+    prompts = _stub_question(monkeypatch, QMessageBox.StandardButton.Save)
+    saved = tmp_path / "Saved"
+    calls = []
+
+    def fake_save_as():
+        calls.append(True)
+        window.store = ProjectStore.create(saved)
+        window.store.save(window.project)
+
+    monkeypatch.setattr(window, "_save_project_as", fake_save_as)
+    monkeypatch.setattr(window, "_load_active_clip", lambda: None)
+
+    window._new_project()
+
+    assert prompts == ["Unsaved Case"] and calls == [True]
+    assert window.project.clips == []
+    assert "case.mov" in (saved / "project.json").read_text()  # saved case untouched
+    assert window.store.project_path.parent != saved
+
+
+def test_dirty_scratch_save_as_cancelled_keeps_case_open(window, tmp_path, monkeypatch):
+    _dirty_scratch_case(window, tmp_path)
+    old_project = window.project
+    prompts = _stub_question(monkeypatch, QMessageBox.StandardButton.Save)
+    monkeypatch.setattr(window, "_save_project_as", lambda: None)
+
+    window._new_project()
+
+    assert len(prompts) == 1
+    assert window.project is old_project and window.dirty
+
+
+def test_dirty_scratch_discard_starts_new_project(window, tmp_path, monkeypatch):
+    _dirty_scratch_case(window, tmp_path)
+    prompts = _stub_question(monkeypatch, QMessageBox.StandardButton.Discard)
+    monkeypatch.setattr(window, "_load_active_clip", lambda: None)
+
+    window._new_project()
+
+    assert len(prompts) == 1
+    assert window.project.clips == []
+
+
+def test_dirty_scratch_cancel_changes_nothing(window, tmp_path, monkeypatch):
+    _dirty_scratch_case(window, tmp_path)
+    old_project = window.project
+    prompts = _stub_question(monkeypatch, QMessageBox.StandardButton.Cancel)
+
+    window._new_project()
+
+    assert len(prompts) == 1
+    assert window.project is old_project and window.dirty
+
+
+def test_dirty_project_saved_elsewhere_keeps_generic_prompt(window, tmp_path, monkeypatch):
+    window.store = ProjectStore.create(tmp_path / "Elsewhere")
+    window.project.add_clip(tmp_path / "case.mov", duration=10, width=100, height=100)
+    window._mark_dirty()
+    prompts = _stub_question(monkeypatch, QMessageBox.StandardButton.Cancel)
+
+    window._new_project()
+
+    assert prompts == ["Unsaved Changes"]
+    assert window.project.clips
+
+
+def test_scratch_case_with_running_job_shows_info_not_question(window, tmp_path, monkeypatch):
+    _dirty_scratch_case(window, tmp_path)
+    old_project = window.project
+    monkeypatch.setattr(window, "_export_thread", _RunningThread(), raising=False)
+    prompts = _stub_question(monkeypatch, QMessageBox.StandardButton.Discard)
+    infos = []
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: infos.append(a[1]))
+
+    window._new_project()
+
+    assert prompts == [] and infos == ["Background work in progress"]
+    assert window.project is old_project
+    monkeypatch.setattr(window, "_export_thread", None)
+
+
+# ── Review round 2: autosave-root case, markers/transcript, blocked autosave ──
+
+def _write_root_case(tmp_path, **content):
+    """Put a saved scratch case into the autosave root's project.json."""
+    from neuroedit_desktop.models import TimelineMarker, TranscriptSegment
+
+    root = tmp_path / "Autosave"
+    store = ProjectStore.create(root)
+    project = ProjectState(project_name="Scratch")
+    if content.get("clip"):
+        project.add_clip(tmp_path / "scratch.mov", duration=10, width=100, height=100)
+    if content.get("marker"):
+        project.markers.append(TimelineMarker(id="m", time=1.0, label="x"))
+    if content.get("transcript"):
+        project.transcript_segments.append(
+            TranscriptSegment(id="t", audio_track_id=None, start_time=0, end_time=1, text="hi")
+        )
+    store.save(project)
+    return store.project_path
+
+
+def _move_to_other_project(window, tmp_path):
+    """Open-then-New setup: the current project is saved outside the root."""
+    window.store = ProjectStore.create(tmp_path / "Other")
+    window.project = ProjectState(project_name="Other")
+    window.dirty = False
+    window._load_active_clip = lambda: None
+
+
+@pytest.mark.parametrize("answer", ["open", "cancel", "replace"])
+def test_new_project_asks_about_case_left_in_autosave_root(window, tmp_path, monkeypatch, answer):
+    root_file = _write_root_case(tmp_path, clip=True)
+    before = root_file.read_bytes()
+    _move_to_other_project(window, tmp_path)
+    other_project = window.project
+    button = {
+        "open": QMessageBox.StandardButton.Open,
+        "cancel": QMessageBox.StandardButton.Cancel,
+        "replace": QMessageBox.StandardButton.Discard,
+    }[answer]
+    prompts = _stub_question(monkeypatch, button)
+    # Opening the case reports its (non-existent) media, as startup restore does.
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
+
+    window._new_project()
+
+    assert prompts == ["Unsaved case in the autosave folder"]
+    assert root_file.read_bytes() == before
+    if answer == "open":
+        assert window.store.project_path == root_file
+        assert window.project.project_name == "Scratch" and len(window.project.clips) == 1
+    elif answer == "cancel":
+        assert window.project is other_project
+    else:
+        assert window.project is not other_project and window.project.clips == []
+        assert window.store.project_path == root_file
+
+
+def test_new_project_ignores_empty_case_in_autosave_root(window, tmp_path, monkeypatch):
+    _write_root_case(tmp_path)  # readable but empty
+    _move_to_other_project(window, tmp_path)
+    prompts = _stub_question(monkeypatch, QMessageBox.StandardButton.Cancel)
+
+    window._new_project()
+
+    assert prompts == []
+    assert window.store.project_path == tmp_path / "Autosave" / "project.json"
+
+
+def test_new_project_preserves_unreadable_case_in_autosave_root(window, tmp_path, monkeypatch):
+    root_file = tmp_path / "Autosave" / "project.json"
+    root_file.write_bytes(b'{"clips": "oops"')
+    _move_to_other_project(window, tmp_path)
+    prompts = _stub_question(monkeypatch, QMessageBox.StandardButton.Cancel)
+
+    window._new_project()
+
+    kept = list(root_file.parent.glob("project.unreadable-*.json"))
+    assert prompts == [] and len(kept) == 1 and kept[0].read_bytes() == b'{"clips": "oops"'
+    assert window.store.project_path == root_file and window.project.clips == []
+
+
+def test_new_project_unmovable_unreadable_root_file_is_not_replaced(window, tmp_path, monkeypatch):
+    root_file = tmp_path / "Autosave" / "project.json"
+    root_file.write_bytes(b"{broken")
+    _move_to_other_project(window, tmp_path)
+    other_project = window.project
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warnings.append(a[1]))
+
+    def cannot_move(_path):
+        raise PermissionError("read-only")
+
+    monkeypatch.setattr(ProjectStore, "preserve_unreadable", staticmethod(cannot_move))
+
+    window._new_project()
+
+    assert len(warnings) == 1
+    assert window.project is other_project
+    assert root_file.read_bytes() == b"{broken"
+
+
+@pytest.mark.parametrize("content", [{"marker": True}, {"transcript": True}], ids=["markers", "transcript"])
+def test_markers_or_transcript_only_case_counts_as_content(window, tmp_path, monkeypatch, content):
+    from neuroedit_desktop.models import TimelineMarker, TranscriptSegment
+
+    if "marker" in content:
+        window.project.markers.append(TimelineMarker(id="m", time=1.0, label="x"))
+    else:
+        window.project.transcript_segments.append(
+            TranscriptSegment(id="t", audio_track_id=None, start_time=0, end_time=1, text="hi")
+        )
+    window._mark_dirty()
+    assert window._is_unsaved_scratch_case()
+    prompts = _stub_question(monkeypatch, QMessageBox.StandardButton.Cancel)
+
+    window._new_project()
+
+    assert prompts == ["Unsaved Case"]
+    # the on-disk check uses the same definition
+    _write_root_case(tmp_path, **content)
+    _move_to_other_project(window, tmp_path)
+    window._new_project()
+    assert prompts[-1] == "Unsaved case in the autosave folder"
+
+
+def test_unmovable_unreadable_autosave_is_never_overwritten(make_window_with_autosave, tmp_path, monkeypatch):
+    import os
+
+    if os.geteuid() == 0:
+        pytest.skip("directory permissions are not enforced for root")
+    warnings = []
+    win = make_window_with_autosave(b"{broken", warnings, readonly=True)
+    bad = tmp_path / "Autosave" / "project.json"
+    assert len(warnings) == 1  # constructed fine, warned once
+    other = win.project
+
+    win._mark_dirty()
+    win._autosave()
+    assert win.dirty and bad.read_bytes() == b"{broken"
+
+    win._new_project()  # warns instead of replacing
+    assert len(warnings) == 2 and win.project is other
+    assert bad.read_bytes() == b"{broken"
+    assert not list(bad.parent.glob("*.unreadable-*")) and not list(bad.parent.glob("session-*"))
+
+    win.store = ProjectStore.create(tmp_path / "Other")  # as after Save As
+    win._autosave()
+    assert (tmp_path / "Other" / "project.json").exists()
+
+
+def test_preserved_unreadable_file_protects_masks_in_later_sessions(make_window_with_autosave, tmp_path):
+    root = tmp_path / "Autosave"
+    first = make_window_with_autosave(b'{"annotations": "x"', [])
+    mask = root / "masks" / "referenced.png"
+    mask.write_bytes(b"png")
+    first.close()
+
+    second = make_window_with_autosave(None, [])
+    second._cleanup_orphan_masks()
+    assert mask.exists()  # preserved file from session 1 may still reference it
+
+    for kept in root.glob("project.unreadable-*.json"):
+        kept.unlink()
+    second._cleanup_orphan_masks()
+    assert not mask.exists()
+
+
+def test_blocked_autosave_cannot_be_overwritten_on_close(make_window_with_autosave, tmp_path, monkeypatch):
+    from PySide6.QtGui import QCloseEvent
+
+    def cannot_move(path):
+        raise OSError("rename denied")
+
+    monkeypatch.setattr(ProjectStore, "preserve_unreadable", staticmethod(cannot_move))
+    warnings = []
+    original = b"{broken-but-recoverable"
+    win = make_window_with_autosave(original, warnings)
+    win.project.project_name = "New work"
+    win._mark_dirty()
+    event = QCloseEvent()
+    try:
+        win.closeEvent(event)
+        assert (tmp_path / "Autosave" / "project.json").read_bytes() == original
+        assert not event.isAccepted()
+        assert win.dirty
+        assert "Save As" in warnings[-1][1]
+    finally:
+        win.dirty = False  # permit fixture teardown after the intentionally rejected close
+
+
+def test_startup_autosave_warns_about_newer_schema(make_window_with_autosave):
+    import json
+
+    from neuroedit_desktop.models import SCHEMA_VERSION
+
+    warnings = []
+    win = make_window_with_autosave(json.dumps({"schema_version": SCHEMA_VERSION + 1}).encode(), warnings)
+    assert [entry[0] for entry in warnings] == ["Project from a newer version"]
+    assert not win.dirty
+
+
+@pytest.mark.parametrize('field', ['storyboard_objective', 'storyboard_case_context', 'storyboard_key_anatomy', 'storyboard_steps', 'storyboard_decision_points', 'storyboard_teaching_pearl', 'storyboard_final_point', 'intended_audience', 'edit_disclosure'])
+def test_notes_only_scratch_requires_confirmation(window, monkeypatch, field):
+    from neuroedit_desktop.ui.tutorial import project_has_user_content
+
+    setattr(window.project, field, "Important plan")
+    window._mark_dirty()
+    window._autosave()
+    assert not window.dirty
+    original = window.project
+    prompts = []
+    monkeypatch.setattr(QMessageBox, 'question', lambda *args: prompts.append(args[1]) or QMessageBox.StandardButton.Cancel)
+    window._new_project()
+    assert window.project is original
+    assert prompts == ['Unsaved Case']
+    assert project_has_user_content(window)
+
+
+def test_switching_projects_dismisses_hands_on_tutorial(window, tmp_path):
+    overlay = TutorialOverlay(window, build_default_steps(window), read_only=False)
+    window._tutorial_overlay = overlay
+    project = ProjectState(storyboard_case_context="Existing user work")
+    window._activate_project(ProjectStore.create(tmp_path / "Saved"), project)
+    assert overlay.isHidden()
+    assert window.project is project
+
+
+def test_sam_probe_references_survive_result_until_thread_has_stopped(window, monkeypatch):
+    import threading
+    import time
+
+    from PySide6.QtCore import QObject, Signal
+    from neuroedit_desktop.ui import sam_workflow
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    class PausedWorker(QObject):
+        progress = Signal(str)
+        finished = Signal(object)
+
+        def __init__(self, _backend):
+            super().__init__()
+
+        def cancel(self):
+            release.set()
+
+        def run(self):
+            self.finished.emit(SamBackendInfo("missing", "none", "stub"))
+            entered.set()
+            release.wait(5)
+
+    window._startup_sam_timer.stop()
+    delivered = []
+    original_handler = window._on_sam_probe_finished
+    def on_result(info):
+        original_handler(info)
+        delivered.append(True)
+    monkeypatch.setattr(window, "_on_sam_probe_finished", on_result)
+    monkeypatch.setattr(sam_workflow, "SamProbeWorker", PausedWorker)
+    window._load_sam_backend()
+    thread, worker = window._sam_probe_thread, window._sam_probe_worker
+    try:
+        assert entered.wait(2)
+        deadline = time.monotonic() + 2
+        while not delivered and time.monotonic() < deadline:
+            QApplication.processEvents()
+        assert delivered
+        assert window._sam_probe_thread is thread
+        assert window._sam_probe_worker is worker
+        assert thread.isRunning()
+    finally:
+        release.set()
+    deadline = time.monotonic() + 2
+    while window._sam_probe_thread is not None and time.monotonic() < deadline:
+        QTest.qWait(10)
+    assert window._sam_probe_thread is None
+    assert window._sam_probe_worker is None
+
+
+def test_close_before_startup_cancels_deferred_sam_probe(window, monkeypatch):
+    calls = []
+    monkeypatch.setattr(SamBackend, "probe", lambda self: calls.append(True))
+    window.close()
+    QApplication.processEvents()
+    assert not calls
+    assert getattr(window, "_sam_probe_thread", None) is None

@@ -61,12 +61,10 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ## Repository layout
 
-This repo contains two apps:
-
-- **Root** (`./`): legacy React/Vite/TypeScript browser prototype. Largely
-  superseded — most current work happens in `desktop/`.
-- **`desktop/`**: the active native macOS application (PySide6). All commands
-  and architecture below refer to the desktop app unless noted.
+The application is the native PySide6 desktop editor in **`desktop/`**. The
+repository root contains project documentation and CI configuration; no React/Vite
+prototype is present in this checkout. All commands and architecture below refer
+to the desktop app unless noted.
 
 ## Commands (desktop)
 
@@ -92,8 +90,9 @@ python -c "import py_compile; py_compile.compile('src/neuroedit_desktop/<file>.p
 hf auth login
 ```
 
-The suite under `tests/` collects **381 tests** (`python -m pytest tests/ -q`;
-CI verified for `v0.5.15-alpha`, including `tests/test_ripple_overlays.py`).
+The suite under `tests/` collects **696 tests** (`python -m pytest tests/ -q`;
+locally verified with a clean exit on 2026-11-16). Hosted CI for the resumed
+ticket changes has not yet run.
 Keep it and `ruff check src tests scripts` green before every release tag.
 Every public release must also update GitHub's Latest release and repository
 Releases sidebar. Verify `/releases/latest` resolves to the new tag, alongside
@@ -320,15 +319,15 @@ Other PHI safeguards:
   (v0.5.6→v0.5.14: timeline reorder/drag, labels-in-timeline, narration recording
   rewrite, background media-import probing, brush annotation, video-transition
   last-frame hold, keep-in-place external media). Filed the per-tick narration
-  `stat` finding in `AudioPreview.sync` (still open). Phase 6 modularization
+  `stat` finding in `AudioPreview.sync` (fixed 2026-11-16: one-second cache,
+  immediate checks on seek and source change). Phase 6 modularization
   remains complete; keep future splits ownership-driven rather than
   line-count-driven, and keep a true pre-`to_dict()` undo shortcut deferred
   unless the model gains a trustworthy document revision signal.
 - **Mode:** incremental going forward. Next review should deep-dive files changed
   after `e1b0839` plus one hop. (Full-sweep baselines: `22085f9` 2026-06-17 and
   `3e00fc0` 2026-11-12.)
-- **Out-of-scope paths:** root React/Vite prototype (legacy, superseded by
-  `desktop/`); `desktop/dist/` and any build output; `node_modules/`; `*.lock`;
+- **Out-of-scope paths:** `desktop/dist/` and any build output; `*.lock`;
   `.venv/` (symlinked into iCloud, see venv note); vendored deps; iCloud
   conflict copies (`* 2.py`, `.gitignore`d).
 - **Known false positives / intentionally not optimized:**
@@ -390,7 +389,13 @@ Other PHI safeguards:
     (`AudioPreview`): per-track `QMediaPlayer`+`QAudioOutput`, synced from
     `_tick_timeline_playback`. Players are created/torn down as tracks enter/leave
     the active window; `QAudioOutput` volume is clamped 0..1 (export can amplify
-    to 2). See the open backlog finding re: its per-tick `Path.exists()` cost.
+    to 2). File existence checks use a one-second cache during continuous playback
+    and refresh immediately on seek or source change.
+  - Audio import duration probing runs in a single Python executor worker; a GUI
+    timer commits the result only for the original, unchanged document. Cancel
+    discards results; an already running probe finishes before its Python thread
+    exits. Window teardown stops polling, so late results cannot mutate a closed
+    project. The insertion time is captured before probing.
   - Media import probing runs off-thread: `MediaImportWorker`
     (`ui/media_import_worker.py`) on a `QThread`, probing each path and
     re-stat-ing before/after to discard metadata if the file changed mid-probe.

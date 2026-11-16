@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import errno
 import math
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -15,10 +17,119 @@ from PySide6.QtGui import QBrush, QColor, QFont, QFontMetricsF, QImage, QPainter
 
 from neuroedit_desktop.captions import build_caption_cues, cue_at_time, paint_caption
 from neuroedit_desktop.models import Annotation, AudioTrack, ProjectState, Slide, VideoClip
+from neuroedit_desktop.stills import read_upright_image
 
 
 ProgressCallback = Callable[[int, str], None]
 CancelCallback = Callable[[], bool]
+
+_ffmpeg_cache: list[str | None] = []
+
+
+def _bundled_ffmpeg() -> str | None:
+    try:
+        import imageio_ffmpeg  # type: ignore[import-not-found]  # noqa: PLC0415
+
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _path_ffmpegs() -> list[str]:
+    """Every `ffmpeg` on PATH in order (shutil.which returns only the first)."""
+    found: list[str] = []
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        if not directory:
+            continue
+        hit = shutil.which("ffmpeg", path=directory)
+        if hit:
+            hit = os.path.abspath(hit)  # a relative PATH entry depends on the cwd
+            if hit not in found:
+                found.append(hit)
+    return found
+
+
+def _ffmpeg_runs(path: str) -> bool:
+    """True when the candidate executes (not e.g. a wrong-architecture binary)."""
+    try:
+        proc = subprocess.run(
+            [path, "-version"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
+
+
+def resolve_ffmpeg() -> str | None:
+    """The single ffmpeg the app uses: bundled build first, then PATH.
+
+    A candidate is used only if `-version` runs; only a working path is cached.
+    """
+    if _ffmpeg_cache:
+        return _ffmpeg_cache[0]
+    bundled = _bundled_ffmpeg()
+    for candidate in ([bundled] if bundled else []) + _path_ffmpegs():
+        if _ffmpeg_runs(candidate):
+            _ffmpeg_cache.append(candidate)
+            return candidate
+    # Not cached: a transient failure (slow first launch, scanner) must not
+    # disable ffmpeg for the whole session.
+    return None
+
+
+def require_ffmpeg() -> str:
+    path = resolve_ffmpeg()
+    if path is None:
+        raise RuntimeError(
+            "No working FFmpeg was found. The bundled FFmpeg could not run and no "
+            "usable ffmpeg is on PATH; reinstall NeuroEdit or install a native FFmpeg."
+        )
+    return path
+
+
+def reset_ffmpeg_cache() -> None:
+    _ffmpeg_cache.clear()
+
+
+_STAGE_PREFIX = ".neuroedit-export-"
+_STAGE_SUFFIX = ".partial"
+_COPY_CHUNK = 4 * 1024 * 1024
+
+
+def _publish_file(src: Path, dest: Path, cancelled: CancelCallback | None = None) -> None:
+    """Move a finished file to `dest` so `dest` is only ever replaced by a complete file.
+
+    Same-volume moves are atomic. Across volumes (EXDEV) the file is copied in
+    chunks to a hidden temp name in the destination directory and then atomically
+    renamed; `cancelled` is polled between chunks and the staged file is removed.
+    """
+    try:
+        os.replace(src, dest)
+        return
+    except OSError as exc:
+        if exc.errno != errno.EXDEV:
+            raise
+    fd, staged_name = tempfile.mkstemp(prefix=_STAGE_PREFIX, suffix=_STAGE_SUFFIX, dir=dest.parent)
+    staged = Path(staged_name)
+    try:
+        with os.fdopen(fd, "wb") as out, open(src, "rb") as inp:
+            while True:
+                if cancelled is not None and cancelled():
+                    raise ExportCancelled()
+                chunk = inp.read(_COPY_CHUNK)
+                if not chunk:
+                    break
+                out.write(chunk)
+        shutil.copymode(src, staged)  # mkstemp made it owner-only
+        os.replace(staged, dest)
+    except BaseException:
+        staged.unlink(missing_ok=True)
+        raise
+    src.unlink(missing_ok=True)
 
 
 @dataclass(frozen=True)
@@ -32,6 +143,12 @@ class ExportSettings:
     mute_source_audio: bool = False  # drop original clip audio (may contain spoken PHI)
     burn_captions: bool = False  # burn transcript captions into the video frames
     audio_bitrate_k: int = 192  # AAC bitrate in kbit/s for the mixed audio track
+
+    def __post_init__(self) -> None:
+        # yuv420p H.264 needs even dimensions; an odd request would only fail
+        # at the very end of the run, so round down to even here.
+        object.__setattr__(self, "width", max(2, self.width // 2 * 2))
+        object.__setattr__(self, "height", max(2, self.height // 2 * 2))
 
 
 @dataclass(frozen=True)
@@ -53,6 +170,11 @@ class TimelineSegment:
     @property
     def duration(self) -> float:
         return max(0.0, self.end - self.start)
+
+
+_AUDIO_STREAM_LINE = re.compile(
+    r"^\s+Stream #\d+:\d+(?:\[[^\]]*\])?(?:\([^)]*\))?: Audio:", re.MULTILINE
+)
 
 
 class ExportCancelled(Exception):
@@ -112,7 +234,7 @@ class ProjectExporter:
                 else:
                     self._encode_video_with_opencv(tmp_video, duration, cv2)
                     warnings.append(
-                        "FFmpeg was not found, so the export uses OpenCV video encoding without audio."
+                        "No working FFmpeg was found, so the export uses OpenCV video encoding without audio."
                     )
 
                 audio_sources = self._audio_sources(ffmpeg) if ffmpeg else []
@@ -122,7 +244,7 @@ class ProjectExporter:
                 else:
                     if ffmpeg and self._active_audio_tracks():
                         warnings.append("No readable audio streams were found, so the MP4 is silent.")
-                    os.replace(tmp_video, self.settings.output_path)
+                    _publish_file(tmp_video, self.settings.output_path, self.cancelled)
 
             self.progress(100, "Export complete.")
             return warnings
@@ -163,17 +285,7 @@ class ProjectExporter:
         return max(0.0, max(ends, default=0.0))
 
     def _find_ffmpeg(self) -> str | None:
-        system_ffmpeg = shutil.which("ffmpeg")
-        if system_ffmpeg:
-            return system_ffmpeg
-        try:
-            import imageio_ffmpeg  # type: ignore[import-not-found]  # noqa: PLC0415
-        except Exception:  # noqa: BLE001
-            return None
-        try:
-            return imageio_ffmpeg.get_ffmpeg_exe()
-        except Exception:  # noqa: BLE001
-            return None
+        return resolve_ffmpeg()
 
     def _encode_timeline_video(
         self,
@@ -367,7 +479,12 @@ class ProjectExporter:
         vf = (
             f"scale={self.settings.width}:{self.settings.height}:force_original_aspect_ratio=decrease,"
             f"pad={self.settings.width}:{self.settings.height}:(ow-iw)/2:(oh-ih)/2,"
-            f"fps={self.settings.fps},format=yuv420p,setpts=PTS-STARTPTS"
+            f"fps={self.settings.fps},"
+            # If the probed duration overestimates the stream, hold the last
+            # frame so -frames:v below still yields the full segment. (Placed
+            # before setpts: after it the padded frames are dropped.)
+            f"tpad=stop_mode=clone:stop_duration={segment.duration + 1:.3f},"
+            "format=yuv420p,setpts=PTS-STARTPTS"
         )
         cmd = [
             ffmpeg,
@@ -436,7 +553,14 @@ class ProjectExporter:
             "+faststart",
             str(path),
         ]
-        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        # stderr goes to a temp file, not a pipe: nothing reads it while frames
+        # are being written, so a chatty ffmpeg could fill a pipe and deadlock.
+        stderr_file = tempfile.TemporaryFile()
+        try:
+            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=stderr_file)
+        except BaseException:
+            stderr_file.close()
+            raise
         assert proc.stdin is not None
         first_frame = self._frame_number(segment.start)
         frame_count = max(1, self._frame_number(segment.end) - first_frame)
@@ -462,8 +586,10 @@ class ProjectExporter:
                 proc.stdin.close()
             except (BrokenPipeError, OSError):
                 encoder_died = True
-            stderr = proc.stderr.read().decode("utf-8", errors="replace") if proc.stderr else ""
             ret = proc.wait()
+            stderr_file.seek(0, os.SEEK_END)
+            stderr_file.seek(max(0, stderr_file.tell() - 4000))
+            stderr = stderr_file.read().decode("utf-8", errors="replace")
         finally:
             # A decoder/painter failure must reap ffmpeg too: otherwise the
             # child remains alive waiting for more raw frames on its open pipe.
@@ -474,12 +600,11 @@ class ProjectExporter:
                 except subprocess.TimeoutExpired:
                     proc.kill()
                     proc.wait(timeout=5)
-            for pipe in (proc.stdin, proc.stderr):
-                if pipe is not None:
-                    try:
-                        pipe.close()
-                    except OSError:
-                        pass
+            try:
+                proc.stdin.close()
+            except OSError:
+                pass
+            stderr_file.close()
         if ret != 0 or encoder_died:
             raise RuntimeError(f"FFmpeg video export failed: {stderr.strip() or 'unknown error'}")
 
@@ -617,11 +742,13 @@ class ProjectExporter:
 
         clip = self._clip_at_time(time_s)
         source_rect = None
+        source_size = None
         if clip is not None:
             clip_frame = self._frame_for_clip(clip, time_s)
             if clip_frame is None:
                 raise RuntimeError(f"Could not render source media for clip: {clip.name}")
-            source_rect = self._fitted_source_rect(clip_frame.shape[1], clip_frame.shape[0])
+            source_size = (clip_frame.shape[1], clip_frame.shape[0])
+            source_rect = self._fitted_source_rect(*source_size)
             frame = self._fit_frame(clip_frame)
 
         return self._paint_qt(
@@ -631,6 +758,7 @@ class ProjectExporter:
             include_annotations=True,
             include_fade=True,
             source_rect=source_rect,
+            source_size=source_size,
         )
 
     def _frame_for_clip(self, clip: VideoClip, time_s: float) -> np.ndarray | None:
@@ -639,10 +767,18 @@ class ProjectExporter:
         if clip.media_type == "image":
             cached = self._image_cache.get(clip.path)
             if cached is None:
-                image = cv2.imread(clip.path, cv2.IMREAD_COLOR)
-                if image is None:
+                # Same decoder as the preview, so the picture (and therefore
+                # every label and redaction on it) has the same orientation.
+                image = read_upright_image(clip.path)
+                if image.isNull():
                     return None
-                cached = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                image = image.convertToFormat(QImage.Format.Format_RGB888)
+                rows = np.frombuffer(image.constBits(), dtype=np.uint8).reshape(
+                    (image.height(), image.bytesPerLine())
+                )
+                cached = rows[:, : image.width() * 3].reshape(
+                    (image.height(), image.width(), 3)
+                ).copy()
                 self._image_cache[clip.path] = cached
             return cached
 
@@ -653,22 +789,58 @@ class ProjectExporter:
             self._video_states[clip.path] = {
                 "last_time_s": None,
                 "last_frame": None,
+                "cfr": None,
+                "fps": float(cap.get(cv2.CAP_PROP_FPS) or 0.0),
+                "last_index": None,
+                "next_index": None,
             }
 
         state = self._video_states[clip.path]
         local_s = max(0.0, clip.trim_start + max(0.0, time_s - clip.start_time))
         if state["last_time_s"] == local_s and state["last_frame"] is not None:
             return state["last_frame"]  # type: ignore[return-value]
-        # Frame indices derived from an average FPS select the wrong source frame
-        # for VFR recordings. Seek by the media timestamp for every rendered frame.
-        cap.set(cv2.CAP_PROP_POS_MSEC, local_s * 1000.0)
+        # OpenCV's timestamp seek lands on frame index round(t * average_fps) for
+        # constant-frame-rate files, so those are read forward instead of
+        # re-seeking (a keyframe seek plus decode-forward) for every frame. The
+        # shortcut is trusted only while the decoder proves it: every frame it
+        # yields must carry the timestamp index / fps. The first frame that does
+        # not (a variable-frame-rate file) switches this file to seek-per-frame
+        # for good, and that frame is fetched again the old way.
+        fps = float(state["fps"])  # type: ignore[arg-type]
+        if state["cfr"] is None:
+            state["cfr"] = fps > 0
+        index = int(local_s * fps + 0.5) if state["cfr"] else None
+        if index is not None and state["last_index"] == index and state["last_frame"] is not None:
+            state["last_time_s"] = local_s
+            return state["last_frame"]  # type: ignore[return-value]
+        ahead = None if index is None or state["next_index"] is None else index - state["next_index"]  # type: ignore[operator]
+        read_forward = ahead is not None and 0 <= ahead <= 2
+        if read_forward:
+            for _ in range(ahead):  # type: ignore[arg-type]
+                cap.grab()
+        else:
+            # Frame indices derived from an average FPS select the wrong source frame
+            # for VFR recordings. Seek by the media timestamp for every rendered frame.
+            cap.set(cv2.CAP_PROP_POS_MSEC, local_s * 1000.0)
         ok, frame_bgr = cap.read()
+        if ok and index is not None and abs(
+            cap.get(cv2.CAP_PROP_POS_MSEC) - index * 1000.0 / fps
+        ) > 1.0:
+            state["cfr"] = False
+            index = None
+            if read_forward:
+                cap.set(cv2.CAP_PROP_POS_MSEC, local_s * 1000.0)
+                ok, frame_bgr = cap.read()
         if not ok or frame_bgr is None:
+            state["next_index"] = None
+            state["last_index"] = None
             cached = state.get("last_frame")
             return cached if isinstance(cached, np.ndarray) else None
         rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
         state["last_time_s"] = local_s
         state["last_frame"] = rgb
+        state["last_index"] = index
+        state["next_index"] = None if index is None else index + 1
         return rgb
 
     def _fitted_source_rect(self, src_w: int, src_h: int) -> QRectF:
@@ -700,6 +872,7 @@ class ProjectExporter:
         include_annotations: bool,
         include_fade: bool,
         source_rect: QRectF | None = None,
+        source_size: tuple[int, int] | None = None,
     ) -> np.ndarray:
         height, width = frame.shape[:2]
         qimage = QImage(
@@ -715,7 +888,18 @@ class ProjectExporter:
         if slide is not None:
             self._paint_slide(painter, slide, width, height)
         if include_annotations:
-            self._paint_annotations(painter, time_s, width, height)
+            painter.save()
+            ann_w, ann_h = width, height
+            if source_rect is not None and source_size is not None:
+                # The preview paints overlays in the source's own pixel space
+                # (ui/canvas.py). Do the same here and map that space onto the
+                # fitted picture, so position, stroke weight, and text size all
+                # match the preview whatever the export size or aspect.
+                ann_w, ann_h = source_size
+                painter.translate(source_rect.topLeft())
+                painter.scale(source_rect.width() / ann_w, source_rect.height() / ann_h)
+            self._paint_annotations(painter, time_s, ann_w, ann_h)
+            painter.restore()
         if include_fade:
             self._paint_fade(painter, time_s, width, height)
         # Captions paint over slides too (narration continues across them), but
@@ -913,7 +1097,7 @@ class ProjectExporter:
         label = ann.label.strip()
         font = QFont()
         font.setBold(True)
-        font.setPointSize(max(8, int(ann.font_size)))
+        font.setPointSize(max(8, int(ann.font_size or 15)))
         metrics = QFontMetricsF(font)
         text_rect = QRectF(metrics.boundingRect(label).adjusted(-8, -5, 8, 5))
         if ann.type == "arrow":
@@ -942,7 +1126,7 @@ class ProjectExporter:
             return
         font = QFont(painter.font())
         font.setBold(True)
-        font.setPointSize(max(8, int(ann.font_size)))
+        font.setPointSize(max(8, int(ann.font_size or 15)))
         painter.setFont(font)
         bg = QColor("#000000")
         bg.setAlpha(170)
@@ -957,7 +1141,7 @@ class ProjectExporter:
         x = float(ann.geometry.get("x", 0.5)) * w
         y = float(ann.geometry.get("y", 0.5)) * h
         font = QFont(painter.font())
-        font.setPointSize(max(8, int(ann.font_size)))
+        font.setPointSize(max(8, int(ann.font_size or 15)))
         font.setBold(True)
         painter.setFont(font)
         metrics = QFontMetricsF(font)
@@ -1094,7 +1278,8 @@ class ProjectExporter:
         except subprocess.TimeoutExpired:
             self._audio_probe_cache[key] = False
             return False
-        has_audio = "Audio:" in proc.stderr
+        # Only stream lines count: the banner also echoes the input file name.
+        has_audio = _AUDIO_STREAM_LINE.search(proc.stderr) is not None
         self._audio_probe_cache[key] = has_audio
         return has_audio
 
@@ -1125,7 +1310,7 @@ class ProjectExporter:
             )
             labels.append(f"[{label}]")
         if not labels:
-            os.replace(tmp_video, output_path)
+            _publish_file(tmp_video, output_path, self.cancelled)
             return
 
         chains.append(
@@ -1162,7 +1347,7 @@ class ProjectExporter:
             ]
         )
         self._run_ffmpeg(cmd, "Audio mux failed")
-        os.replace(staged_output, output_path)
+        _publish_file(staged_output, output_path, self.cancelled)
 
     def _release_captures(self) -> None:
         for cap in self._captures.values():

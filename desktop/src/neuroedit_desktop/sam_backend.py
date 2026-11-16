@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import gc
 import os
+import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Literal
@@ -54,20 +57,102 @@ class SamBackend:
         self._device = "cpu"
         self._sam3_error: str | None = None
 
+    def _hub_cache_base(self) -> Path:
+        hub_cache = os.environ.get("HF_HUB_CACHE")
+        if hub_cache:
+            return Path(hub_cache)
+        return Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface")) / "hub"
+
+    @staticmethod
+    def _cache_dir_name(model_id: str) -> str:
+        return "models--" + model_id.replace("/", "--")
+
     def weights_cache_dir(self) -> Path:
         """Directory the SAM3 weights are cached in. Respects HF_HOME /
         HF_HUB_CACHE overrides so cache checks and deletion stay in sync with
         wherever huggingface_hub actually downloads to."""
-        hub_cache = os.environ.get("HF_HUB_CACHE")
-        if hub_cache:
-            base = Path(hub_cache)
-        else:
-            base = Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface")) / "hub"
-        return base / "models--facebook--sam3"
+        return self._hub_cache_base() / self._cache_dir_name(self.SAM3_MODEL_ID)
+
+    def managed_cache_dirs(self) -> list[Path]:
+        """The only directories delete_weights() may remove: the SAM3 cache and
+        the SAM1 fallback cache. Nothing else in the shared Hugging Face cache."""
+        base = self._hub_cache_base()
+        return [
+            base / self._cache_dir_name(self.SAM3_MODEL_ID),
+            base / self._cache_dir_name(self.SAM1_MODEL_ID),
+        ]
+
+    _WEIGHT_NAMES = {"model.safetensors", "pytorch_model.bin"}
 
     def is_weights_cached(self) -> bool:
-        snapshots = self.weights_cache_dir() / "snapshots"
-        return snapshots.exists() and any(snapshots.iterdir())
+        """True only when a complete weight file is present and no download is
+        left half-finished. Hugging Face writes in-flight files to
+        blobs/<hash>.incomplete and links them into snapshots/ only once done,
+        so config files alone (an interrupted download) must not count."""
+        cache = self.weights_cache_dir()
+        blobs = cache / "blobs"
+        try:
+            if blobs.is_dir() and any(blobs.glob("*.incomplete")):
+                return False
+            snapshots = cache / "snapshots"
+            if not snapshots.is_dir():
+                return False
+            for revision in snapshots.iterdir():
+                if not revision.is_dir():
+                    continue
+                for entry in revision.rglob("*"):
+                    # exists() follows symlinks: a link to a missing blob is not a file.
+                    if entry.name in self._WEIGHT_NAMES and entry.is_file():
+                        return True
+        except OSError:
+            return False
+        return False
+
+    def unload_models(self) -> None:
+        """Drop every loaded model so deleted weights do not stay resident."""
+        self._sam1_model = None
+        self._sam1_processor = None
+        self._sam3_tracker_model = None
+        self._sam3_tracker_processor = None
+        self._sam3_video_model = None
+        self._sam3_video_processor = None
+        gc.collect()
+        torch = sys.modules.get("torch")  # never import torch just to free memory
+        if torch is not None:
+            try:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                if torch.backends.mps.is_available():
+                    torch.mps.empty_cache()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def delete_weights(self) -> tuple[list[Path], list[tuple[Path, str]]]:
+        """Remove the managed model cache directories. Returns (removed,
+        failed) where failed holds (path, reason); a directory is only counted
+        removed if it is really gone afterwards."""
+        self.unload_models()
+        removed: list[Path] = []
+        failed: list[tuple[Path, str]] = []
+        for target in self.managed_cache_dirs():
+            if not target.is_symlink() and not target.exists():
+                continue
+            try:
+                if target.is_symlink():
+                    target.unlink()  # remove the link only, never its destination
+                else:
+                    shutil.rmtree(target)
+            except OSError as exc:
+                failed.append((target, str(exc)))
+                continue
+            if target.exists() or target.is_symlink():
+                failed.append((target, "still present after deletion"))
+            else:
+                removed.append(target)
+        return removed, failed
 
     def login(self, token: str) -> None:
         from huggingface_hub import login
@@ -100,8 +185,11 @@ class SamBackend:
         if info.status != "ready":
             return info
         try:
-            self._report(progress, "Loading SAM3 video tracker weights...")
-            self._ensure_sam3_video_model()
+            # Single-frame segmentation (the first thing users do) uses the
+            # tracker model, so warm that one; the video model loads, with a
+            # status message, on the first propagation.
+            self._report(progress, "Loading SAM3 tracker weights...")
+            self._ensure_sam3_tracker_model()
             return SamBackendInfo("ready", self._device, f"SAM3 tracker ready on {self._device}.")
         except Exception as exc:  # noqa: BLE001
             self._sam3_error = self._format_error(exc)
@@ -125,6 +213,8 @@ class SamBackend:
         labels = [1 if p.type == "positive" else 0 for p in points]
 
         try:
+            if self._sam3_tracker_model is None:
+                self._report(progress, "Loading SAM3 model...")
             self._report(progress, "Running SAM3 segmentation...")
             mask, score = self._run_sam3_on_frame(frame_rgb, point_pixels, labels)
             backend = "SAM3"
@@ -132,6 +222,8 @@ class SamBackend:
             self._sam3_error = self._format_error(exc)
             self._report(progress, f"SAM3 failed: {self._sam3_error}")
             self._report(progress, "Falling back to SAM1 segmentation...")
+            if self._sam1_model is None:
+                self._report(progress, "Loading SAM1 model...")
             mask, score = self._run_sam1_on_frame(frame_rgb, point_pixels, labels)
             backend = "SAM1 fallback"
 
@@ -300,6 +392,8 @@ class SamBackend:
         import numpy as np
         import torch
 
+        if self._sam3_video_model is None:
+            self._report(progress, "Loading SAM3 video model...")
         model, processor, device, dtype = self._ensure_sam3_video_model()
         self._report(progress, "Reading video frames for SAM3 session...")
         frames, times, effective_rate = self._load_video_window(video_path, start_time_s, duration_s)
@@ -326,35 +420,42 @@ class SamBackend:
 
         mask_frames: list[dict[str, float | str]] = []
         scores: list[float] = []
-        with torch.no_grad():
-            outputs = model.propagate_in_video_iterator(
-                session,
-                start_frame_idx=0,
-                max_frame_num_to_track=len(times),
-            )
-            for idx, output in enumerate(outputs, start=1):
-                if cancelled is not None and cancelled():
-                    raise SamCancelled()
-                frame_idx = int(output.frame_idx)
-                if frame_idx < 0 or frame_idx >= len(times):
-                    continue
-                if idx == 1 or idx % 10 == 0:
-                    self._report(progress, f"SAM3 propagated frame {idx}/{len(times)}...")
-                masks = processor.post_process_masks(
-                    [output.pred_masks.detach().cpu()],
-                    original_sizes=[[session.video_height, session.video_width]],
-                    binarize=True,
-                )[0]
-                mask = self._first_binary_mask(masks)
-                path = mask_dir / (
-                    f"track_sam3_{int(start_time_s * 1000):08d}_{run_id}_{frame_idx:04d}.png"
+        written: list[Path] = []
+        try:
+            with torch.no_grad():
+                outputs = model.propagate_in_video_iterator(
+                    session,
+                    start_frame_idx=0,
+                    max_frame_num_to_track=len(times),
                 )
-                self._save_mask_rgba(mask, (h, w), path, color=mask_color)
-                score = self._score_from_outputs(output)
-                mask_frames.append({"time": float(times[frame_idx]), "mask_path": str(path), "score": score})
-                scores.append(score)
-        if not mask_frames:
-            raise RuntimeError("SAM3 did not produce propagated masks.")
+                for idx, output in enumerate(outputs, start=1):
+                    if cancelled is not None and cancelled():
+                        raise SamCancelled()
+                    frame_idx = int(output.frame_idx)
+                    if frame_idx < 0 or frame_idx >= len(times):
+                        continue
+                    if idx == 1 or idx % 10 == 0:
+                        self._report(progress, f"SAM3 propagated frame {idx}/{len(times)}...")
+                    masks = processor.post_process_masks(
+                        [output.pred_masks.detach().cpu()],
+                        original_sizes=[[session.video_height, session.video_width]],
+                        binarize=True,
+                    )[0]
+                    mask = self._first_binary_mask(masks)
+                    path = mask_dir / (
+                        f"track_sam3_{int(start_time_s * 1000):08d}_{run_id}_{frame_idx:04d}.png"
+                    )
+                    written.append(path)
+                    self._save_mask_rgba(mask, (h, w), path, color=mask_color)
+                    score = self._score_from_outputs(output)
+                    mask_frames.append({"time": float(times[frame_idx]), "mask_path": str(path), "score": score})
+                    scores.append(score)
+            if not mask_frames:
+                raise RuntimeError("SAM3 did not produce propagated masks.")
+        except BaseException:
+            # Cancel, failure, or fallback to SAM1 must not leave partial masks.
+            self._unlink_quietly(written)
+            raise
         return SamPropagationResult(
             mask_frames=mask_frames,
             score=float(np.mean(scores)) if scores else 1.0,
@@ -382,6 +483,7 @@ class SamBackend:
         cap = cv2.VideoCapture(str(video_path))
         if not cap.isOpened():
             raise RuntimeError(f"Could not open video: {video_path}")
+        written: list[Path] = []
         try:
             video_duration = self._video_duration(cap)
             end_time = min(start_time_s + max(0.0, duration_s), video_duration or start_time_s + duration_s)
@@ -427,6 +529,7 @@ class SamBackend:
                     labels,
                 )
                 path = mask_dir / f"track_{int(start_time_s * 1000):08d}_{run_id}_{idx:04d}.png"
+                written.append(path)
                 self._save_mask_rgba(mask, frame_rgb.shape[:2], path, color=mask_color)
                 mask_frames.append({"time": float(frame_time), "mask_path": str(path), "score": float(score)})
                 scores.append(float(score))
@@ -436,8 +539,19 @@ class SamBackend:
                 sample_rate=sample_rate,
                 backend="SAM1 fallback",
             )
+        except BaseException:
+            self._unlink_quietly(written)
+            raise
         finally:
             cap.release()
+
+    @staticmethod
+    def _unlink_quietly(paths: list[Path]) -> None:
+        for path in paths:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     def _load_video_window(self, video_path: Path, start_time_s: float, duration_s: float):
         import cv2

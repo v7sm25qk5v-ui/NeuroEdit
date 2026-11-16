@@ -825,3 +825,296 @@ def test_drag_beyond_end_previews_append_then_escape_restores_order():
     _key(canvas, Qt.Key.Key_Escape)
     assert canvas.width() == original_width
     assert project.clips[0].start_time == 0
+
+
+# --- NE-014: view changes and edits are separate signals --------------------
+
+
+def _signal_counts(canvas: TimelineCanvas) -> dict[str, int]:
+    counts = {"edit": 0, "view": 0}
+    canvas.project_changed.connect(lambda: counts.__setitem__("edit", counts["edit"] + 1))
+    canvas.view_changed.connect(lambda: counts.__setitem__("view", counts["view"] + 1))
+    return counts
+
+
+def test_clicking_a_clip_reports_a_view_change_not_an_edit() -> None:
+    project = _project(clips=[_clip("first", 0, 5), _clip("second", 5, 5)], active_clip_id="first")
+    canvas = TimelineCanvas(project)
+    counts = _signal_counts(canvas)
+    y = canvas._track_y(0) + 20
+
+    _press(canvas, canvas.LABEL_W + 750, y)
+    _release(canvas, canvas.LABEL_W + 750, y)
+    assert project.active_clip_id == "second"
+    assert counts == {"edit": 0, "view": 1}
+
+    _press(canvas, canvas.LABEL_W + 750, y)   # already active: nothing changed
+    _release(canvas, canvas.LABEL_W + 750, y)
+    assert counts == {"edit": 0, "view": 1}
+
+
+def test_a_drag_reports_one_edit_only_if_something_moved() -> None:
+    project = _project(clips=[_clip("first", 0, 5), _clip("second", 5, 5)], active_clip_id="first")
+    canvas = TimelineCanvas(project)
+    canvas.snap_enabled = False
+    counts = _signal_counts(canvas)
+    y = canvas._track_y(0) + 20
+    tail = canvas.LABEL_W + 498
+
+    _press(canvas, tail, y)
+    _move(canvas, canvas.LABEL_W + 300, y)
+    _move(canvas, canvas.LABEL_W + 500, y)
+    _release(canvas, canvas.LABEL_W + 500, y)
+    assert counts["edit"] == 0
+
+    _press(canvas, tail, y)
+    _move(canvas, canvas.LABEL_W + 300, y)
+    _release(canvas, canvas.LABEL_W + 300, y)
+    assert project.clips[0].trim_end == pytest.approx(3.0)
+    assert counts["edit"] == 1
+
+
+def _mixed_canvas() -> tuple[ProjectState, TimelineCanvas, dict[str, int]]:
+    project = _project(
+        clips=[_clip("first", 0, 5), _clip("second", 5, 5)],
+        active_clip_id="first",
+        audio_tracks=[AudioTrack(id="voice", path="/tmp/v.m4a", name="Voice", start_time=2.13, duration=3.0)],
+        slides=[Slide(id="slide", title="Note", start_time=6.37, duration=2.0, overlay=True)],
+    )
+    canvas = TimelineCanvas(project)
+    canvas.snap_enabled = False
+    canvas.resize(1400, 400)
+    return project, canvas, _signal_counts(canvas)
+
+
+def _block_center(canvas: TimelineCanvas, kind: str) -> tuple[float, float]:
+    for x in range(int(canvas.LABEL_W), 1400, 4):
+        for y in range(canvas.RULER_H, 400, 4):
+            hit = canvas._hit_block(x, y)
+            if hit is not None and hit[0] == kind:
+                return float(x + 20), float(y + 2)
+    raise AssertionError(f"no {kind} block found")
+
+
+@pytest.mark.parametrize("kind, read", [
+    ("audio", lambda project: project.audio_tracks[0].start_time),
+    ("slide", lambda project: project.slides[0].start_time),
+])
+def test_audio_and_slide_drags_report_one_edit_only_if_they_moved(kind, read) -> None:
+    project, canvas, counts = _mixed_canvas()
+    x, y = _block_center(canvas, kind)
+    before = read(project)
+
+    _press(canvas, x, y)
+    _release(canvas, x, y)
+    assert counts["edit"] == 0, "a click is not an edit"
+
+    # Out and back to the press pixel: at most float noise is left behind,
+    # and whether any is depends on where in the block the press landed.
+    noisy = 0
+    for offset in range(0, 150, 7):
+        _press(canvas, x + offset, y)
+        for step in (37, 91, 13, 0):
+            _move(canvas, x + offset + step, y)
+        _release(canvas, x + offset, y)
+        noisy += read(project) != before
+        assert read(project) == pytest.approx(before, abs=1e-9)
+    assert noisy, "expected at least one round trip to leave float noise"
+    assert counts["edit"] == 0
+
+    _press(canvas, x, y)
+    _move(canvas, x + 100, y)
+    _release(canvas, x + 100, y)
+    assert read(project) == pytest.approx(before + 1.0)
+    assert counts["edit"] == 1
+
+
+def test_an_edit_whose_release_was_lost_is_reported_on_the_next_press() -> None:
+    project, canvas, counts = _mixed_canvas()
+    y = canvas._track_y(0) + 20
+
+    _press(canvas, canvas.LABEL_W + 498, y)        # first clip's tail handle
+    _move(canvas, canvas.LABEL_W + 300, y)         # trimmed; release never arrives
+    assert project.clips[0].trim_end == pytest.approx(3.0)
+    assert counts["edit"] == 0
+
+    _press(canvas, canvas.LABEL_W + 100, y)
+    assert counts["edit"] == 1
+    _release(canvas, canvas.LABEL_W + 100, y)
+    assert counts["edit"] == 1
+
+
+def test_replacing_the_project_mid_drag_does_not_report_an_edit() -> None:
+    project, canvas, counts = _mixed_canvas()
+    y = canvas._track_y(0) + 20
+
+    _press(canvas, canvas.LABEL_W + 498, y)
+    _move(canvas, canvas.LABEL_W + 300, y)
+    canvas.set_project(_project(clips=[_clip("other", 0, 8)]))
+    _press(canvas, canvas.LABEL_W + 100, y)
+    _release(canvas, canvas.LABEL_W + 100, y)
+
+    assert counts["edit"] == 0
+
+
+# --- NE-028 timeline polish -------------------------------------------------
+
+
+def test_edit_marker_with_unchanged_text_is_not_an_edit(monkeypatch) -> None:
+    project = _project()
+    marker = _marker("m-1", label="Same")
+    project.markers.append(marker)
+    canvas = TimelineCanvas(project)
+    counts = _signal_counts(canvas)
+    monkeypatch.setattr(
+        editor_panels.QInputDialog, "getText", staticmethod(lambda *a, **k: ("  Same ", True))
+    )
+
+    canvas._edit_marker(marker)
+
+    assert marker.label == "Same"
+    assert counts == {"edit": 0, "view": 0}
+
+
+def test_rename_clip_with_unchanged_name_is_not_an_edit(monkeypatch) -> None:
+    project = _project()
+    clip = _clip()
+    project.clips.append(clip)
+    canvas = TimelineCanvas(project)
+    counts = _signal_counts(canvas)
+    monkeypatch.setattr(
+        editor_panels.QInputDialog, "getText", staticmethod(lambda *a, **k: (clip.name, True))
+    )
+
+    canvas._rename_clip(clip)
+
+    assert counts["edit"] == 0
+
+
+def _label(ann_id: str = "ann-1", at: float = 1.0, duration: float = 2.0) -> Annotation:
+    return Annotation(id=ann_id, frame_time=at, ann_duration=duration, type="text",
+                      label="Note", color="#fff")
+
+
+def test_delete_key_removes_selected_annotation_as_one_edit() -> None:
+    project = _project(clips=[_clip(duration=10)], annotations=[_label("a"), _label("b", 5)])
+    project.selected_annotation_id = "a"
+    canvas = TimelineCanvas(project)
+    counts = _signal_counts(canvas)
+    canvas._set_selection(("annotation", "a"))
+
+    _key(canvas, Qt.Key.Key_Delete)
+
+    assert [a.id for a in project.annotations] == ["b"]
+    assert canvas.selected_item is None
+    assert project.selected_annotation_id is None
+    assert counts == {"edit": 1, "view": 0}
+
+
+def test_trash_control_removes_selected_annotation(app) -> None:
+    project = _project(clips=[_clip(duration=10)], annotations=[_label("a")])
+    widget = RichTimelineWidget(project)
+    widget.canvas._set_selection(("annotation", "a"))
+
+    widget._delete_selection()
+
+    assert project.annotations == []
+
+
+def test_deleting_an_annotation_keeps_another_selected_annotation_id() -> None:
+    project = _project(clips=[_clip(duration=10)], annotations=[_label("a"), _label("b", 5)])
+    project.selected_annotation_id = "b"
+    canvas = TimelineCanvas(project)
+    canvas._set_selection(("annotation", "a"))
+
+    canvas._delete_selected_item()
+
+    assert project.selected_annotation_id == "b"
+
+
+def test_dragging_on_empty_timeline_scrubs_the_playhead() -> None:
+    project = _project(clips=[_clip(duration=10)])
+    canvas = TimelineCanvas(project)
+    counts = _signal_counts(canvas)
+    seeks: list[float] = []
+    canvas.seek_requested.connect(seeks.append)
+    y = canvas.RULER_H // 2   # ruler: no item there
+
+    _press(canvas, canvas.LABEL_W + 100, y)
+    _move(canvas, canvas.LABEL_W + 200, y)
+    _move(canvas, canvas.LABEL_W + 350, y)
+    _release(canvas, canvas.LABEL_W + 350, y)
+    _move(canvas, canvas.LABEL_W + 450, y)   # button released: no more seeks
+
+    assert seeks == pytest.approx([1.0, 2.0, 3.5])
+    assert counts == {"edit": 0, "view": 0}
+    assert canvas._drag is None
+
+
+def test_scrub_is_clamped_to_the_project_end() -> None:
+    project = _project(clips=[_clip(duration=4)])
+    canvas = TimelineCanvas(project)
+    seeks: list[float] = []
+    canvas.seek_requested.connect(seeks.append)
+    y = canvas.RULER_H // 2
+
+    _press(canvas, canvas.LABEL_W + 100, y)
+    _move(canvas, canvas.LABEL_W + 900, y)
+    _release(canvas, canvas.LABEL_W + 900, y)
+
+    assert seeks[-1] == pytest.approx(4.0)
+
+
+def test_dragging_a_clip_does_not_scrub() -> None:
+    project = _project(clips=[_clip("a", 0, 5), _clip("b", 5, 5)])
+    canvas = TimelineCanvas(project)
+    canvas.snap_enabled = False
+    seeks: list[float] = []
+    canvas.seek_requested.connect(seeks.append)
+    y = canvas._track_y(0) + 20
+
+    _press(canvas, canvas.LABEL_W + 250, y)
+    _move(canvas, canvas.LABEL_W + 300, y)
+    _release(canvas, canvas.LABEL_W + 300, y)
+
+    assert seeks == []
+
+
+def test_audio_drag_end_edge_snaps_to_the_playhead() -> None:
+    project = _project(
+        clips=[_clip(duration=10)],
+        audio_tracks=[AudioTrack(id="v", path="v.wav", name="V", start_time=0, duration=2)],
+    )
+    project.current_time = 6.0
+    canvas = TimelineCanvas(project)
+    y = canvas._track_y(1) + 20
+    # Grab the middle of the 2 s track (offset 1 s), drop so the END is 3 px past 6 s.
+    _press(canvas, canvas.LABEL_W + 100, y)
+    _move(canvas, canvas.LABEL_W + 500 + 3, y)   # pointer 5.03 s -> start 4.03, end 6.03
+    track = project.audio_tracks[0]
+
+    assert track.start_time == pytest.approx(4.0)
+    assert canvas._snap_indicator_time == pytest.approx(6.0)
+    _release(canvas, canvas.LABEL_W + 503, y)
+
+
+def test_slide_drag_end_edge_snaps_and_shift_bypasses() -> None:
+    project = _project(clips=[_clip(duration=10)], slides=[Slide(id="s", title="S", start_time=0, duration=2)])
+    project.current_time = 6.0
+    canvas = TimelineCanvas(project)
+    y = canvas._slide_block_rect(project.slides[0], 100).center().y()
+    _press(canvas, canvas.LABEL_W + 100, y)
+    _move(canvas, canvas.LABEL_W + 503, y)
+
+    assert project.slides[0].start_time == pytest.approx(4.0)
+    _release(canvas, canvas.LABEL_W + 503, y)
+
+    shifted = _project(clips=[_clip(duration=10)], slides=[Slide(id="s", title="S", start_time=0, duration=2)])
+    shifted.current_time = 6.0
+    canvas = TimelineCanvas(shifted)
+    _press(canvas, canvas.LABEL_W + 100, y)
+    canvas.mouseMoveEvent(QMouseEvent(
+        QEvent.Type.MouseMove, QPointF(canvas.LABEL_W + 503, y), QPointF(canvas.LABEL_W + 503, y),
+        Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.ShiftModifier,
+    ))
+    assert shifted.slides[0].start_time == pytest.approx(4.03)
