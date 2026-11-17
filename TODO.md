@@ -343,6 +343,57 @@ by the optimization automation; they are not duplicated into P4.5.
   commit, not per tick, so payoff is small — fold into the fix for the item
   above if that work happens. Affected: `models.py`, `ui/editor_panels.py`.
 
+### New findings — 2026-11-17 dependency audit (automation run)
+
+**Scope:** every manifest in the repo — `desktop/requirements-release.txt`
+(the pinned packaging set), `desktop/pyproject.toml` (core + optional `sam`,
+`dev`, `package` extras), and `.github/workflows/` action pins. Latest versions
+from PyPI; advisories from the OSV/GHSA data served through PyPI's per-version
+JSON on audit day.
+
+**Shipped/pinned set is clean.** None of the seven pinned packaging deps carry a
+known advisory at their pinned version, so the alpha installer is not exposed:
+imageio-ffmpeg 0.6.0 (→0.8.1, minor), numpy 2.4.6 (→2.5.5, minor),
+opencv-python 4.13.0.92 (→5.0.0.93, **major** — hold until validated on both
+platforms), PySide6 6.11.1 (→6.12.0, minor), pyinstaller 6.20.0 (→6.22.3, patch),
+ruff 0.15.22 (→0.17.5, minor), pytest 9.2.0 (already latest). These are routine,
+no-CVE version drift — refresh deliberately per the file's own header, not urgently.
+GitHub Actions are all commit-SHA pinned (checkout, setup-python, upload/
+download-artifact, softprops/action-gh-release) — the recommended secure form;
+no change needed beyond periodic SHA bumps.
+
+- [ ] **Harden the optional `[sam]` extra floors in `pyproject.toml` — current
+  lower bounds admit known-vulnerable installs of the model-loading stack
+  (security).** The `sam` extra is unpinned (only `>=` floors), and because this
+  stack *loads downloaded model weights and configs*, the permissive floors are
+  the one real security gap this audit found. A default `pip install -e ".[sam]"`
+  today resolves to safe latest versions (torch 2.15.0, transformers 5.23.0,
+  pillow 13.0.0), so this bites only an install that pins low, reuses an old
+  lockfile, or resolves under upstream constraints — but the floors should still
+  exclude the vulnerable ranges. Raise:
+  - `torch>=2.7` → **`torch>=2.10`**. The `>=2.7` floor admits CVE-2026-24747
+    (GHSA-63cw-57p8-fm3p, fixed 2.10.0): a crafted `.pth` checkpoint bypasses the
+    `weights_only` unpickler → code execution on load. Directly relevant — SAM
+    weights are downloaded and loaded by `sam_backend.py`. Floor also admits
+    several 2.7.x DoS/overflow CVEs (CVE-2025-55551..55560) fixed by 2.7.1/2.9.0.
+  - `transformers>=5.6` → **`transformers>=5.10`**. The `>=5.6` floor admits
+    CVE-2026-9856 (GHSA-xrqw-3rrv-vx5w, fixed 5.10.0): path-traversal arbitrary
+    file write when loading a model. (Note CVE-2026-80047 has no fixed version
+    listed yet; track upstream.)
+  - `pillow>=10` → **`pillow>=12.3`** (ideally the latest 13.x line). The `>=10`
+    floor admits a large backlog of Pillow CVEs including CVE-2023-50447
+    (`ImageMath.eval` arbitrary code execution, fixed 10.2.0) plus many native
+    buffer-overflow/OOB-write and DoS issues fixed across 10.3.0 → 13.0.0.
+  - Lower priority, same rationale (keep the floor at a currently-supported
+    release): `huggingface-hub>=0.30`, `safetensors>=0.5`, `torchvision>=0.22` —
+    no advisories at the floor today, but they trail latest (2.4.0 / 0.8.0 /
+    0.29.2); bump opportunistically.
+
+  Verify: after bumping floors, `pip install -e ".[sam]"` still resolves, and the
+  SAM-gated tests pass (torch remains absent from the committed venv by design —
+  see CLAUDE.md venv note — so this is a constraint-file change, not a runtime
+  regression risk for the default build).
+
 ## P0 — Unblock and ship the current alpha
 
 - [x] Fix the dev environment — Python 3.13 reinstalled 2026-06-10; venv
