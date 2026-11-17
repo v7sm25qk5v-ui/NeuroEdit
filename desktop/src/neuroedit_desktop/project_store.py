@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from neuroedit_desktop.media_convert import rebase_working_copies
 from neuroedit_desktop.models import ProjectState
 
 
@@ -29,7 +30,9 @@ class ProjectStore:
     def open(cls, project_path: Path) -> tuple[ProjectStore, ProjectState]:
         with project_path.open("r", encoding="utf-8") as handle:
             data = json.load(handle)
-        return cls(project_path=project_path), ProjectState.from_dict(data)
+        project = ProjectState.from_dict(data)
+        rebase_working_copies(project, project_path.parent)
+        return cls(project_path=project_path), project
 
     @staticmethod
     def preserve_unreadable(project_path: Path) -> Path:

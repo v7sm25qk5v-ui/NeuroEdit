@@ -273,19 +273,22 @@ by the optimization automation; they are not duplicated into P4.5.
 
 ### New findings — 2026-11-12 full-sweep automation run
 
-- [ ] **2026-11-12 app review: 21 tickets, NE-010 to NE-030.** Five P1
+- [x] **2026-11-12 app review: 21 tickets, NE-010 to NE-030.** Five P1
   (redaction coverage after timeline edits, head-trim ripple, export overlay
   coordinates, cross-volume export, PHI review reset by view actions). Details,
   evidence, and acceptance criteria live in
   [CODING_TICKETS.md](CODING_TICKETS.md); report in
   [desktop/docs/review-2026-11-12/REVIEW.md](desktop/docs/review-2026-11-12/REVIEW.md).
-  Not duplicated here. **Progress:** NE-010 (redaction coverage across timeline
+  Not duplicated here. **Shipped:** NE-010 (redaction coverage across timeline
   edits) and NE-011 (head-trim ripple independent of drag path) shipped in
-  v0.5.15-alpha (`e1b0839`). NE-012–NE-031 now have local implementations and
-  passing integration checks (2026-11-16); see the coding queue for hardware,
-  real-media, and hosted-CI follow-ups. During the November 15
-  release refresh, NE-010/NE-011 were marked software verified after live
-  confirmation that the tagged CI passed 381 tests and published all installers.
+  v0.5.15-alpha (`e1b0839`). NE-012–NE-031 shipped in v0.5.17-alpha
+  (`2343eb6`, 2026-11-16) after multi-agent correctness review and the NE-026
+  export-decode / static-composition benchmarks; macOS CI passed 696 tests.
+  The remaining open work is hardware/real-media/Windows/installer-smoke
+  **validation** (tracked in CODING_TICKETS.md), not source code. During the
+  November 15 release refresh, NE-010/NE-011 were marked software verified after
+  live confirmation that the tagged CI passed its tests and published all
+  installers.
 
 - [x] **`AudioPreview.sync` stats every narration file on disk ~30×/sec during
   playback (perf; blocks the UI thread on external/iCloud media).**
@@ -342,6 +345,22 @@ by the optimization automation; they are not duplicated into P4.5.
   construction) when no redaction exists avoids the work. Runs only on a reorder
   commit, not per tick, so payoff is small — fold into the fix for the item
   above if that work happens. Affected: `models.py`, `ui/editor_panels.py`.
+
+### 2026-11-17 incremental run (`e1b0839..947503b`, NE-012–NE-031 wave)
+
+No new optimization findings. The large diff (74 files, +10.6k/-3.0k) is the
+NE-012–NE-031 ticket wave shipped in v0.5.17-alpha (`2343eb6`): export overlay
+transform, cross-volume export, bundled/PATH ffmpeg resolution, autosave
+preservation, upright-still decoder, SAM cache management, read-only tutorial
+tour, caption PHI gate, and the slider/text undo-coalescing (`ui/edit_gesture.py`
++ `HistoryMixin._flush_pending_edits`). The perf-sensitive paths were already
+measured and optimized by that work — export CFR decode reads frames forward
+(`_frame_for_clip` `read_forward` / `cap.grab()`) instead of re-seeking, so the
+NE-026 benchmark's seek-per-frame cost only applies to true VFR sources; the
+static-composition benchmark did not justify a new cache. The three 2026-11-13
+items above remain open (the ticket wave touched `editor_panels.py` /
+`models.py` for other reasons but did not address the double-rewind, the
+reorder-replacement scope question, or the no-redaction early return).
 
 ## P0 — Unblock and ship the current alpha
 

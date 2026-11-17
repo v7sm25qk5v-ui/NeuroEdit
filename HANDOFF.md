@@ -1,5 +1,99 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-17 — v0.5.18-alpha release preparation
+
+- The user authorized pushing all current edits and cutting the next release,
+  explicitly requesting no additional local testing because Claude completed it.
+  Local and remote main were `947503b391c2ca38ba95d74ba818e5d281207cb4`.
+  Preserved the MPG working-copy feature, its tests, and daily optimization notes.
+- Prepared numeric version 0.5.18, new annotated tag/artifact label v0.5.18-alpha,
+  README notes/download links, and `desktop/docs/releases/v0.5.18-alpha.md`.
+  Platform/runtime versions derive from pyproject through the existing packaging.
+- Claude's existing handoff reports 723 passing tests twice, clean exits, 27 MPG
+  regression tests, Ruff and diff checks clean. These are supplied prior results;
+  no local test suite was rerun for publication. Required hosted CI gates remain.
+- Publication must include macOS DMG/ZIP and Windows installer and make this tag
+  Latest in both API and repository sidebar. Final CI, assets, and publication
+  evidence will be recorded after the release pipeline completes.
+
+## 2026-11-17 — MPG import: convert to an MP4 working copy (uncommitted)
+
+**Request:** the user's footage is mostly `.mpg`, which the app rejected. They chose
+"convert on import" over opening MPG directly (asked and answered in chat).
+
+**Why conversion, measured on MPEG-1/MPEG-2 test files:** `.mpg` was only missing from
+`VIDEO_EXTENSIONS`; ffmpeg decoding and export already worked. But MPEG program streams
+have no seek index and timestamps starting ~0.5 s in, so (1) Qt's player showed the next
+keyframe after a paused seek, up to ~0.5 s late, and (2) OpenCV repeated the frame from
+~0.5 s for the first ~0.5 s of each clip in the frame-by-frame export, and the NE-026
+sequential read never engaged. A redaction placed by scrubbing could therefore start up to
+half a second after the face it was meant to cover. On an H.264 MP4 copy both behave like
+any MP4 (0 of 570 OpenCV seeks wrong; Qt identical to an ordinary MP4).
+
+**What changed (base `947503b`, v0.5.17-alpha; nothing committed):**
+- New `desktop/src/neuroedit_desktop/media_convert.py`: `convert_to_working_copy` runs
+  ffmpeg (`libx264 -preset veryfast -crf 17`, AAC 192k, `yadif=deint=interlaced`, square
+  pixels, `-map_metadata -1`, `+faststart`) into a hidden `.neuroedit-convert-*` temp in
+  `<project>/media/`, then renames atomically to `<stem>.neuroedit-<12 hex>.mp4` (hash of
+  path, size, mtime, so an edited original converts again and an unchanged one is reused).
+  Cancel kills ffmpeg at once; stale temps (>10 min) are removed. Refuses a linked media dir.
+- `ui/media_import_worker.py`: converts before probing, off the GUI thread; progress per
+  file and a status label; results carry the media path, whether the copy is new, and a
+  failure reason.
+- `ui/main_window.py`: import uses the copy and keeps the original file name as the clip
+  name; copies made by a cancelled/discarded/failed import are deleted; failures show the
+  reason; Save As copies `media/` working copies; relinking to an MPG is refused with an
+  explanation; close-time cleanup deletes only app-named copies (and stale temps) that no
+  document, undo step or saved file uses — matched by file name so a moved folder keeps them.
+- `project_store.py`: `ProjectStore.open` re-points clips to `<folder>/media/<same name>`
+  when the folder was moved or copied (`rebase_working_copies`).
+- `ui/main_window_utils.py` (`.mpg`/`.mpeg` in `VIDEO_EXTENSIONS`, `referenced_clip_paths`,
+  `only=` filter on `delete_orphan_masks`), `ui/editor_panels.py` (media explorer filters),
+  video file-dialog filter, `desktop/CLAUDE.md` module map.
+- Tests: new `desktop/tests/test_mpg_import.py` (27).
+
+**Verification:** 27/27 new tests pass; 9 fail on the code before the feature and 4 more
+fail on its first version (the review fixes). Full `tests/`: **723 passed** twice (48 s
+each), clean exits; Ruff and `git diff --check` clean; user autosave and preference hashes
+unchanged by the runs. Conversion speed on synthetic 1080p MPEG-2: ~4 s per minute
+(real footage compresses less; expect slower).
+
+**Independent Sonnet review** found, and this change fixes: cleanup deleted any file in
+`media/` (including the user's own footage) and emptied a moved project folder's copies;
+cancel/close took ~5 s and a forced quit left ffmpeg writing a partial copy; the same file
+twice in one discarded batch leaked a copy; failure reasons were hidden; several untested
+behaviours (metadata, atomic final name, edited original, interlacing, linked folder).
+
+**Known and left as is:** the UI still says "Keep in Place" although MPGs are copied (an
+8-second status message says so after conversion); a truncated MPG converts "successfully"
+to a shorter copy (undetectable from the container); only the first audio stream is kept;
+Save As copies large working copies on the GUI thread without staging; the old autosave
+root keeps its copy after Save As while its project.json still references it; the cancel
+test does not reproduce the reviewer's 13 s SIGTERM stall on this synthetic footage.
+Masks of a moved project folder still point at the old folder (pre-existing).
+
+**Not verified:** with real MPG recordings from the user's equipment; in the running app;
+on Windows.
+
+## 2026-11-17 — Daily optimization automation ran (incremental, no code changes)
+
+- Scanned `e1b0839..947503b` (the NE-012–NE-031 ticket wave shipped in
+  v0.5.17-alpha, `2343eb6`: 74 files, +10.6k/-3.0k). Deep-dived the perf-relevant
+  changes (`exporter.py` overlay transform / cross-volume publish / ffmpeg
+  resolution, new `ui/edit_gesture.py`, `HistoryMixin._flush_pending_edits`,
+  `_frame_for_clip` decode path). **No new optimization findings** — the wave was
+  already multi-agent reviewed for correctness and self-benchmarked (NE-026
+  export decode / static composition), and export CFR decode already reads frames
+  forward rather than re-seeking.
+- TODO.md "Optimization Backlog": checked off the NE-010→NE-031 umbrella item
+  (all ticket code shipped; only hardware/real-media/Windows/installer **validation**
+  remains, tracked in CODING_TICKETS.md) and added a dated run note. The three
+  2026-11-13 items (trim-drag double rewind, reorder re-places only redactions,
+  `move_redactions_with_clips` no-redaction early return) remain open.
+- CLAUDE.md memory: "Last reviewed" → `947503b` / 2026-11-17; corrected the stale
+  341 → 696 test count; recorded the edit-gesture/flush-pending-edits architecture
+  and the export CFR decode-forward false-positive note.
+
 ## 2026-11-16 — v0.5.17-alpha published, downloads and Latest verified
 
 - Committed all current Codex and Claude updates: **71 files**, commit

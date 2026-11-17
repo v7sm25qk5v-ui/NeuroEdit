@@ -109,6 +109,7 @@ from neuroedit_desktop.ui.main_window_utils import (
     format_time,
     hex_to_rgb,
     propagation_window_s,
+    referenced_clip_paths,
     referenced_mask_paths,
 )
 from neuroedit_desktop.ui.editor_panels import (
@@ -125,6 +126,13 @@ from neuroedit_desktop.ui.styles import (
     BG_CARD, BG_HOVER,
     BORDER, BORDER_BRIGHT, PRIMARY,
     TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY, VIDEO_CANVAS,
+)
+from neuroedit_desktop.media_convert import (
+    MEDIA_DIR_NAME,
+    convert_to_working_copy,
+    is_stale_conversion_file,
+    is_working_copy_name,
+    needs_conversion,
 )
 from neuroedit_desktop.stills import read_upright_image as _read_upright_image
 from neuroedit_desktop.ui.tutorial import (
@@ -1691,7 +1699,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
                 relative = source.relative_to(old_root)
             except ValueError:
                 return path_str
-            if not relative.parts or relative.parts[0] not in {"masks", "audio", "stills"}:
+            if not relative.parts or relative.parts[0] not in {"masks", "audio", "stills", MEDIA_DIR_NAME}:
                 return path_str
             if ".." in relative.parts:
                 raise ValueError(f"Invalid managed asset path: {source}")
@@ -1728,6 +1736,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             slide.image_path = migrate(slide.image_path)
         for track in project.audio_tracks:
             track.path = migrate(track.path) or track.path
+        for clip in project.clips:
+            clip.path = migrate(clip.path) or clip.path  # MPG working copies
 
     def _add_to_recent(self, project_path: Path) -> None:
         settings = QSettings("NeuroEdit", "Desktop")
@@ -1815,7 +1825,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         paths, _ = QFileDialog.getOpenFileNames(
             self, "Add Video Files (Keep in Place)",
             str(Path.home() / "Movies"),
-            "Video Files (*.mp4 *.mov *.m4v *.avi *.webm);;All Files (*)",
+            "Video Files (*.mp4 *.mov *.m4v *.avi *.webm *.mpg *.mpeg);;All Files (*)",
         )
         if not paths:
             return
@@ -1897,7 +1907,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         if not videos:
             self._finish_media_import([], False)
             return
-        progress = QProgressDialog("Reading video metadata...", "Cancel", 0, len(videos), self)
+        steps = MediaImportWorker.PROGRESS_STEPS
+        progress = QProgressDialog("Reading video metadata...", "Cancel", 0, len(videos) * steps, self)
         progress.setMinimumDuration(0)
         # Window-modal: edits during the import would discard it, so block them.
         # The dialog's own Cancel button still works.
@@ -1905,12 +1916,19 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         progress.setValue(0)
         self._import_progress = progress
         thread = QThread(self)
-        worker = MediaImportWorker(videos, probe_video)
+        media_dir = self.store.project_path.parent / MEDIA_DIR_NAME
+
+        def convert(path, **kwargs):
+            # Looked up at call time so tests can substitute the converter.
+            return convert_to_working_copy(path, media_dir, **kwargs)
+
+        worker = MediaImportWorker(videos, probe_video, convert)
         self._import_thread, self._import_worker = thread, worker
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         progress.canceled.connect(self._cancel_media_import)
         worker.progress.connect(progress.setValue)
+        worker.status.connect(progress.setLabelText)
         worker.finished.connect(self._finish_media_import)
         worker.finished.connect(thread.quit)
         worker.finished.connect(worker.deleteLater)
@@ -1939,26 +1957,39 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             progress.canceled.disconnect()
             progress.close()
             self._import_progress = None
+        metadata = dict(results)
+        # Working copies this run made; any that do not end up in the project
+        # are deleted (they hold patient footage and nobody would find them).
+        # From the list, not the dict: the same file twice in one batch reuses
+        # the first copy, and its entry must not hide that the copy is new.
+        unused_copies = {entry[2] for _path, entry in results if len(entry) > 3 and entry[3]}
         if (was_cancelled
                 or getattr(self, "_closing", False) or self.project is not self._import_project
                 or self.store is not self._import_store
                 or self._snapshot_payload(self._snapshot()) != self._import_snapshot):
+            self._delete_working_copies(unused_copies)
             self.statusBar().showMessage("Import cancelled or project changed; no files added.", 5000)
             return
-        metadata = dict(results)
         failures = []
         clip = None
+        converted = 0
         for path in self._import_paths:
             suffix = path.suffix.lower()
             if suffix in VIDEO_EXTENSIONS:
-                values, signature = metadata.get(path, ((0, 0, 0), None))
+                values, signature, media_path, _created, error = metadata.get(
+                    path, ((0, 0, 0), None, path, False, None)
+                )
                 duration, width, height = values
                 if (math.isfinite(duration) and duration > 0 and width > 0 and height > 0
-                        and signature == MediaImportWorker._file_signature(path)):
-                    clip = self.project.add_clip(path, duration=duration, width=width, height=height)
+                        and signature == MediaImportWorker._file_signature(media_path)):
+                    clip = self.project.add_clip(media_path, duration=duration, width=width, height=height)
+                    if media_path != path:
+                        clip.name = path.stem  # keep the name the user knows
+                        converted += 1
+                        unused_copies.discard(media_path)
                     self._media_problem_cache[(clip.id, clip.path, *signature)] = None
                 else:
-                    failures.append(path.name)
+                    failures.append(f"{path.name} ({error})" if error else path.name)
             elif suffix in IMAGE_EXTENSIONS:
                 image = _read_upright_image(path)
                 if image.isNull():
@@ -1967,12 +1998,27 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
                     clip = self.project.add_image_clip(path, width=image.width(), height=image.height())
             else:
                 failures.append(path.name)
+        self._delete_working_copies(unused_copies)
         if clip is not None:
             self.project.active_clip_id = clip.id
             self._load_active_clip()
             self._mark_dirty(review_relevant=True)
+        if converted:
+            self.statusBar().showMessage(
+                f"Converted {converted} MPG file(s) to a working copy in the project's media "
+                "folder. The original files were not changed.",
+                8000,
+            )
         if failures:
             QMessageBox.warning(self, "Import Media", "Could not import: " + ", ".join(failures))
+
+    @staticmethod
+    def _delete_working_copies(paths) -> None:
+        for path in paths:
+            try:
+                Path(path).unlink(missing_ok=True)
+            except OSError:
+                pass
 
     def _relink_media(self) -> None:
         # Each entry represents one project reference, including split clips.
@@ -2009,6 +2055,11 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         if kind == "clip" and item.media_type == "video":
             if path.suffix.lower() not in VIDEO_EXTENSIONS:
                 return "Choose a supported video file."
+            if needs_conversion(path):
+                return (
+                    "MPG files are converted to a working copy when they are added. "
+                    "Use Add Video Files to add it, or relink to an MP4, MOV, M4V, AVI, or WebM file."
+                )
             try:
                 duration, width, height = probe_video(path)
             except Exception:  # noqa: BLE001
@@ -2864,6 +2915,20 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             with self.store.project_path.open("r", encoding="utf-8") as handle:
                 snapshots.append(json.load(handle))
         delete_orphan_masks(masks_dir, referenced_mask_paths(snapshots))
+        media_dir = self.store.project_path.parent / MEDIA_DIR_NAME
+        if media_dir.is_dir():
+            # MPG working copies no document, undo step, or saved file still
+            # uses. Only files the app named are candidates: the folder may hold
+            # the user's own footage. Copies are matched by name, which is unique
+            # to the source, so a moved project folder keeps its copies.
+            canonical = media_dir.parent.resolve() / media_dir.name
+            used_names = {Path(path).name for path in referenced_clip_paths(snapshots)}
+            delete_orphan_masks(
+                media_dir,
+                {str(canonical / name) for name in used_names},
+                only=lambda name: is_working_copy_name(name)
+                or is_stale_conversion_file(media_dir / name),
+            )
 
     def _shutdown_threads(self) -> bool:
         """Stop background workers so Qt does not abort with 'QThread: Destroyed

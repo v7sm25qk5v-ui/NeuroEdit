@@ -91,7 +91,7 @@ class MediaExplorerPanel(QWidget):
     clip_selected = Signal(str)
 
     MEDIA_NAME_FILTERS = [
-        "*.mp4", "*.mov", "*.m4v", "*.avi", "*.webm",
+        "*.mp4", "*.mov", "*.m4v", "*.avi", "*.webm", "*.mpg", "*.mpeg",
         "*.png", "*.jpg", "*.jpeg", "*.heic", "*.bmp", "*.webp",
     ]
 

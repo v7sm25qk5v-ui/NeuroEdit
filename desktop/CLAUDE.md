@@ -90,8 +90,8 @@ python -c "import py_compile; py_compile.compile('src/neuroedit_desktop/<file>.p
 hf auth login
 ```
 
-The suite under `tests/` collects **696 tests** (`python -m pytest tests/ -q`;
-Claude reports local clean exits on 2026-11-16). Tagged v0.5.17-alpha macOS CI
+The suite under `tests/` collects **723 tests** (`python -m pytest tests/ -q`;
+Claude reports two local clean exits on 2026-11-17). Prior tagged v0.5.17-alpha macOS CI
 also passed all 696 tests with a clean exit; Windows informational pytest is
 blocked by the test fixture's unnormalized path comparison (Qt forward slashes
 versus Windows backslashes). Windows installer packaging passed.
@@ -188,6 +188,15 @@ layer paints the slide above it.
   SAM1 (`facebook/sam-vit-base`) fallback. Uses `inspect.signature` to filter
   kwargs for cross-version model compatibility.
 - `video_probe.py` — fast `probe_video(path) → (duration, w, h)` via ffmpeg.
+- `media_convert.py` — `.mpg`/`.mpeg` (MPEG program streams) are converted on import
+  to an H.264 MP4 working copy in the project's `media/` folder
+  (`<stem>.neuroedit-<12 hex>.mp4`; the original is never modified). Without it
+  Qt's player shows the next keyframe after a paused seek (up to ~0.5 s late) and
+  OpenCV repeats one frame for the first ~0.5 s, so preview and export disagree.
+  The copy is deinterlaced (flagged frames only), square-pixel, metadata-free.
+  Close-time cleanup deletes only files with that name pattern (and stale
+  `.neuroedit-convert-*` temps); `ProjectStore.open` re-points clips at
+  `<folder>/media/<same name>` when a project folder was moved or copied.
 - `exporter.py` — timeline → ffmpeg composition (export pipeline).
 - Exporter loading is deferred until export, still capture, or export-settings
   creation; keep that on-demand boundary intact. Live captions stay eager because
@@ -292,18 +301,22 @@ Other PHI safeguards:
 
 ## Optimization Automation Memory
 
-- **Last implementation:** 2026-08-23 — export duration now uses the same
-  positive-duration, positive-volume active-audio criteria as source-media
-  preflight and audio muxing, so inactive narration placeholders do not extend
-  otherwise visual exports.
-- **Last reviewed:** 2026-11-15 (HEAD `e1b0839`, unchanged) — second consecutive
-  incremental run with an empty code diff: no new commits and no manual code edits
-  since the 2026-11-14 review (HEAD is still the v0.5.15-alpha ripple overlay fix
-  NE-010/NE-011; the only working-tree changes are this automation's own
-  uncommitted markdown). No new findings. The four open optimization items — the
-  three from the 2026-11-13 run plus the `AudioPreview.sync` per-tick `stat` — were
-  re-confirmed as still open and carried forward. When code finally lands past
-  `e1b0839`, deep-dive the diff plus one hop before trusting this empty-diff streak.
+- **Last implementation:** 2026-11-16 (v0.5.17-alpha) — export per-frame decode
+  (`exporter._frame_for_clip`) reads CFR frames forward instead of re-seeking,
+  and `AudioPreview.sync` caches narration-file existence for one second instead
+  of `stat`-ing every track per playback tick.
+- **Last reviewed:** 2026-11-17 (HEAD `947503b`) — incremental run over
+  `e1b0839..947503b`, the NE-012–NE-031 ticket wave shipped in v0.5.17-alpha
+  (`2343eb6`): 74 files, +10.6k/-3.0k. Deep-dived the perf-relevant changes
+  (`exporter.py` overlay transform + cross-volume publish + ffmpeg resolution,
+  new `ui/edit_gesture.py`, `HistoryMixin._flush_pending_edits`, `_frame_for_clip`
+  decode path). No new findings: the wave was already multi-agent reviewed for
+  correctness and self-benchmarked (NE-026 export decode / static composition).
+  The three 2026-11-13 items stay open (the diff touched `editor_panels.py` /
+  `models.py` but did not address them). The `AudioPreview.sync` per-tick `stat`
+  item was already fixed 2026-11-16.
+- **Prior incremental review (2026-11-15, `e1b0839`, unchanged):** second
+  consecutive empty-diff run; no new findings; four open items carried forward.
 - **Prior incremental review (2026-11-14, `e1b0839`):** incremental run with an
   empty code diff — no new commits and no manual code edits since the 2026-11-13
   review. No new findings; the four open items re-confirmed and carried forward.
@@ -327,7 +340,7 @@ Other PHI safeguards:
   line-count-driven, and keep a true pre-`to_dict()` undo shortcut deferred
   unless the model gains a trustworthy document revision signal.
 - **Mode:** incremental going forward. Next review should deep-dive files changed
-  after `e1b0839` plus one hop. (Full-sweep baselines: `22085f9` 2026-06-17 and
+  after `947503b` plus one hop. (Full-sweep baselines: `22085f9` 2026-06-17 and
   `3e00fc0` 2026-11-12.)
 - **Out-of-scope paths:** `desktop/dist/` and any build output; `*.lock`;
   `.venv/` (symlinked into iCloud, see venv note); vendored deps; iCloud
@@ -379,6 +392,14 @@ Other PHI safeguards:
     but that render only runs on edits (cache miss), and `_tick_timeline_playback`
     uses the cached `MainWindow._project_end_time()`. Playback is unaffected; not
     worth threading a cache through `TimelineCanvas`.
+  - Export per-frame decode (`exporter._frame_for_clip`) already avoids the
+    NE-026 benchmark's seek-per-frame cost for constant-frame-rate sources: it
+    trusts OpenCV's CFR index and reads frames forward (`read_forward` /
+    `cap.grab()` for a 0–2 frame skip) rather than re-seeking each frame, falling
+    back to timestamp seek only for true VFR files or large jumps. The
+    `benchmark_export_decode.py` 5× seek-vs-sequential gap is the worst-case VFR
+    cost, not the common path — do not re-flag export decode as a caching/seek
+    optimization. (NE-026 also measured static composition and chose no new cache.)
 - **Architecture notes (high-signal):**
   - Narration recording (v0.5.14, `ui/audio_panel.py`) now waits for
     `QMediaRecorder` `StoppedState` before probing the *recorded file's* real
@@ -442,6 +463,16 @@ Other PHI safeguards:
     compatibility requires it. `ui/history.py` owns dirty-state, autosave, and
     undo/redo snapshot controller methods. Future splits should be
     ownership-driven rather than line-count-driven.
+  - Slider/text undo-coalescing (v0.5.17, `ui/edit_gesture.py`): `EditGesture`
+    mirrors the canvas's `annotation_mutated`/`edit_committed` for panel widgets —
+    live mutations emit `changed` (history-less dirty mark), and the gesture ends
+    (idle timer, focus-out, or source switch) emits `committed` (one undo
+    snapshot). `CommitTextEdit` adds the missing `editingFinished` to `QTextEdit`.
+    `HistoryMixin._flush_pending_edits` runs before any document-replacing action
+    (undo/redo/save/project-switch/close): it calls `interpretText()` on every
+    spinbox in the audio/slides/labels panels (NE-016: `setKeyboardTracking(False)`
+    means typed digits reach the model only on Enter/focus-out, which a menu
+    shortcut triggers neither) and commits each panel's open gesture.
   - Playback-loop optimization is partially complete: `MainWindow._project_end_time()`
     caches `project_end_time()` for seek/playback/export and invalidates on
     document edits/project load/undo/redo restores. Playback uses the monotonic
@@ -469,13 +500,15 @@ Other PHI safeguards:
     Image, and single-file Media Explorer imports. A batch import loads one
     preview, selects the last successful clip, and creates one dirty/history
     operation; multi-video batches also share the §42 metadata progress dialog.
-  - Suite is **341 tests** (last CI-verified, 2026-11-10,
-    `docs/engineering-2026-11-10/RELEASE_NOTES.md`); gate is
+  - Current suite is **723 tests** (Claude-verified 2026-11-17). Prior CI
+    baseline was **696 tests** on the v0.5.17-alpha tag, 2026-11-16:
+    macOS quality 696 passed in 86.10 s, clean exit; see HANDOFF). The gate is
     `ruff check src tests scripts` + `python -m pytest tests/ -q`, both green at
-    the last release marker. v0.5.15-alpha (`e1b0839`) adds
-    `tests/test_ripple_overlays.py` (40 tests; local `tests/` run 380 passed / 1
-    known NE-027 timeout); the v0.5.15 tag's CI run is the gate of record and was
-    still to be confirmed green at release time.
+    the last release marker. The NE-012–NE-031 wave added the export,
+    undo-coalescing, caption-PHI, tutorial-safety, lifecycle, and
+    version-consistency suites. Informational Windows CI remains blocked by the
+    `QSettings.fileName()` forward-slash vs backslash fixture assertion (NE-027
+    follow-up); it does not gate releases.
   - torch/SAM stack is lazy by design (venv has no torch → SAM no-ops); the
     cold-start import audit is complete and keeps the exporter out of the normal
     startup module graph.

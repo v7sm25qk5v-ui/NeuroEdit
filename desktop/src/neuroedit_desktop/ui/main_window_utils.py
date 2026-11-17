@@ -11,7 +11,8 @@ MASK_PALETTE = [
     "#fb923c", "#60a5fa", "#f472b6", "#a3e635",
 ]
 
-VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".webm"}
+# .mpg/.mpeg are converted to an MP4 working copy on import (media_convert.py).
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".webm", ".mpg", ".mpeg"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".heic", ".bmp", ".webp"}
 
 
@@ -49,8 +50,19 @@ def referenced_mask_paths(project_dicts: list[dict]) -> set[str]:
     return referenced
 
 
-def delete_orphan_masks(masks_dir: Path, referenced: set[str]) -> int:
-    """Delete unreferenced files directly inside masks_dir."""
+def referenced_clip_paths(project_dicts: list[dict]) -> set[str]:
+    """Every clip media file referenced by the given project dicts, resolved."""
+    return {
+        str(Path(str(clip["path"])).resolve())
+        for data in project_dicts
+        for clip in data.get("clips") or []
+        if clip.get("path")
+    }
+
+
+def delete_orphan_masks(masks_dir: Path, referenced: set[str], only=None) -> int:
+    """Delete unreferenced files directly inside masks_dir (only those whose
+    name `only` accepts, when given)."""
     # Keep a descriptor for the actual project directory and open its masks
     # child without following a link. Skip cleanup on platforms lacking these
     # operations rather than deleting through an unverified path.
@@ -69,6 +81,8 @@ def delete_orphan_masks(masks_dir: Path, referenced: set[str]) -> int:
                 if not entry.is_file(follow_symlinks=False):
                     continue
                 if str(canonical_dir / entry.name) in referenced:
+                    continue
+                if only is not None and not only(entry.name):
                     continue
                 try:
                     os.unlink(entry.name, dir_fd=masks_fd)
