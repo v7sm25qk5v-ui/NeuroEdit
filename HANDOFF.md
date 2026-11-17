@@ -1,5 +1,32 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-17 — v0.5.18-alpha published and verified
+
+- Committed all 13 current files (MPG import and daily notes), source
+  `a68b18970ddd5dea27abdfaf5363d4c6b3d0197a`; pushed main and annotated tag
+  `v0.5.18-alpha` atomically. Tag object:
+  `390c38eb87259a061c903e646d4096959bf03682`. No old tag moved.
+- Published [NeuroEdit v0.5.18-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.18-alpha)
+  with honest alpha/unsigned labels and non-prerelease GitHub category plus
+  explicit Latest for discoverability. API and live repository sidebar verified.
+- No local tests rerun, per the user's instruction. Tagged workflow
+  [44107755944](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44107755944)
+  passed overall: macOS quality **723 passed, 2 warnings in 102.41 s**, clean
+  exit; Ruff, both platform builds, and publication succeeded. Main workflow
+  [44107756025](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44107756025)
+  passed overall, with 723 macOS tests in 105.39 s.
+- Existing nonblocking Windows pytest failure: session fixture compares Qt's
+  forward-slash path to Windows backslashes (716 setup errors, 7 skips). Ruff
+  and the separate Windows installer build passed; NE-027 follow-up retained.
+- All public downloads returned HEAD HTTP 200: macOS DMG (130597017 bytes),
+  macOS ZIP (117620203 bytes), Windows Setup.exe (100317872 bytes). GitHub-reported
+  SHA-256 hashes and CI results are in
+  `desktop/docs/releases/v0.5.18-alpha-verification.json`. Installer bytes were
+  not independently downloaded, installed, or exercised with real equipment.
+- Final notes, CI documentation, and handoff are in a documentation-only follow-up
+  commit. The tested source/tag are unchanged. Known MPG/storage/UI limitations
+  and real-equipment/Windows validation gaps remain documented below.
+
 ## 2026-11-17 — v0.5.18-alpha release preparation
 
 - The user authorized pushing all current edits and cutting the next release,

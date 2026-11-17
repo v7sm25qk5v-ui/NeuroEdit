@@ -391,6 +391,19 @@ but not executed. **Unmeasured** means the cost is plausible but not profiled.
 | NE-030 Small lifecycle and documentation items | P3 | Source confirmed | Verified (local software) |
 | NE-031 Rotated JPEG stills have the same orientation in preview and export | P2 | Reproduced | Verified (local software) |
 
+## Release verification — v0.5.18-alpha (2026-11-17)
+
+The MPG working-copy import feature, regression coverage, and documentation are
+committed at `a68b18970ddd5dea27abdfaf5363d4c6b3d0197a` and published in
+[v0.5.18-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.18-alpha).
+No additional local tests were run, per the user. Tagged macOS CI passed **723 tests
+in 102.41 s**, clean exit; main CI passed 723 tests in 105.39 s. Both installers,
+publication, all public download URLs, and Latest/sidebar were verified.
+
+The existing NE-027 Windows fixture-path follow-up persists: 716 setup errors,
+7 skips in informational pytest; Ruff and Windows installer packaging succeeded.
+Publication evidence: `desktop/docs/releases/v0.5.18-alpha-verification.json`.
+
 ## Release verification — v0.5.17-alpha (2026-11-16)
 
 All current implemented ticket changes and Claude's follow-up edits are committed

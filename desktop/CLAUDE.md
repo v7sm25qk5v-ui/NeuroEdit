@@ -91,10 +91,10 @@ hf auth login
 ```
 
 The suite under `tests/` collects **723 tests** (`python -m pytest tests/ -q`;
-Claude reports two local clean exits on 2026-11-17). Prior tagged v0.5.17-alpha macOS CI
-also passed all 696 tests with a clean exit; Windows informational pytest is
-blocked by the test fixture's unnormalized path comparison (Qt forward slashes
-versus Windows backslashes). Windows installer packaging passed.
+Claude reports two local clean exits on 2026-11-17). Tagged v0.5.18-alpha macOS CI
+passed all 723 tests in 102.41 s with a clean exit; main CI also passed. Windows
+informational pytest remains blocked by the fixture's unnormalized path comparison
+(Qt forward slashes versus Windows backslashes). Windows installer packaging passed.
 Keep it and `ruff check src tests scripts` green before every release tag.
 Every public release must also update GitHub's Latest release and repository
 Releases sidebar. Verify `/releases/latest` resolves to the new tag, alongside
@@ -500,9 +500,9 @@ Other PHI safeguards:
     Image, and single-file Media Explorer imports. A batch import loads one
     preview, selects the last successful clip, and creates one dirty/history
     operation; multi-video batches also share the §42 metadata progress dialog.
-  - Current suite is **723 tests** (Claude-verified 2026-11-17). Prior CI
-    baseline was **696 tests** on the v0.5.17-alpha tag, 2026-11-16:
-    macOS quality 696 passed in 86.10 s, clean exit; see HANDOFF). The gate is
+  - Current suite is **723 tests** (Claude-verified and tagged v0.5.18-alpha
+    macOS CI-verified on 2026-11-17: 723 passed in 102.41 s, clean exit; see HANDOFF).
+    The gate is
     `ruff check src tests scripts` + `python -m pytest tests/ -q`, both green at
     the last release marker. The NE-012–NE-031 wave added the export,
     undo-coalescing, caption-PHI, tutorial-safety, lifecycle, and
