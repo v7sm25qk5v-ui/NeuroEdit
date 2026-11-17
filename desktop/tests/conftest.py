@@ -1,6 +1,8 @@
 """Keep desktop tests out of the user's native application preferences."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from PySide6.QtCore import QSettings
 
@@ -20,7 +22,7 @@ def isolated_app_settings(tmp_path_factory):
 
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(QSettings, "__init__", isolated_init)
-        assert QSettings("NeuroEdit", "Desktop").fileName() == str(settings_path)
+        assert Path(QSettings("NeuroEdit", "Desktop").fileName()) == settings_path
         yield
 
 

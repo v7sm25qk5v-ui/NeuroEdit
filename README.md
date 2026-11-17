@@ -4,21 +4,20 @@ NeuroEdit is a standalone desktop video editor for preparing operative video for
 conference, research, and educational use. Editing and export run locally;
 NeuroEdit does not upload video or audio to a cloud editing service.
 
-Current alpha: [v0.5.18-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.18-alpha)
+Current alpha: [v0.5.19-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.19-alpha)
 
 [Download the latest build](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/latest).
 
-### What's new in v0.5.18-alpha
+### What's new in v0.5.19-alpha
 
-- Import `.mpg` and `.mpeg` footage by converting it in the background to an
-  H.264 MP4 working copy in the project's `media/` folder. Originals stay untouched.
-- Import shows conversion progress and supports cancellation; unchanged originals
-  reuse their working copies. Clips keep the original file name for identification.
-- Save As carries working copies into the saved project, and opening a moved
-  project reconnects its managed copies. Cleanup preserves copies referenced by
-  the project, saved document, or undo history.
-- Retains the editing, export, caption-review, project-recovery, and lifecycle
-  improvements from v0.5.17-alpha.
+- **In-app updates:** choose **Help → Check for Updates…** to read release notes,
+  download a verified update, and choose **Install and Restart**.
+- Saves edited work before installation and reopens the same saved project after
+  restart. Download cancellation and failed save/launch paths keep the app safe.
+- Supports installed macOS and Windows builds; source checkouts and read-only
+  locations offer the release page for manual installation.
+- Retains MPG/MPEG working-copy import and the editor improvements from earlier
+  releases.
 
 The retained security findings are tracked in [SECURITY_FIXES.md](SECURITY_FIXES.md).
 The original scan had partial coverage; these fixes do not constitute a completed audit.
@@ -59,7 +58,7 @@ The original scan had partial coverage; these fixes do not constitute a complete
 
 ### macOS
 
-Download `NeuroEdit-v0.5.18-alpha-macOS-unsigned.dmg` from the release page.
+Download `NeuroEdit-v0.5.19-alpha-macOS-unsigned.dmg` from the release page.
 Open the DMG, drag `NeuroEdit.app` into Applications, then right-click the app
 and choose `Open` for the first launch.
 
@@ -69,7 +68,7 @@ If macOS blocks launch, open `System Settings` -> `Privacy & Security`, choose
 
 ### Windows
 
-Download `NeuroEdit-v0.5.18-alpha-Windows-Setup.exe` from the release page on a
+Download `NeuroEdit-v0.5.19-alpha-Windows-Setup.exe` from the release page on a
 Windows PC. If SmartScreen warns, choose `More info` -> `Run anyway`, then follow
 the installer.
 
@@ -79,6 +78,19 @@ screenshots at 100%, 125%, and 150% display scaling.
 
 The downloadable installers are editor-only and do not include the optional
 SAM/PyTorch runtime. Use a source build with the `[sam]` extra for segmentation.
+
+## In-app updates
+
+Updater-enabled builds provide **Help → Check for Updates…** to view release
+notes, download a verified update, and choose **Install and Restart**. The app
+saves your work and reopens the same saved project after restarting. Checks only
+contact GitHub when requested; project media stays local.
+
+Install v0.5.19-alpha manually once to get the updater. It reports **up to date**
+until a newer release is published; that future release can use the in-app flow.
+Source checkouts and read-only app locations use the release page for manual
+installation. See
+[updater implementation and validation](desktop/docs/IN_APP_UPDATES.md).
 
 ## Clinical Disclaimer
 

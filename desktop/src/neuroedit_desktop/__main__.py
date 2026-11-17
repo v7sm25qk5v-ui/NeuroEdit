@@ -112,6 +112,9 @@ def main() -> int:
     from neuroedit_desktop.ui.main_window import MainWindow
 
     window = MainWindow()
+    from neuroedit_desktop.ui.update_workflow import resume_after_update
+
+    resume_after_update(window)
     window.show()
     return app.exec()
 

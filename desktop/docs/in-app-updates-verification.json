@@ -1,0 +1,39 @@
+{
+  "macos_build": "passed",
+  "full_tag_metadata": "v0.5.18-alpha",
+  "updater_modules_in_archive": [
+    "neuroedit_desktop.ui.update_dialog",
+    "neuroedit_desktop.ui.update_workflow",
+    "neuroedit_desktop.update_install",
+    "neuroedit_desktop.update_release",
+    "neuroedit_desktop.update_service"
+  ],
+  "real_bundle_zip_extraction": "passed",
+  "staged_codesign_verification": "passed",
+  "existing_bundle_unchanged": true,
+  "staging_cleanup": "passed",
+  "actual_installed_app_replacement_run": false,
+  "windows_native_install_run": false,
+  "branch": "codex/in-app-updates",
+  "base_commit": "46530cbd87d33e8ca8b685d364376c21d93a1964",
+  "local_uncommitted": true,
+  "full_suite": {
+    "passed": 765,
+    "seconds": 117.04,
+    "warnings": 2,
+    "clean_exit": true,
+    "strict_thread_warnings": true
+  },
+  "updater_tests": 42,
+  "live_github_check": "up_to_date",
+  "native_preferences": "unchanged",
+  "autosave_hashes": "unchanged",
+  "live_download": {
+    "state": "verified_download",
+    "asset": "NeuroEdit-v0.5.18-alpha-macOS-unsigned.zip",
+    "size": 117620203,
+    "sha256": "222eef81a54474b871cd15a6c564746e9718b7089cb8693bdf6690c3dce2416c",
+    "installed_or_executed": false,
+    "removed_after_verification": true
+  }
+}

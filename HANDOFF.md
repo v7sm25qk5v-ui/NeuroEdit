@@ -1,5 +1,79 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-17 — v0.5.19-alpha updater release preparation
+
+- The user requested a new alpha to test the in-app updater. Prepared numeric
+  version 0.5.19, immutable tag/artifact label v0.5.19-alpha, README/download
+  links, updater documentation and release notes. Includes all feature-branch
+  changes on top of `46530cbd87d33e8ca8b685d364376c21d93a1964`.
+- Prior validation: 765 tests with clean exit, 42 updater cases, independent
+  senior review, real Qt GitHub/CDN download verification, and real macOS app
+  build/ZIP staging/code-signature checks. No installed app was changed.
+  Local tests are not repeated for metadata-only publication; hosted gates remain.
+- First installation is manual. After installing, Help → Check for Updates…
+  reports up to date until another genuine newer release exists. No second
+  dummy release is created merely to show the download path.
+- Source is to be fast-forwarded onto main; the tested tag remains immutable.
+  Final CI/platform build/assets and Latest/sidebar verification will be recorded
+  when publication completes. Native update/restart smoke remains for the user.
+
+## 2026-11-17 — In-app GitHub updater implemented (local feature branch)
+
+- After finishing the v0.5.18-alpha release below, the user requested an in-app
+  Check for Updates / install-and-restart experience. Work is on
+  `codex/in-app-updates`, based on `46530cbd87d33e8ca8b685d364376c21d93a1964`.
+  These feature changes are local/uncommitted; the published v0.5.18-alpha does
+  not contain this updater. No new release/version bump was performed for it.
+- Three Terra engineers independently implemented release/network handling,
+  platform installation, and dialog UI; Sol reviewed the combined code. Root
+  integrated menu actions, save/close gates, one-time project reopening, tests,
+  and documentation. Ownership stayed separate; no user projects were modified.
+- Entry point: **Help → Check for Updates…**. Requests the fixed public NeuroEdit
+  GitHub Latest release only on user action. Displays version/full alpha tag and
+  plain release notes, streams a cancellable download to private temporary
+  storage, and requires matching size and GitHub SHA-256 before installation.
+  No project/media data is sent to GitHub. Retry ignores stale reply callbacks.
+- macOS: privately stages the ZIP on the installation volume; validates contained
+  paths/symlinks, bundle identity, executable and version; detached helper waits
+  for the old process to exit before rename/rollback/relaunch. Windows: verified
+  EXE, system PowerShell helper waits for process exit and runs Inno silently
+  with the existing install directory and an explicit restart switch. Neither
+  path force-kills the editor or bypasses OS protections. Read-only installs
+  and source checkouts get manual-install guidance.
+- Install first honors recording/jobs/save guards and flushes typed edits. A
+  failed/cancelled save or helper launch leaves the app running. Dirty content
+  is saved before handoff; an existing clean file is not rewritten (preserves
+  unknown newer-schema fields). Clean nonempty state missing its file is saved.
+  One-time `updates/reopenProject` restores the current saved project on restart;
+  empty unsaved projects do not produce a broken reopen flag.
+- Packaging embeds the full artifact tag in generated resources/build_info.json;
+  numeric package/bundle version remains sourced from pyproject. Build scripts
+  set NEUROEDIT_RELEASE_TAG; the Windows installer recognizes
+  /NEUROEDIT_RESTART=1. The test fixture compares Path objects so the prior
+  Windows slash-normalization setup error is corrected here; subsequent native
+  Windows tests have not been run.
+- Verification: **765 tests passed, 2 existing Qt deprecation warnings in 117.04 s**,
+  clean exit, with unraisable/unhandled-thread warnings treated as errors.
+  **42 updater tests** passed; senior review found no remaining blocking defect.
+  Ruff, shell syntax, dependency checks and diff checks passed. One live Qt HTTPS
+  check of GitHub returned up-to-date for the current 0.5.18 release. An actual
+  updater download of the public 117620203-byte macOS ZIP followed GitHub/CDN
+  redirects, passed size/SHA-256 verification, and was deleted without installation.
+- Built a real temporary macOS app using pinned PyInstaller 6.20.0. Confirmed all
+  five updater modules and full-tag metadata are bundled. Created the normal
+  ditto ZIP and staged it through prepare_install: real framework symlinks
+  extracted, staged codesign --verify --deep --strict passed, existing bundle
+  unchanged, staging cleaned. No installed app was replaced or launched.
+- Builds/tests used /private/tmp/neuroedit-updater-20261117 and the task-local
+  Python runtime. Its package metadata was aligned to the temporary 0.5.18
+  snapshot; the intentional iCloud workspace .venv was untouched. NeuroEdit-owned
+  preferences and existing autosave hashes match the private pre-feature snapshot.
+- Remaining native smoke: actual macOS installed-app replacement/relaunch and
+  Windows PowerShell/Inno install/restart. macOS rollback covers failed swap or
+  rejected OS launch, not application health after Launch Services accepts it.
+  The first updater-enabled release must be installed manually once; subsequent
+  releases can use the in-app flow. Details: desktop/docs/IN_APP_UPDATES.md.
+
 ## 2026-11-17 — v0.5.18-alpha published and verified
 
 - Committed all 13 current files (MPG import and daily notes), source

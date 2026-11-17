@@ -366,6 +366,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
 
         self.about_action = QAction("About NeuroEdit", self)
         self.about_action.triggered.connect(self._show_about)
+        self.check_updates_action = QAction("Check for Updates…", self)
+        self.check_updates_action.triggered.connect(self._check_for_updates)
 
         # Dev-only: timestamped paint/load/export/SAM timing log for manual QA.
         self.diagnostics_action = QAction("Performance Diagnostics (Developer)", self)
@@ -488,11 +490,19 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
 
         help_menu = menubar.addMenu("Help")
         help_menu.addAction(self.tutorial_action)
+        help_menu.addAction(self.check_updates_action)
         help_menu.addSeparator()
         help_menu.addAction(self.diagnostics_action)
         help_menu.addAction(self.reveal_diagnostics_action)
         help_menu.addSeparator()
         help_menu.addAction(self.about_action)
+
+    def _check_for_updates(self) -> None:
+        from neuroedit_desktop.ui.update_workflow import UpdateWorkflow
+
+        if getattr(self, "_update_workflow", None) is None:
+            self._update_workflow = UpdateWorkflow(self)
+        self._update_workflow.show()
 
     def _set_theme_mode(self, mode: ui_styles.ThemeMode, checked: bool = True) -> None:
         if not checked:
@@ -2975,6 +2985,10 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self._flush_pending_edits()
+        updater = getattr(self, "_update_workflow", None)
+        if updater is not None and not updater.can_close():
+            event.ignore()
+            return
         if self.audio_panel.recording_pending:
             self.audio_panel.status.setText("Stop recording and wait for it to finish before closing.")
             self.statusBar().showMessage("Stop recording and wait for it to finish before closing.", 6000)
@@ -2995,7 +3009,9 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         # Save BEFORE touching threads, while the heap is known-good — if a worker
         # later has to be force-terminated mid-allocation, the project is already
         # safely on disk. Never close silently after a failed dirty save.
-        if self.dirty:
+        if self.dirty or (updater is not None and updater.install_pending
+                          and self._has_case_content(self.project)
+                          and not self.store.project_path.is_file()):
             blocked_path = getattr(self, "_autosave_blocked_path", None)
             if blocked_path is not None and self.store.project_path == blocked_path:
                 QMessageBox.warning(
@@ -3013,6 +3029,9 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
                 QMessageBox.critical(self, "Save failed", str(exc))
                 event.ignore()
                 return
+        if updater is not None and not updater.before_window_close():
+            event.ignore()
+            return
         self._closing = True
         self.audio_preview.stop()
         for timer_attr in ("autosave_timer", "_sam_heartbeat_timer",

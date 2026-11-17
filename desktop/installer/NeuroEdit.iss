@@ -53,4 +53,16 @@ Name: "{group}\Uninstall NeuroEdit"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\NeuroEdit"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch NeuroEdit now"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch NeuroEdit now"; Flags: nowait postinstall skipifsilent; Check: not IsUpdateRestart
+Filename: "{app}\{#MyAppExeName}"; Flags: nowait; Check: IsUpdateRestart
+
+[Code]
+function IsUpdateRestart: Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), '/NEUROEDIT_RESTART=1') = 0 then
+      Result := True;
+end;

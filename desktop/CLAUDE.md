@@ -90,11 +90,10 @@ python -c "import py_compile; py_compile.compile('src/neuroedit_desktop/<file>.p
 hf auth login
 ```
 
-The suite under `tests/` collects **723 tests** (`python -m pytest tests/ -q`;
-Claude reports two local clean exits on 2026-11-17). Tagged v0.5.18-alpha macOS CI
-passed all 723 tests in 102.41 s with a clean exit; main CI also passed. Windows
-informational pytest remains blocked by the fixture's unnormalized path comparison
-(Qt forward slashes versus Windows backslashes). Windows installer packaging passed.
+The updater release collects **765 tests** (`python -m pytest tests/ -q`;
+local clean exit on 2026-11-17). The published v0.5.18-alpha baseline passed 723
+macOS CI tests; hosted results for v0.5.19-alpha are recorded in HANDOFF.md. The Windows fixture path
+comparison is corrected locally, but native Windows validation is pending.
 Keep it and `ruff check src tests scripts` green before every release tag.
 Every public release must also update GitHub's Latest release and repository
 Releases sidebar. Verify `/releases/latest` resolves to the new tag, alongside
@@ -500,7 +499,7 @@ Other PHI safeguards:
     Image, and single-file Media Explorer imports. A batch import loads one
     preview, selects the last successful clip, and creates one dirty/history
     operation; multi-video batches also share the §42 metadata progress dialog.
-  - Current suite is **723 tests** (Claude-verified and tagged v0.5.18-alpha
+  - Published baseline suite is **723 tests** (Claude-verified and tagged v0.5.18-alpha
     macOS CI-verified on 2026-11-17: 723 passed in 102.41 s, clean exit; see HANDOFF).
     The gate is
     `ruff check src tests scripts` + `python -m pytest tests/ -q`, both green at
@@ -520,3 +519,14 @@ Other PHI safeguards:
     `_wordmark_font()` falls back to the app font if the family fails to register.
     Regenerate packaged icons with `scripts/generate_icons.py` from
     `resources/neuroedit-appicon.svg`.
+
+## In-app updater (2026-11-17, v0.5.19-alpha)
+
+`update_release.py` validates the fixed GitHub release/asset schema and versions;
+`update_service.py` handles Qt HTTPS and streaming digest verification;
+`update_install.py` stages and hands off platform installation;
+`ui/update_dialog.py` is presentation only; `ui/update_workflow.py` coordinates
+explicit user actions with the normal save/close flow. No startup network check.
+Read `docs/IN_APP_UPDATES.md` before modifying updater, build-tag metadata, or
+installer restart behavior. Keep helper launch after all save/close rejection
+branches and before native worker shutdown can force process exit.

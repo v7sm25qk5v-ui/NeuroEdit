@@ -40,6 +40,7 @@ Remove-Item -Recurse -Force "build", "dist" -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $ReleaseDir | Out-Null
 
 # 3. PyInstaller -> dist\NeuroEdit\NeuroEdit.exe
+$env:NEUROEDIT_RELEASE_TAG = $Version
 & ".\.venv\Scripts\pyinstaller.exe" --clean --noconfirm NeuroEdit.spec
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller failed (exit $LASTEXITCODE)."

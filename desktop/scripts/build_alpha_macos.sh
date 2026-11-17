@@ -25,7 +25,7 @@ python -m pip install -c requirements-release.txt -e ".[package]"
 rm -rf build dist "$ARCHIVE_DIR"
 mkdir -p "$ARCHIVE_DIR"
 
-pyinstaller --clean --noconfirm NeuroEdit.spec
+NEUROEDIT_RELEASE_TAG="$VERSION" pyinstaller --clean --noconfirm NeuroEdit.spec
 
 if [[ ! -d "$APP_PATH" ]]; then
   echo "Build failed: $APP_PATH was not created." >&2

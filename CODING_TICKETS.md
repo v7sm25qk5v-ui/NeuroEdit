@@ -990,3 +990,27 @@ what users expect. Check the import probe and Take Still for the same rule.
 **Acceptance.** A test with EXIF orientations 1, 3, 6, and 8 shows the same
 picture size in preview and export, and a redaction drawn on a corner in the
 preview covers the same corner in the exported frame.
+
+## NE-032 — In-app GitHub update check, download, install and restart
+
+**Status 2026-11-17:** Verified locally on `codex/in-app-updates`; native
+installed-app/Windows smoke pending. Not in published v0.5.18-alpha.
+
+**Scope.** Manual Help menu check, fixed GitHub Latest version/notes, platform
+asset selection, cancellable verified download, safe close/save, installation
+handoff and project reopening. Source/read-only installations get a manual path.
+No startup polling, update server, account/token, arbitrary asset URL or automatic
+installation without user action.
+
+**Evidence.** 42 updater tests and full 765-test suite pass with clean exits.
+Independent senior review approved the changes. Real macOS bundle build, normal
+ZIP extraction/staging, full-tag resource, and staged code-signature verification
+pass in temporary storage; no installed app was replaced. Test coverage includes
+stale callbacks/retries, invalid digest/size, cancellation, safe symlinks, rollback,
+failed saves/launches, preserving clean newer-schema files, and restart recovery.
+Details and remaining platform checks: `desktop/docs/IN_APP_UPDATES.md`.
+
+**NE-027 related infrastructure.** The slash-normalization assertion is corrected
+in the feature branch using Path equality. Native Windows execution must still
+verify the suite and new installer behavior; this is not a claim of a green
+Windows hosted check.

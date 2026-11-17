@@ -6,6 +6,9 @@
 
 import sys
 import tomllib
+import json
+import os
+import re
 from importlib.metadata import version
 
 from PyInstaller.utils.hooks import copy_metadata
@@ -32,6 +35,13 @@ else:
     APP_ICON = str(RESOURCES / "icon_256.png") if (RESOURCES / "icon_256.png").exists() else None
 
 datas = copy_metadata("neuroedit-desktop")
+build_info = ROOT / "build" / "neuroedit-update" / "build_info.json"
+build_info.parent.mkdir(parents=True, exist_ok=True)
+release_tag = os.environ.get("NEUROEDIT_RELEASE_TAG", "")
+if not re.fullmatch(r"v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", release_tag):
+    release_tag = APP_VERSION
+build_info.write_text(json.dumps({"tag": release_tag}), encoding="utf-8")
+datas.append((str(build_info), "neuroedit_desktop/resources"))
 if RESOURCES.exists():
     datas.append((str(RESOURCES), "neuroedit_desktop/resources"))
 
@@ -62,6 +72,7 @@ a = Analysis(
         "PySide6.QtMultimedia",
         "PySide6.QtMultimediaWidgets",
         "PySide6.QtWidgets",
+        "PySide6.QtNetwork",
     ],
     hookspath=[],
     hooksconfig={},
