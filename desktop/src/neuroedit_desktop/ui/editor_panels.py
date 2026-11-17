@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 from PySide6.QtCore import QDir, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QKeySequence, QPainter, QPen, QPixmap, QShortcut
+from PySide6.QtGui import QBrush, QColor, QKeySequence, QPainter, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QApplication,
@@ -44,6 +44,8 @@ from neuroedit_desktop.models import (
     TimelineMarker,
     VideoClip,
     new_id,
+    slide_is_inserted,
+    slide_span,
 )
 from neuroedit_desktop.ui.audio_panel import AudioPanel as AudioPanel
 from neuroedit_desktop.ui.edit_gesture import CommitTextEdit, EditGesture
@@ -270,6 +272,7 @@ class TimelineCanvas(QWidget):
     HANDLE_PX = 6
     MARKER_HIT_PX = 12
     SNAP_PX = 8.0
+    INSERT_ICON_W = 26.0
 
     # Cache the static layer (ruler, lanes, blocks, markers) only while the
     # canvas stays a sane size; a long timeline at high zoom can be hundreds of
@@ -299,6 +302,9 @@ class TimelineCanvas(QWidget):
         self._drag_start_state: tuple | None = None
         self._slide_lanes_key: tuple | None = None
         self._slide_lanes_value: dict[str, int] = {}
+        # (slide id, timeline_positions(), clip list) at press while an
+        # inserted slide is dragged: each move re-applies from this state.
+        self._slide_drag_origin: tuple[str, list, list] | None = None
         # Widget-level selection only — never serialized or snapshotted.
         self.selected_item: tuple[str, str] | None = None  # (kind, item_id)
         self.snap_enabled = True
@@ -326,6 +332,7 @@ class TimelineCanvas(QWidget):
         if project is not self.project:
             self._drag = None
             self._drag_start_state = None
+            self._slide_drag_origin = None
             self._clear_clip_move()
         self.project = project
         self._prune_selection()
@@ -413,7 +420,7 @@ class TimelineCanvas(QWidget):
                 for t in p.audio_tracks
             ),
             tuple(
-                (s.id, round(s.start_time, 3), round(s.duration, 3), s.title)
+                (s.id, round(s.start_time, 3), round(s.duration, 3), s.title, s.overlay, s.insert)
                 for s in p.slides
             ),
             tuple(
@@ -486,6 +493,7 @@ class TimelineCanvas(QWidget):
             painter.drawText(QRectF(10, y, self.LABEL_W - 18, track_h), Qt.AlignmentFlag.AlignVCenter, label)
 
         self._paint_video_blocks(painter, zoom)
+        self._paint_slides_on_video_row(painter, zoom)
         self._paint_audio_blocks(painter, zoom)
         self._paint_slide_blocks(painter, zoom)
         self._paint_annotation_blocks(painter, zoom)
@@ -669,10 +677,77 @@ class TimelineCanvas(QWidget):
             rect = self._slide_block_rect(slide, zoom)
             selected = self.selected_item == ("slide", slide.id)
             hovered = self._hover_item == ("slide", slide.id)
+            inserted = slide_is_inserted(slide)
+            title = slide.title or "(untitled slide)"
             self._paint_block(
-                painter, rect, slide.title or "(untitled slide)", TIMELINE_SLIDES, 42,
+                painter, rect, "" if inserted else title, TIMELINE_SLIDES, 42,
                 selected=selected, hovered=hovered,
             )
+            if inserted:
+                self._paint_inserted_slide_face(painter, rect, title)
+
+    def _paint_inserted_slide_face(self, painter: QPainter, rect: QRectF, title: str) -> None:
+        """Title on the left; in the middle an icon of the slide pushing the
+        clips on either side apart: |<-[]->|."""
+        cx, cy = rect.center().x(), rect.center().y()
+        half = self.INSERT_ICON_W / 2
+        text_left = rect.left() + 8
+        text_rect = QRectF(text_left, rect.top(), cx - half - 6 - text_left, rect.height())
+        if text_rect.width() >= 24:
+            painter.setPen(QColor(TEXT_PRIMARY))
+            text = painter.fontMetrics().elidedText(
+                title, Qt.TextElideMode.ElideRight, int(text_rect.width()),
+            )
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter, text)
+        if rect.width() < self.INSERT_ICON_W + 2:
+            return
+        pen = QPen(QColor(TEXT_PRIMARY), 1.6)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        for sign in (-1, 1):
+            # Outer bar: the neighbouring clip. Arrow: pushed away from the slide.
+            bar_x = cx + sign * half
+            painter.drawLine(QPointF(bar_x, cy - 7), QPointF(bar_x, cy + 7))
+            tip_x = cx + sign * (half - 3)
+            painter.drawLine(QPointF(cx + sign * 5, cy), QPointF(tip_x, cy))
+            painter.drawLine(QPointF(tip_x, cy), QPointF(tip_x - sign * 3, cy - 3))
+            painter.drawLine(QPointF(tip_x, cy), QPointF(tip_x - sign * 3, cy + 3))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(TEXT_PRIMARY))
+        painter.drawRoundedRect(QRectF(cx - 2.5, cy - 6, 5, 12), 1.5, 1.5)
+
+    def _paint_slides_on_video_row(self, painter: QPainter, zoom: float) -> None:
+        """Show what full slides do to the video: an inserted slide holds a
+        dashed place in the video row; a cover slide hatches the footage it hides."""
+        color = QColor(TIMELINE_SLIDES)
+        for slide in self.project.slides:
+            if slide.overlay:
+                continue
+            start = slide.start_time
+            end = start + slide_span(slide)
+            if slide_is_inserted(slide):
+                rect = self._block_rect(start, end - start, 0, zoom)
+                fill = QColor(color)
+                fill.setAlpha(22)
+                pen = QPen(color, 1.2)
+                pen.setStyle(Qt.PenStyle.DashLine)
+                painter.setPen(pen)
+                painter.setBrush(fill)
+                painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 8, 8)
+                continue
+            for clip in self.project.clips:
+                clip_start = self._clip_preview_positions.get(clip.id, clip.start_time)
+                lo = max(start, clip_start)
+                hi = min(end, clip_start + clip.display_duration)
+                if hi - lo <= 1e-6:
+                    continue
+                rect = self._block_rect(lo, hi - lo, 0, zoom)
+                hatch = QColor(color)
+                hatch.setAlpha(150)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QBrush(hatch, Qt.BrushStyle.BDiagPattern))
+                painter.drawRect(rect.adjusted(0, 2, 0, -2))
 
     def _annotation_timeline_duration(self, annotation, end_time: float | None = None) -> float:
         if end_time is None:
@@ -777,6 +852,7 @@ class TimelineCanvas(QWidget):
         # A release can be lost (focus change mid-drag); do not lose its edit.
         self._report_drag_edit()
         self._scrubbing = False
+        self._slide_drag_origin = None
         pos = event.position()
         if pos.x() < self.LABEL_W:
             return
@@ -797,6 +873,11 @@ class TimelineCanvas(QWidget):
                 self._clip_press_position = QPointF(pos)
             if kind in ("clip-trim-start", "clip-trim-end"):
                 self._trim_drag_origin = (item_id, self.project.timeline_positions())
+            pressed_slide = self._slide_by_id(item_id) if kind == "slide" else None
+            if pressed_slide is not None and slide_is_inserted(pressed_slide):
+                self._slide_drag_origin = (
+                    item_id, self.project.timeline_positions(), list(self.project.clips),
+                )
             if kind.startswith("clip") and self.project.active_clip_id != item_id:
                 self.project.active_clip_id = item_id
                 self.view_changed.emit()
@@ -868,6 +949,26 @@ class TimelineCanvas(QWidget):
                         )
                     track.start_time = new_start
                     break
+        elif kind == "slide" and self._slide_drag_origin is not None:
+            # An inserted slide moves between clips, never into one: it takes
+            # the clip edge nearest where its start is dropped, and the clips
+            # part around it live.
+            slide = self._slide_by_id(item_id)
+            if slide is not None:
+                # Read the pointer against the timeline as drawn now (slide in
+                # its current slot), converted to the layout without the slide,
+                # where the move works: what is drawn after the slide is
+                # `span` later than it is there.
+                aim = max(0.0, time_at - offset)
+                slot = slide.start_time
+                span = slide_span(slide)
+                if aim >= slot + span:
+                    aim -= span
+                elif aim > slot:
+                    aim = slot
+                self._rewind_slide_drag()
+                self.project.move_inserted_slide(slide, aim)
+                self._snap_indicator_time = slide.start_time
         elif kind == "slide":
             new_start = max(0.0, time_at - offset)
             for slide in self.project.slides:
@@ -970,6 +1071,8 @@ class TimelineCanvas(QWidget):
         self._scrubbing = False
         trim_origin = self._trim_drag_origin
         self._trim_drag_origin = None
+        slide_origin = self._slide_drag_origin
+        self._slide_drag_origin = None
         self._snap_indicator_time = None
         self.setCursor(Qt.CursorShape.ArrowCursor)
         dropped_on_trash = drag is not None and self._over_trash
@@ -982,6 +1085,9 @@ class TimelineCanvas(QWidget):
             if trim_origin is not None:
                 # Delete the clip as it was at press, not the half-trimmed one.
                 self.project.restore_timeline_positions(trim_origin[1])
+            if slide_origin is not None:
+                # Delete the slide from where it was, closing its own time.
+                self._restore_slide_drag(slide_origin)
             base_kind = "clip" if drag[0].startswith("clip") else drag[0]
             self._set_selection((base_kind, drag[1]))
             self._delete_selected_item()
@@ -994,6 +1100,28 @@ class TimelineCanvas(QWidget):
         super().mouseReleaseEvent(event)
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
+        if (
+            event.key() == Qt.Key.Key_Escape
+            and self._slide_drag_origin is not None
+            and self._drag is not None
+            and self._drag[0] == "slide"
+        ):
+            # Cancel: the slide and everything it pushed go back.
+            self._restore_slide_drag(self._slide_drag_origin)
+            self._slide_drag_origin = None
+            self._drag = None
+            self._drag_start_state = None
+            self._snap_indicator_time = None
+            self._over_trash = False
+            if self.trash_target is not None:
+                self.trash_target.set_armed(False)
+            self.unsetCursor()
+            self.project.duration = project_end_time(self.project)
+            self.edit_preview_changed.emit()
+            self.refresh_geometry()
+            self.update()
+            event.accept()
+            return
         if event.key() == Qt.Key.Key_Escape and self._drag is not None and self._drag[0] == "clip":
             self._drag = None
             self._clear_clip_move()
@@ -1040,6 +1168,9 @@ class TimelineCanvas(QWidget):
                 t for t in self.project.audio_tracks if t.id != item_id
             ]
         elif kind == "slide":
+            slide = self._slide_by_id(item_id)
+            if slide is not None:
+                self.project.remove_slide_gap(slide)
             self.project.slides = [s for s in self.project.slides if s.id != item_id]
         elif kind == "marker":
             self.project.markers = [m for m in self.project.markers if m.id != item_id]
@@ -1237,6 +1368,16 @@ class TimelineCanvas(QWidget):
             if hover is not None and hover[0] == "clip":
                 clip = next(c for c in self.project.clips if c.id == hover[1])
                 tooltip = f"{clip.name} · {clip.display_duration:g}s"
+            if hover is not None and hover[0] == "slide":
+                slide = self._slide_by_id(hover[1])
+                if slide is not None:
+                    if slide.overlay:
+                        effect = "Overlay: drawn over the video"
+                    elif slide_is_inserted(slide):
+                        effect = "Inserted: the video after it plays later"
+                    else:
+                        effect = "Covers the video under it (hatched)"
+                    tooltip = f"{slide.title or '(untitled slide)'} · {slide.duration:g}s\n{effect}"
             if hover is not None and hover[0] == "annotation":
                 annotation = next(a for a in self.project.annotations if a.id == hover[1])
                 end = annotation.frame_time + self._annotation_timeline_duration(annotation)
@@ -1291,6 +1432,21 @@ class TimelineCanvas(QWidget):
             or any(abs(now - before) > 1e-9 for now, before in zip(times, start[1]))
         ):
             self.project_changed.emit()
+
+    def _slide_by_id(self, slide_id: str) -> Slide | None:
+        return next((s for s in self.project.slides if s.id == slide_id), None)
+
+    def _restore_slide_drag(self, origin: tuple[str, list, list]) -> None:
+        slide_id, positions, clips = origin
+        self.project.clips = list(clips)
+        self.project.restore_timeline_positions(positions)
+        slide = self._slide_by_id(slide_id)
+        if slide is not None:
+            slide.insert = True
+
+    def _rewind_slide_drag(self) -> None:
+        if self._slide_drag_origin is not None:
+            self._restore_slide_drag(self._slide_drag_origin)
 
     def _rewind_trim_drag(self, clip) -> None:
         """Put the timeline back as it was at press, so every mouse move
@@ -1879,10 +2035,17 @@ class SlideEditorPanel(QWidget):
     BG_PRESETS = ["#0a0a1a", "#1a0a2e", "#0a1a0a", "#1a1a0a", "#1a0a0a", "#0d1b2a"]
     TEXT_PRESETS = ["#ffffff", "#e2e8f0", ACCENT_CYAN, ACCENT_AMBER, ACCENT_EMERALD, ACCENT_RED]
 
+    PLACEMENTS = [
+        ("Insert: push video later", "insert"),
+        ("Cover video", "cover"),
+        ("Overlay (transparent)", "overlay"),
+    ]
+
     def __init__(self, project: ProjectState, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.project = project
         self._refreshing = False
+        self._loaded_duration = 0.0
         # Typing and spinbox edits mutate the slide live; one undo step per gesture.
         self.gesture = EditGesture(self)
 
@@ -1910,10 +2073,14 @@ class SlideEditorPanel(QWidget):
         self.bold_check = QCheckBox("Bold")
         self.bold_check.setChecked(True)
         self.italic_check = QCheckBox("Italic")
-        self.overlay_check = QCheckBox("Overlay (transparent)")
-        self.overlay_check.setToolTip(
-            "When on, the slide is drawn as text on top of the underlying image/video "
-            "instead of replacing the frame."
+        self.placement_combo = QComboBox()
+        for label, value in self.PLACEMENTS:
+            self.placement_combo.addItem(label, value)
+        self.placement_combo.setToolTip(
+            "Insert: the slide gets its own time and the video after it plays later; "
+            "nothing is hidden.\n"
+            "Cover video: the slide replaces the footage under it, which is not shown.\n"
+            "Overlay: the slide's text is drawn over the playing video."
         )
 
         self.title_input.textChanged.connect(self._apply_fields_live)
@@ -1926,7 +2093,7 @@ class SlideEditorPanel(QWidget):
         self.font_family_combo.currentFontChanged.connect(self._apply_fields)
         self.bold_check.toggled.connect(self._apply_fields)
         self.italic_check.toggled.connect(self._apply_fields)
-        self.overlay_check.toggled.connect(self._apply_fields)
+        self.placement_combo.currentIndexChanged.connect(self._apply_fields)
 
         new_btn = QPushButton("New Slide")
         new_btn.setProperty("variant", "primary")
@@ -1959,7 +2126,7 @@ class SlideEditorPanel(QWidget):
         form.addRow("Duration", self.duration_input)
         form.addRow("Font", self.font_size_input)
         form.addRow("Style", style_row)
-        form.addRow("", self.overlay_check)
+        form.addRow("Placement", self.placement_combo)
 
         bg_row = QHBoxLayout()
         for color in self.BG_PRESETS:
@@ -2013,12 +2180,7 @@ class SlideEditorPanel(QWidget):
         current_id = self._selected_id()
         self.list_widget.clear()
         for slide in self.project.slides:
-            end_time = slide.start_time + slide.duration
-            overlay = "overlay" if slide.overlay else "full slide"
-            item = QListWidgetItem(
-                f"{slide.title or '(untitled)'}\n"
-                f"{fmt_time(slide.start_time)} - {fmt_time(end_time)}  |  {slide.duration:g}s  |  {overlay}"
-            )
+            item = QListWidgetItem(self._list_text(slide))
             item.setSizeHint(QSize(0, 54))
             item.setData(Qt.ItemDataRole.UserRole, slide.id)
             self.list_widget.addItem(item)
@@ -2062,7 +2224,7 @@ class SlideEditorPanel(QWidget):
         for w in (
             self.title_input, self.content_input, self.duration_input,
             self.font_size_input, self.font_family_combo, self.bold_check,
-            self.italic_check, self.overlay_check,
+            self.italic_check, self.placement_combo,
         ):
             w.setEnabled(slide is not None)
         if slide is None:
@@ -2072,18 +2234,21 @@ class SlideEditorPanel(QWidget):
             self.font_size_input.setValue(20)
             self.bold_check.setChecked(True)
             self.italic_check.setChecked(False)
-            self.overlay_check.setChecked(False)
+            self.placement_combo.setCurrentIndex(0)
         else:
             self.title_input.setText(slide.title)
             self.content_input.setPlainText(slide.content)
             self.duration_input.setValue(slide.duration)
             self.font_size_input.setValue(slide.font_size)
+            self._loaded_duration = float(self.duration_input.value())
             if slide.font_family:
                 from PySide6.QtGui import QFont
                 self.font_family_combo.setCurrentFont(QFont(slide.font_family))
             self.bold_check.setChecked(slide.bold)
             self.italic_check.setChecked(slide.italic)
-            self.overlay_check.setChecked(slide.overlay)
+            self.placement_combo.setCurrentIndex(
+                self.placement_combo.findData(self._placement(slide))
+            )
         self._refreshing = False
 
     def _create_slide(self) -> None:
@@ -2098,7 +2263,10 @@ class SlideEditorPanel(QWidget):
             text_color="#ffffff",
             font_size=20,
         )
+        # New slides take their own time so no footage disappears behind them;
+        # near a clip edge they go to the edge rather than splitting the clip.
         self.project.slides.append(slide)
+        self.project.insert_slide(slide, self.project.slide_insert_point(self.project.current_time))
         self.project.duration = project_end_time(self.project)
         self.project_changed.emit()
         self.refresh()
@@ -2129,28 +2297,58 @@ class SlideEditorPanel(QWidget):
             return False
         slide.title = self.title_input.text()
         slide.content = self.content_input.toPlainText()
-        slide.duration = float(self.duration_input.value())
+        duration = float(self.duration_input.value())
+        if abs(duration - self._loaded_duration) > 1e-9:
+            # Only a real change of the spinner: a stored duration it cannot
+            # show exactly (0.3 s, 5.123 s) must not change on another edit.
+            # An inserted slide pushes or pulls the video after it.
+            self.project.resize_inserted_slide(slide, duration)
+            self._loaded_duration = duration
         slide.font_size = int(self.font_size_input.value())
         slide.font_family = self.font_family_combo.currentFont().family()
         slide.bold = self.bold_check.isChecked()
         slide.italic = self.italic_check.isChecked()
-        slide.overlay = self.overlay_check.isChecked()
+        self._set_placement(slide, self.placement_combo.currentData())
         self.project.duration = project_end_time(self.project)
         self.preview.set_slide(slide)
         self._refresh_list_labels()
         return True
+
+    @staticmethod
+    def _placement(slide: Slide) -> str:
+        if slide.overlay:
+            return "overlay"
+        return "insert" if slide_is_inserted(slide) else "cover"
+
+    def _set_placement(self, slide: Slide, placement: str | None) -> None:
+        if placement is None or placement == self._placement(slide):
+            return
+        if slide_is_inserted(slide):
+            self.project.remove_slide_gap(slide)
+        if placement == "insert":
+            point = self.project.slide_insert_point(slide.start_time, exclude_id=slide.id)
+            self.project.insert_slide(slide, point)
+        else:
+            slide.insert = False
+            slide.overlay = placement == "overlay"
+
+    @staticmethod
+    def _list_text(slide: Slide) -> str:
+        end_time = slide.start_time + slide.duration
+        placement = {"insert": "inserted", "cover": "covers video", "overlay": "overlay"}[
+            SlideEditorPanel._placement(slide)
+        ]
+        return (
+            f"{slide.title or '(untitled)'}\n"
+            f"{fmt_time(slide.start_time)} - {fmt_time(end_time)}  |  {slide.duration:g}s  |  {placement}"
+        )
 
     def _refresh_list_labels(self) -> None:
         current = self._selected_id()
         for row, slide in enumerate(self.project.slides):
             item = self.list_widget.item(row)
             if item is not None:
-                end_time = slide.start_time + slide.duration
-                overlay = "overlay" if slide.overlay else "full slide"
-                item.setText(
-                    f"{slide.title or '(untitled)'}\n"
-                    f"{fmt_time(slide.start_time)} - {fmt_time(end_time)}  |  {slide.duration:g}s  |  {overlay}"
-                )
+                item.setText(self._list_text(slide))
                 item.setSizeHint(QSize(0, 54))
                 item.setData(Qt.ItemDataRole.UserRole, slide.id)
                 if slide.id == current:
@@ -2178,7 +2376,10 @@ class SlideEditorPanel(QWidget):
         if slide is None:
             return
         self.gesture.commit()
-        slide.start_time = self.project.current_time
+        if slide_is_inserted(slide):
+            self.project.place_inserted_slide(slide, self.project.current_time)
+        else:
+            slide.start_time = self.project.current_time
         self.project.duration = project_end_time(self.project)
         self.project_changed.emit()
         self.refresh()
@@ -2188,6 +2389,9 @@ class SlideEditorPanel(QWidget):
         if slide_id is None:
             return
         self.gesture.commit()
+        selected = self._selected_slide()
+        if selected is not None:
+            self.project.remove_slide_gap(selected)
         self.project.slides = [slide for slide in self.project.slides if slide.id != slide_id]
         self.project.duration = project_end_time(self.project)
         self.project_changed.emit()

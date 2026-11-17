@@ -91,7 +91,8 @@ hf auth login
 ```
 
 The updater release collects **765 tests** (`python -m pytest tests/ -q`;
-local clean exit on 2026-11-17). Published v0.5.19-alpha passed all 765 macOS
+local clean exit on 2026-11-17); with inserted slides (uncommitted) the tree
+collects **804** (clean exit, 2026-11-17). Published v0.5.19-alpha passed all 765 macOS
 CI tests; both installer builds passed. The Windows fixture path blocker is fixed;
 its informational suite now reports 741 passed, 17 failed and 7 skipped. See
 HANDOFF.md and docs/releases/v0.5.19-alpha-verification.json for evidence and
@@ -184,6 +185,13 @@ layer paints the slide above it.
   `ProjectState.ripple_after` shifts only timeline items downstream of a
   trim/delete delta, preserving unrelated intentional gaps; the separate
   `arrange_clips_without_overlap` helper still resolves overlap/reorder cases.
+  Full slides are either inserted (`Slide.insert`: they own a gap in the video
+  storyline, so clips after them play later) or cover (drawn over footage,
+  which is hidden). `insert_gap`, `slide_insert_point` (snaps to clip edges
+  within `INSERT_SNAP_SECONDS`/`INSERT_SNAP_PX`), `insert_slide`,
+  `remove_slide_gap`, `move_inserted_slide`, `place_inserted_slide` and
+  `resize_inserted_slide` keep that gap in step; `compact_clip_positions` also
+  keeps a slide-filled gap before the first clip.
 - `project_store.py` — JSON load/save with atomic temp-file rename.
 - `sam_backend.py` — model loading, frame extraction (OpenCV), and SAM3 with
   SAM1 (`facebook/sam-vit-base`) fallback. Uses `inspect.signature` to filter

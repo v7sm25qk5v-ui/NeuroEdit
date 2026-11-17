@@ -2183,7 +2183,9 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         if still_path is None:
             return
 
-        self._insert_timeline_gap(time_s, duration)
+        # Never inside another inserted slide: the still would overlap it.
+        time_s = self.project.outside_inserted_slides(time_s)
+        time_s = self.project.insert_gap(time_s, duration)
         slide = Slide(
             id=new_id(),
             title="",
@@ -2193,6 +2195,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             background="#000000",
             text_color="#ffffff",
             font_size=20,
+            insert=True,
         )
         self.project.slides.append(slide)
         self._invalidate_project_end_time()
@@ -2240,67 +2243,10 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         return 1920, 1080
 
     def _insert_timeline_gap(self, time_s: float, duration: float) -> None:
-        # A redaction that starts exactly at the insertion point moves after
-        # the gap (the still already shows its frame); ripple_after would keep
-        # its start and grow it instead.
-        at_point = [
-            (ann, ann.frame_time, ann.ann_duration)
-            for ann in self.project.annotations
-            if ann.type == "redact" and time_s <= ann.frame_time <= time_s + 1e-9
-        ]
-        # Everything downstream (clips, slides, audio, captions, markers,
-        # annotations and their mask frames) shifts in one place. Clips that
-        # span the insertion point keep their start and are split below.
-        self.project.ripple_after(time_s, duration)
-        for ann, start, length in at_point:
-            ann.frame_time = start + duration
-            ann.ann_duration = length
-
-        for clip in list(self.project.clips):
-            start = clip.start_time
-            if start < time_s < start + clip.display_duration:
-                self._split_clip_for_gap(clip, time_s, duration)
-
-        for ann in self.project.annotations:
-            # Cap normal labels so they don't bleed through the gap. Redactions
-            # were already extended by ripple_after, unlimited ones stay so.
-            if ann.type != "redact" and ann.frame_time < time_s and ann.is_visible_at(time_s):
-                ann.ann_duration = time_s - ann.frame_time
+        self.project.insert_gap(time_s, duration)
 
     def _split_clip_for_gap(self, clip: VideoClip, time_s: float, gap_duration: float) -> None:
-        left_duration = time_s - clip.start_time
-        split_trim = clip.trim_start + left_duration
-        right_duration = clip.trim_end - split_trim
-        if left_duration < 0.05:
-            clip.start_time += gap_duration
-            return
-        if right_duration < 0.05:
-            return
-
-        original_trim_end = clip.trim_end
-        original_source_out_limit = clip.source_out_limit
-        clip.trim_end = split_trim
-        clip.source_out_limit = split_trim
-        right = VideoClip(
-            id=new_id(),
-            path=clip.path,
-            name=f"{clip.name} (after still)",
-            duration=clip.duration,
-            start_time=time_s + gap_duration,
-            trim_start=split_trim,
-            trim_end=original_trim_end,
-            source_in_limit=split_trim,
-            source_out_limit=original_source_out_limit,
-            width=clip.width,
-            height=clip.height,
-            thumbnail_path=clip.thumbnail_path,
-            media_type=clip.media_type,
-            fade_in=clip.fade_in,
-            fade_out=clip.fade_out,
-            fade_color=clip.fade_color,
-        )
-        idx = self.project.clips.index(clip)
-        self.project.clips.insert(idx + 1, right)
+        self.project.split_clip_for_gap(clip, time_s, gap_duration)
 
     def _clip_media_problem(self, clip: VideoClip) -> str | None:
         path = Path(clip.path)

@@ -1,5 +1,88 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-17 — Inserted slides: a slide can push the video later (uncommitted)
+
+**Why.** A full slide always went in at the playhead *over* the video. A title
+slide at 0:00 therefore hid the first seconds of the first clip; the preview
+skipped them and the export never showed them. The user wants both slides that
+overlap footage and slides that sit *before/between* clips, and asked that a
+slide aimed roughly between two clips land between them rather than splitting
+a clip a second from its end.
+
+**What changed.**
+- `models.py`: `Slide.insert` (default False, so old projects load unchanged as
+  cover slides). Helpers `slide_span`, `slide_is_inserted`. `ProjectState`
+  gains `insert_gap` + `split_clip_for_gap` (moved from `MainWindow`, which now
+  delegates; Take Still is unchanged and marks its slide `insert=True`),
+  `slide_insert_point`, `insert_slide`, `remove_slide_gap`, `move_inserted_slide`,
+  `place_inserted_slide`, `resize_inserted_slide`. Snapping: nearest clip edge
+  within `INSERT_SNAP_SECONDS` (2 s) or `INSERT_SNAP_PX` (16 px at the current
+  zoom), never inside another inserted slide, past the end → end. Further inside
+  a clip the clip is split there (deliberate mid-clip insert via the playhead).
+- `compact_clip_positions` now also keeps a slide-filled gap *before the first
+  clip*. Before, any clip drag collapsed that gap and slid the first clip under
+  a title slide (also a latent Take Still-at-0:00 bug). Gaps with no slide still
+  close as before.
+- Timeline (`editor_panels.TimelineCanvas`): inserted slides show the title on
+  the left and a centred `|<-[]->|` icon; their time is a dashed placeholder in
+  the Video row; cover slides hatch the footage they hide; hover tooltips say
+  which. Dragging an inserted slide moves it between clips only (never splits),
+  re-applied from the press state each move so the clips part live; Escape
+  cancels; trash/delete closes its time. Cover/overlay slides drag as before.
+- Slides panel: the "Overlay (transparent)" checkbox became **Placement**:
+  Insert (push video later) / Cover video / Overlay. **New Slide now inserts by
+  default** at the snapped playhead point. Switching placement opens/closes the
+  slide's time; duration edits and delete move the video; Place at Current Time
+  re-inserts at the playhead (reading it in the current layout).
+
+**Gotchas.** An inserted slide's time is closed and reopened when it moves; a
+move that lands in the same slot restores the press state exactly, because
+close+reopen would shift items that start inside the slide's own time.
+Inserting/resizing goes through `insert_gap`, so a redaction starting exactly
+at the insertion point moves with its footage instead of growing over the
+slide. Schema version not bumped: an older build drops `insert` and treats the
+slide as cover, with the clips still after it (no footage hidden).
+
+**Verification.** New `desktop/tests/test_slide_insert.py`, 39 tests:
+- Snapping table and the zoomed-out snap.
+- Never inside another inserted slide.
+- Insert, split, move and back, same-slot no-op, resize, and place at the playhead.
+- Redactions and mask frames.
+- The leading gap surviving a clip drag.
+- Timeline: drag (including rightward), Escape, delete, paint, and cache key.
+- Panel: New Slide, placement switching, duration, and delete.
+- Export: the title slide then the whole clip, frame-compared.
+- In-app undo: one step per edit.
+
+The full suite gave **802 passed** with a clean exit (215 s). An earlier run while the reviewer was active timed out only in `test_capture_baseline`, the known 180 s subprocess limit under load. Ruff is clean. An offscreen render of the timeline was checked by eye; nothing was tried in the running app.
+
+**Independent review** (Sonnet, about 7,000 randomized model sequences). Fixed:
+- A rightward drag landed one slot too far, because the pointer is now read against the timeline as drawn.
+- Take Still inside an inserted slide overlapped it; it now uses `outside_inserted_slides`.
+- A redaction moved off the insertion point left its mask frames behind (pre-existing).
+- Room within `MIN_SPLIT` (0.05 s) of a clip edge left a clip sliver under the slide; `insert_gap` now snaps to the edge and returns the point.
+- A file with both `overlay` and `insert` set closed a gap that never existed.
+- A stored duration the spinner can't show (for example 0.3 s) was rewritten by unrelated edits.
+
+**User decision (2026-11-17): "Stop at the slide".** At a clip edge,
+`insert_gap` now leaves a finite redaction that ends exactly at the insertion
+point where it is, so the redaction box no longer covers the inserted slide.
+The trade-off, accepted by the user: that redaction's inclusive end frame, the
+next clip's first frame (about 1/30 s), is no longer covered. Inside a clip
+(Take Still or a deliberate mid-clip insert) it still grows, because there the
+end frame is the same footage resumed after the room
+(`test_insert_still_preserves_redaction_on_resumed_source`). Tests:
+`test_redaction_ending_at_a_clip_edge_stops_at_an_inserted_slide` and
+`..._at_a_split_point_still_covers_the_resumed_footage`. Full suite after this
+change: **804 passed**, clean exit (51 s).
+
+**Open, deliberately unchanged:**
+- **Labels spanning the insertion point** are capped there.
+- **Audio, markers and captions starting inside an inserted slide** don't travel with it when it moves.
+- **Narrow slides.** At low zoom a narrow inserted slide shows only the icon; the title is in the tooltip.
+
+**Next:** try it in the app with real footage (Insert a title before a clip, drag it between clips, Take Still near a slide), then commit.
+
 ## 2026-11-17 — v0.5.19-alpha updater published and verified
 
 - Pushed main and annotated tag `v0.5.19-alpha`, source
