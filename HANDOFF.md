@@ -1,6 +1,6 @@
 # NeuroEdit — Session Handoff
 
-## 2026-11-17 — Inserted slides: a slide can push the video later (uncommitted)
+## 2026-11-17 — Inserted slides: a slide can push the video later (`46b3a15`, not pushed)
 
 **Why.** A full slide always went in at the playhead *over* the video. A title
 slide at 0:00 therefore hid the first seconds of the first clip; the preview
@@ -81,7 +81,7 @@ change: **804 passed**, clean exit (51 s).
 - **Audio, markers and captions starting inside an inserted slide** don't travel with it when it moves.
 - **Narrow slides.** At low zoom a narrow inserted slide shows only the icon; the title is in the tooltip.
 
-**Next:** try it in the app with real footage (Insert a title before a clip, drag it between clips, Take Still near a slide), then commit.
+**Next:** try it in the app with real footage (Insert a title before a clip, drag it between clips, Take Still near a slide). Committed locally on main; not pushed or released.
 
 ## 2026-11-17 — v0.5.19-alpha updater published and verified
 
