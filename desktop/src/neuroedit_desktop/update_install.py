@@ -38,6 +38,31 @@ class PreparedInstall:
     payload: Path
 
 
+_MAC_INSTALL_DIRS = (Path("/Applications"), Path.home() / "Applications")
+
+
+def _installed_mac_copy(bundle: Path) -> Path | None:
+    """Find one writable installed copy identical to a read-only running bundle."""
+    try:
+        info = (bundle / "Contents/Info.plist").read_bytes()
+        executable = hashlib.sha256((bundle / "Contents/MacOS/NeuroEdit").read_bytes()).digest()
+    except OSError:
+        return None
+    matches = []
+    for directory in _MAC_INSTALL_DIRS:
+        candidate = directory / "NeuroEdit.app"
+        if (candidate.is_symlink() or not _valid_bundle(candidate)
+                or not os.access(directory, os.W_OK | os.X_OK)):
+            continue
+        try:
+            if ((candidate / "Contents/Info.plist").read_bytes() == info
+                    and hashlib.sha256((candidate / "Contents/MacOS/NeuroEdit").read_bytes()).digest() == executable):
+                matches.append(candidate)
+        except OSError:
+            continue
+    return matches[0] if len(matches) == 1 else None
+
+
 def inspect_install_target() -> InstallTarget:
     """Only allow installed, writable frozen applications, never a source checkout."""
     platform = sys.platform
@@ -53,6 +78,10 @@ def inspect_install_target() -> InstallTarget:
         if target.name != "NeuroEdit.app" or not _valid_bundle(target):
             return InstallTarget(platform, None, "The installed application bundle could not be verified. Download the update manually.")
         writable = os.access(target.parent, os.W_OK | os.X_OK)
+        if not writable:
+            installed = _installed_mac_copy(target)
+            if installed is not None:
+                target, writable = installed, True
     elif platform == "win32":
         if executable.name.lower() != "neuroedit.exe" or not (executable.parent / "_internal").is_dir():
             return InstallTarget(platform, None, "The installed application could not be identified. Download the update manually.")

@@ -81,6 +81,79 @@ def test_source_checkout_is_unsupported(monkeypatch):
     assert not updater.inspect_install_target().supported
 
 
+@pytest.fixture
+def translocated_install(tmp_path, monkeypatch):
+    running = tmp_path / "AppTranslocation" / "random" / "d" / "NeuroEdit.app"
+    installed = tmp_path / "Applications" / "NeuroEdit.app"
+    user_apps = tmp_path / "user" / "Applications"
+    info = plistlib.dumps({"CFBundleIdentifier": "org.neuroedit", "CFBundleExecutable": "NeuroEdit", "CFBundleShortVersionString": "0.5.20"})
+    for bundle in (running, installed):
+        (bundle / "Contents/MacOS").mkdir(parents=True)
+        (bundle / "Contents/Info.plist").write_bytes(info)
+        executable = bundle / "Contents/MacOS/NeuroEdit"
+        executable.write_bytes(b"the running application")
+        executable.chmod(0o755)
+    access = updater.os.access
+    monkeypatch.setattr(updater.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(updater.sys, "platform", "darwin")
+    monkeypatch.setattr(updater.sys, "executable", str(running / "Contents/MacOS/NeuroEdit"))
+    monkeypatch.setattr(updater, "_MAC_INSTALL_DIRS", (installed.parent, user_apps))
+    monkeypatch.setattr(updater.os, "access", lambda path, mode: False if path == running.parent else access(path, mode))
+    return running, installed, user_apps
+
+
+@pytest.mark.parametrize("user_install", [False, True])
+def test_translocated_app_updates_its_identical_installed_copy(translocated_install, tmp_path, user_install):
+    running, installed, user_apps = translocated_install
+    if user_install:
+        user_apps.mkdir(parents=True)
+        installed = installed.rename(user_apps / "NeuroEdit.app")
+    target = updater.inspect_install_target()
+    assert target.supported and target.path == installed
+    asset = tmp_path / "update.zip"
+    bundle_zip(asset)
+    prepared = updater.prepare_install(asset, release(asset), target)
+    assert prepared.staging.parent == installed.parent
+    assert prepared.target.path == installed
+    assert (installed / "Contents/MacOS/NeuroEdit").read_bytes() == b"the running application"
+    assert (running / "Contents/MacOS/NeuroEdit").read_bytes() == b"the running application"
+    updater.discard_prepared_install(prepared)
+
+
+@pytest.mark.parametrize("difference", ["executable", "metadata", "missing", "ambiguous", "read_only", "symlink"])
+def test_translocated_app_never_guesses_an_install_target(translocated_install, monkeypatch, difference):
+    import shutil
+
+    _, installed, user_apps = translocated_install
+    if difference == "executable":
+        (installed / "Contents/MacOS/NeuroEdit").write_bytes(b"a different application")
+    elif difference == "metadata":
+        path = installed / "Contents/Info.plist"
+        info = plistlib.loads(path.read_bytes())
+        info["CFBundleShortVersionString"] = "0.5.19"
+        path.write_bytes(plistlib.dumps(info))
+    elif difference == "missing":
+        shutil.rmtree(installed)
+    elif difference == "ambiguous":
+        shutil.copytree(installed, user_apps / "NeuroEdit.app")
+    elif difference == "read_only":
+        access = updater.os.access
+        monkeypatch.setattr(updater.os, "access", lambda path, mode: False if path == installed.parent else access(path, mode))
+    elif difference == "symlink":
+        other = installed.with_name("Other.app")
+        installed.rename(other)
+        installed.symlink_to(other, target_is_directory=True)
+    assert not updater.inspect_install_target().supported
+
+
+def test_writable_running_app_does_not_search_other_installations(translocated_install, monkeypatch):
+    running, _, _ = translocated_install
+    monkeypatch.setattr(updater.os, "access", lambda path, mode: True)
+    monkeypatch.setattr(updater, "_installed_mac_copy", lambda path: pytest.fail("already writable"))
+    target = updater.inspect_install_target()
+    assert target.supported and target.path == running
+
+
 def test_windows_launch_is_detached_and_waits_for_pid(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: calls.append((args, kwargs)))

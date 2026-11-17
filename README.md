@@ -4,21 +4,16 @@ NeuroEdit is a standalone desktop video editor for preparing operative video for
 conference, research, and educational use. Editing and export run locally;
 NeuroEdit does not upload video or audio to a cloud editing service.
 
-Current alpha: [v0.5.20-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.20-alpha)
+Current alpha: [v0.5.21-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.21-alpha)
 
 [Download the latest build](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/latest).
 
-### What's new in v0.5.20-alpha
+### What's new in v0.5.21-alpha
 
-- **Inserted slides:** a slide can now take its own time on the timeline, so the
-  video after it plays later instead of being hidden behind it. A title slide at
-  0:00 no longer covers the start of the first clip.
-- Slides have a **Placement**: Insert (push the video later), Cover video, or
-  Overlay. New slides are inserted by default.
-- Inserted slides snap to the nearest clip edge, so a slide aimed between two
-  clips never splits one a second from its end. Drag one to move it between
-  clips; the timeline shows a push icon on it and hatches footage a cover slide hides.
-- First release available through **Help → Check for Updates…** from v0.5.19-alpha.
+- **Mac in-app update fix:** when macOS runs NeuroEdit from a read-only temporary
+  copy, the updater can use a single verified matching copy in Applications.
+  Download the update in the app, then choose **Install and Restart**.
+- Retains inserted slides, which push footage later instead of covering it.
 
 The retained security findings are tracked in [SECURITY_FIXES.md](SECURITY_FIXES.md).
 The original scan had partial coverage; these fixes do not constitute a completed audit.
@@ -60,7 +55,7 @@ The original scan had partial coverage; these fixes do not constitute a complete
 
 ### macOS
 
-Download `NeuroEdit-v0.5.20-alpha-macOS-unsigned.dmg` from the release page.
+Download `NeuroEdit-v0.5.21-alpha-macOS-unsigned.dmg` from the release page.
 Open the DMG, drag `NeuroEdit.app` into Applications, then right-click the app
 and choose `Open` for the first launch.
 
@@ -70,7 +65,7 @@ If macOS blocks launch, open `System Settings` -> `Privacy & Security`, choose
 
 ### Windows
 
-Download `NeuroEdit-v0.5.20-alpha-Windows-Setup.exe` from the release page on a
+Download `NeuroEdit-v0.5.21-alpha-Windows-Setup.exe` from the release page on a
 Windows PC. If SmartScreen warns, choose `More info` -> `Run anyway`, then follow
 the installer.
 
@@ -89,9 +84,11 @@ saves your work and reopens the same saved project after restarting. Checks only
 contact GitHub when requested; project media stays local.
 
 Builds from v0.5.19-alpha onward include the updater; v0.5.19-alpha can update
-to v0.5.20-alpha in the app. Older versions must install manually once.
-Source checkouts and read-only app locations use the release page for manual
-installation. See
+to v0.5.21-alpha in the app. Older versions must install manually once.
+On macOS, a read-only running copy can update a single identical writable copy
+in `/Applications` or `~/Applications`. Older updater builds may still require
+a one-time manual installation if macOS translocates them. Source checkouts and
+read-only apps without a matching installed copy use manual installation. See
 [updater implementation and validation](desktop/docs/IN_APP_UPDATES.md).
 
 ## Clinical Disclaimer

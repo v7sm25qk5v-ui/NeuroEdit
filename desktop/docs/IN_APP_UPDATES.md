@@ -14,8 +14,14 @@ releases can update in the app. Publication results are recorded in HANDOFF.md.
    Saving or closing failure prevents handoff. The editor saves edited work and
    remembers the current saved project, then exits normally.
 5. The helper waits for process exit, installs, and restarts NeuroEdit. The saved
-   project reopens once. Source checkouts and read-only installations offer
-   **Open Releases** with manual-install instructions.
+   project reopens once. On macOS, a read-only running app can target a single
+   writable matching copy in `/Applications` or `~/Applications`; the Info.plist
+   bytes and executable SHA-256 must match. Missing, ambiguous, symlinked or
+   mismatched copies are refused. Source checkouts and read-only installations
+   without a matching installed copy offer **Open Releases**.
+
+The installed-copy fallback ships in v0.5.21-alpha. A translocated older build
+cannot receive the fix before it is installed once.
 
 Only public release metadata/assets are requested. No videos, audio, project
 content, GitHub account or credentials are sent. Existing unsigned-build OS

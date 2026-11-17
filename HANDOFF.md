@@ -1,5 +1,29 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-17 — macOS translocated updater fix, v0.5.21-alpha prepared
+
+- User reported that Check for Updates offered only the release page. Confirmed
+  the running v0.5.19 process was inside a read-only `AppTranslocation` mount,
+  while `/Applications/NeuroEdit.app` was writable. The old updater inspected
+  only the running bundle, so it incorrectly fell back to manual installation.
+- `update_install.py` now checks the two standard Applications folders when the
+  running macOS bundle is read-only. Exactly one writable, valid, non-symlinked
+  `NeuroEdit.app` must have byte-identical Info.plist and executable SHA-256.
+  Different or ambiguous copies are refused. No private macOS APIs, quarantine
+  changes, source-checkout updates, or arbitrary filesystem searches added.
+- Nine regression cases cover system/user installs, staging on the installed
+  volume without changing either original, mismatches, missing/ambiguous copies,
+  read-only locations, symlinks and unchanged writable-running-app behavior.
+- Verification: Ruff `src tests scripts` passed; full suite **813 passed**, two
+  existing Qt warnings, 48.14 s, clean exit. Patched target detection against the
+  actual translocated v0.5.19 process selected `/Applications/NeuroEdit.app`.
+- Prepared numeric 0.5.21, README/download references, updater docs and release
+  notes. Publication and installed-app smoke results will be recorded separately.
+- Desktop-control inspection failed with an expired continuation after a long
+  tool stall. No app close, replacement, native preferences or project changes
+  were performed. The running old build needs the fixed version installed once;
+  it cannot download changed updater code before installation.
+
 ## 2026-11-17 — v0.5.20-alpha published and verified
 
 - Pushed Claude's three prepared commits on main and the existing annotated
