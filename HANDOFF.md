@@ -1,5 +1,37 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-17 — v0.5.21-alpha published and installed on the user's Mac
+
+- Published [NeuroEdit v0.5.21-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.21-alpha)
+  at source `cd86959e90657d819731a6e24978b78ff9ba7c0c`, annotated tag
+  `d90c333297585178e7f69be32dbab31752f925f1`. Main and tag pushed atomically;
+  existing release tags were not moved. Latest API and all three public installer
+  URLs verified; release notes describe the translocated-copy updater fix.
+- Tagged [workflow 44173325908](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44173325908)
+  succeeded: required macOS Ruff, **813 tests passed**, two existing warnings,
+  93.68 s, both installer builds and publication. Main
+  [quality 44173325902](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44173325902)
+  succeeded. Informational Windows: **790 passed, 16 failed, 7 skipped**;
+  its failed test names exactly match v0.5.20-alpha, and all nine new cases pass.
+- The user saved and quit normally before replacement. The old app initially
+  remained running and rejected a normal Quit request; the user completed quit
+  after a follow-up. No process was force-killed. Desktop-control inspection
+  failed; the separate System Events fallback was denied assistive access.
+- One-time bootstrap for the older updater used the production `UpdateService`,
+  `prepare_install` and `launch_prepared_install`, not a browser/manual drag.
+  Downloaded the published ZIP, verified SHA-256, staged on the installation
+  volume and passed deep/strict codesign verification before invoking the normal
+  replacement/rollback/relaunch helper. No quarantine attributes were changed.
+- Verified installed **0.5.21** and a live process executing directly from
+  `/Applications/NeuroEdit.app/Contents/MacOS/NeuroEdit`, with writable parent
+  and no App Translocation. Installed signature verification also passed.
+  No project contents or native preferences were edited by the bootstrap.
+- Evidence: `desktop/docs/releases/v0.5.21-alpha-verification.json`. This verifies
+  real download/replacement/restart; the full future update through GUI buttons
+  and edited-project reopening remains a separate smoke check. Native Windows
+  installation and existing informational failures also remain open.
+- Documentation-only publication follow-up does not move the tested release tag.
+
 ## 2026-11-17 — macOS translocated updater fix, v0.5.21-alpha prepared
 
 - User reported that Check for Updates offered only the release page. Confirmed
