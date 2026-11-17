@@ -1,5 +1,34 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-17 — v0.5.20-alpha published and verified
+
+- Pushed Claude's three prepared commits on main and the existing annotated
+  `v0.5.20-alpha` tag atomically. Release source
+  `f0cb76899eb46258eb9988cfd6cdbf89199e4977`; tag object
+  `58ed6e38c4ef4d6fdf2b188c9056804eec37aff0`. No existing tag moved.
+- Published [NeuroEdit v0.5.20-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.20-alpha)
+  with the prepared release notes and macOS DMG/ZIP plus Windows installer.
+  GitHub Latest API reports this tag; alpha/unsigned labels retained, with
+  GitHub non-prerelease/Latest status for updater discovery.
+- Tagged [workflow 44156708157](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44156708157)
+  succeeded: required macOS Ruff and **804 tests passed**, 2 warnings, 108.93 s;
+  both installer builds and publication passed. Main
+  [quality 44156707379](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44156707379)
+  also succeeded. Relied on Claude's completed local tests; no local rerun.
+- Informational Windows job: **781 passed, 16 failed, 7 skipped, 2 warnings**
+  in 126.07 s; Ruff passed. Platform assumptions, paths, cleanup and macOS
+  update-helper failures remain; not all classified as test-only. The existing
+  informational policy is unchanged, and Windows runtime is not fully validated.
+- All three public installer URLs returned HEAD HTTP 200. GitHub-reported
+  SHA-256 digests, sizes and publication evidence are recorded in
+  `desktop/docs/releases/v0.5.20-alpha-verification.json`. Installer bytes were
+  not independently downloaded or installed during this publication.
+- v0.5.19-alpha users can now use **Help → Check for Updates…** against a real
+  newer release. Actual installed update/restart, native Windows execution and
+  inserted slides with real footage remain smoke checks.
+- This documentation-only follow-up records publication without moving the
+  tested tag. Earlier preparation/not-pushed entries below are historical.
+
 ## 2026-11-17 — v0.5.20-alpha release prepared (inserted slides)
 
 - Version 0.5.20 in `desktop/pyproject.toml`; README "What's new", install

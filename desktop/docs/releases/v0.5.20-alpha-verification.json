@@ -1,0 +1,80 @@
+{
+  "release_id": 449090876,
+  "tag": "v0.5.20-alpha",
+  "name": "NeuroEdit v0.5.20-alpha",
+  "source_commit": "f0cb76899eb46258eb9988cfd6cdbf89199e4977",
+  "annotated_tag_object": "58ed6e38c4ef4d6fdf2b188c9056804eec37aff0",
+  "release_url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.20-alpha",
+  "published_at": "2026-11-17T19:22:27Z",
+  "verified_at": "2026-11-17T19:24:02.176813+00:00",
+  "draft": false,
+  "prerelease": false,
+  "latest_tag": "v0.5.20-alpha",
+  "local_tests_rerun": false,
+  "prior_local_validation": {
+    "source": "Claude handoff and user confirmation",
+    "passed": 804,
+    "ruff": "passed"
+  },
+  "main_workflow": {
+    "id": 44156707379,
+    "url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44156707379",
+    "conclusion": "success"
+  },
+  "tagged_workflow": {
+    "id": 44156708157,
+    "url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44156708157",
+    "conclusion": "success",
+    "macos_pytest_passed": 804,
+    "macos_pytest_seconds": 108.93,
+    "warnings": 2,
+    "ruff": "passed",
+    "macos_installer": "success",
+    "windows_installer": "success",
+    "publication": "success"
+  },
+  "windows_informational": {
+    "conclusion": "failure",
+    "nonblocking": true,
+    "passed": 781,
+    "failed": 16,
+    "skipped": 7,
+    "warnings": 2,
+    "pytest_seconds": 126.07,
+    "ruff": "passed",
+    "failure_scope": "Includes platform assumptions, paths, cleanup and macOS update helpers; not all classified as test-only."
+  },
+  "assets": [
+    {
+      "name": "NeuroEdit-v0.5.20-alpha-macOS-unsigned.dmg",
+      "size": 130026242,
+      "state": "uploaded",
+      "github_reported_digest": "sha256:6eac9864d8961d8655dc1b262ab53951a28642be891bbd736986fee430a34d4b",
+      "browser_download_url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/download/v0.5.20-alpha/NeuroEdit-v0.5.20-alpha-macOS-unsigned.dmg",
+      "public_head_http_status": 200
+    },
+    {
+      "name": "NeuroEdit-v0.5.20-alpha-macOS-unsigned.zip",
+      "size": 117656880,
+      "state": "uploaded",
+      "github_reported_digest": "sha256:0d6b83d3072283142b5fcfb5eebe9ddd1778ca8ba537dbbdcfdb62cc2af2f004",
+      "browser_download_url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/download/v0.5.20-alpha/NeuroEdit-v0.5.20-alpha-macOS-unsigned.zip",
+      "public_head_http_status": 200
+    },
+    {
+      "name": "NeuroEdit-v0.5.20-alpha-Windows-Setup.exe",
+      "size": 100377453,
+      "state": "uploaded",
+      "github_reported_digest": "sha256:c44f2ea86aedfe69a71b3244bd86094b789e98cadd469729f8093ce92c723b02",
+      "browser_download_url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/download/v0.5.20-alpha/NeuroEdit-v0.5.20-alpha-Windows-Setup.exe",
+      "public_head_http_status": 200
+    }
+  ],
+  "asset_verification_scope": "GitHub-reported SHA256 and public HEAD HTTP 200; installer bytes not independently downloaded or installed.",
+  "remaining_validation": [
+    "Installed macOS update/restart and project recovery",
+    "Native Windows install/update/restart and project recovery",
+    "Informational Windows test failures",
+    "Real footage inserted-slide smoke test"
+  ]
+}
