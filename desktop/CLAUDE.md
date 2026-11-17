@@ -91,8 +91,8 @@ hf auth login
 ```
 
 The updater release collects **765 tests** (`python -m pytest tests/ -q`;
-local clean exit on 2026-11-17); with inserted slides (`46b3a15`) the tree
-collects **804** (clean exit, 2026-11-17). Published v0.5.19-alpha passed all 765 macOS
+local clean exit on 2026-11-17). v0.5.20-alpha (inserted slides) collects
+**804** (local clean exit and Ruff on 2026-11-17). Published v0.5.19-alpha passed all 765 macOS
 CI tests; both installer builds passed. The Windows fixture path blocker is fixed;
 its informational suite now reports 741 passed, 17 failed and 7 skipped. See
 HANDOFF.md and docs/releases/v0.5.19-alpha-verification.json for evidence and

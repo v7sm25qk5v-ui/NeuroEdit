@@ -1,5 +1,14 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-17 — v0.5.20-alpha release prepared (inserted slides)
+
+- Version 0.5.20 in `desktop/pyproject.toml`; README "What's new", install
+  names and updater text; notes in `desktop/docs/releases/v0.5.20-alpha.md`.
+- First release that v0.5.19-alpha users can take through **Help → Check for
+  Updates…**, so it is the first real use of the in-app update path.
+- Local: Ruff (`src tests scripts`) clean; full suite **804 passed**, clean exit (52 s).
+- Publication status is recorded in the next entry once CI has run.
+
 ## 2026-11-17 — Inserted slides: a slide can push the video later (`46b3a15`, not pushed)
 
 **Why.** A full slide always went in at the playhead *over* the video. A title

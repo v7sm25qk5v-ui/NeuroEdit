@@ -4,20 +4,21 @@ NeuroEdit is a standalone desktop video editor for preparing operative video for
 conference, research, and educational use. Editing and export run locally;
 NeuroEdit does not upload video or audio to a cloud editing service.
 
-Current alpha: [v0.5.19-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.19-alpha)
+Current alpha: [v0.5.20-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.20-alpha)
 
 [Download the latest build](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/latest).
 
-### What's new in v0.5.19-alpha
+### What's new in v0.5.20-alpha
 
-- **In-app updates:** choose **Help → Check for Updates…** to read release notes,
-  download a verified update, and choose **Install and Restart**.
-- Saves edited work before installation and reopens the same saved project after
-  restart. Download cancellation and failed save/launch paths keep the app safe.
-- Supports installed macOS and Windows builds; source checkouts and read-only
-  locations offer the release page for manual installation.
-- Retains MPG/MPEG working-copy import and the editor improvements from earlier
-  releases.
+- **Inserted slides:** a slide can now take its own time on the timeline, so the
+  video after it plays later instead of being hidden behind it. A title slide at
+  0:00 no longer covers the start of the first clip.
+- Slides have a **Placement**: Insert (push the video later), Cover video, or
+  Overlay. New slides are inserted by default.
+- Inserted slides snap to the nearest clip edge, so a slide aimed between two
+  clips never splits one a second from its end. Drag one to move it between
+  clips; the timeline shows a push icon on it and hatches footage a cover slide hides.
+- First release available through **Help → Check for Updates…** from v0.5.19-alpha.
 
 The retained security findings are tracked in [SECURITY_FIXES.md](SECURITY_FIXES.md).
 The original scan had partial coverage; these fixes do not constitute a completed audit.
@@ -38,8 +39,9 @@ The original scan had partial coverage; these fixes do not constitute a complete
   tool that burns opaque boxes over on-screen identifiers, metadata stripping on
   every export, a pre-export attestation checklist, and a configurable
   (non-cloud-synced) storage location.
-- **Slides and stills** — title/body slides, image overlays, and "Take Still"
-  frame capture that inherits redactions.
+- **Slides and stills** — title/body slides that are inserted between clips
+  (pushing the video later), cover footage, or overlay it; image overlays; and
+  "Take Still" frame capture that inherits redactions.
 - **Narration and audio** — record or import tracks, preview them on the timeline,
   and mix them into exports with per-track timing and volume.
 - **Captions** — generated from transcript segments, previewed on the canvas,
@@ -58,7 +60,7 @@ The original scan had partial coverage; these fixes do not constitute a complete
 
 ### macOS
 
-Download `NeuroEdit-v0.5.19-alpha-macOS-unsigned.dmg` from the release page.
+Download `NeuroEdit-v0.5.20-alpha-macOS-unsigned.dmg` from the release page.
 Open the DMG, drag `NeuroEdit.app` into Applications, then right-click the app
 and choose `Open` for the first launch.
 
@@ -68,7 +70,7 @@ If macOS blocks launch, open `System Settings` -> `Privacy & Security`, choose
 
 ### Windows
 
-Download `NeuroEdit-v0.5.19-alpha-Windows-Setup.exe` from the release page on a
+Download `NeuroEdit-v0.5.20-alpha-Windows-Setup.exe` from the release page on a
 Windows PC. If SmartScreen warns, choose `More info` -> `Run anyway`, then follow
 the installer.
 
@@ -86,8 +88,8 @@ notes, download a verified update, and choose **Install and Restart**. The app
 saves your work and reopens the same saved project after restarting. Checks only
 contact GitHub when requested; project media stays local.
 
-Install v0.5.19-alpha manually once to get the updater. It reports **up to date**
-until a newer release is published; that future release can use the in-app flow.
+Builds from v0.5.19-alpha onward include the updater; v0.5.19-alpha can update
+to v0.5.20-alpha in the app. Older versions must install manually once.
 Source checkouts and read-only app locations use the release page for manual
 installation. See
 [updater implementation and validation](desktop/docs/IN_APP_UPDATES.md).
