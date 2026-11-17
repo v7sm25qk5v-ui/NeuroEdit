@@ -993,8 +993,9 @@ preview covers the same corner in the exported frame.
 
 ## NE-032 — In-app GitHub update check, download, install and restart
 
-**Status 2026-11-17:** Verified locally on `codex/in-app-updates`; native
-installed-app/Windows smoke pending. Not in published v0.5.18-alpha.
+**Status 2026-11-17:** Published in v0.5.19-alpha; local and required macOS CI
+verification passed, both installers built. Actual installed-app/Windows update
+and restart smoke remains open. See the release verification JSON and HANDOFF.md.
 
 **Scope.** Manual Help menu check, fixed GitHub Latest version/notes, platform
 asset selection, cancellable verified download, safe close/save, installation
@@ -1010,7 +1011,9 @@ stale callbacks/retries, invalid digest/size, cancellation, safe symlinks, rollb
 failed saves/launches, preserving clean newer-schema files, and restart recovery.
 Details and remaining platform checks: `desktop/docs/IN_APP_UPDATES.md`.
 
-**NE-027 related infrastructure.** The slash-normalization assertion is corrected
-in the feature branch using Path equality. Native Windows execution must still
-verify the suite and new installer behavior; this is not a claim of a green
-Windows hosted check.
+**NE-027 related infrastructure.** Published Path equality fixes the former
+Windows fixture setup blocker. Hosted Windows now runs: 741 passed, 17 failed,
+7 skipped. Follow up on macOS/POSIX-only assumptions, path/filename differences,
+file/mask cleanup and relative-time assertions; determine runtime defects versus
+test portability issues before closing. Windows Ruff and installer build passed;
+actual installer/update/restart behavior still needs native smoke verification.

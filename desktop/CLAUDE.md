@@ -91,9 +91,11 @@ hf auth login
 ```
 
 The updater release collects **765 tests** (`python -m pytest tests/ -q`;
-local clean exit on 2026-11-17). The published v0.5.18-alpha baseline passed 723
-macOS CI tests; hosted results for v0.5.19-alpha are recorded in HANDOFF.md. The Windows fixture path
-comparison is corrected locally, but native Windows validation is pending.
+local clean exit on 2026-11-17). Published v0.5.19-alpha passed all 765 macOS
+CI tests; both installer builds passed. The Windows fixture path blocker is fixed;
+its informational suite now reports 741 passed, 17 failed and 7 skipped. See
+HANDOFF.md and docs/releases/v0.5.19-alpha-verification.json for evidence and
+remaining Windows portability/runtime validation.
 Keep it and `ruff check src tests scripts` green before every release tag.
 Every public release must also update GitHub's Latest release and repository
 Releases sidebar. Verify `/releases/latest` resolves to the new tag, alongside

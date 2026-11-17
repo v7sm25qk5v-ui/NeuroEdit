@@ -1,5 +1,36 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-17 — v0.5.19-alpha updater published and verified
+
+- Pushed main and annotated tag `v0.5.19-alpha`, source
+  `193178257b30e4ed32597e43c6821428e8817eb5`, tag object
+  `75cb8c750b9684a4111297391c393791011a0dd1`. No existing tag moved.
+- Published [NeuroEdit v0.5.19-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.19-alpha).
+  GitHub Latest API, live repository Releases sidebar, README links and all
+  three installer assets agree. Alpha/unsigned labels retained; GitHub category
+  is non-prerelease with explicit Latest for discoverability.
+- Tagged [workflow 44142405107](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44142405107)
+  succeeded overall: required macOS quality **765 passed, 2 existing warnings,
+  88.59 s**, clean exit; Ruff, macOS build, Windows build and publication passed.
+  Main [quality 44142403488](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44142403488)
+  succeeded overall with 765 macOS tests in 79.03 s. No redundant local rerun for
+  release metadata; prior local 765-test and updater verification remain above.
+- Informational Windows pytest now executes past the fixed fixture: **741 passed,
+  17 failed, 7 skipped, 2 warnings** (tagged 105.99 s; main 130.40 s). Failures
+  include POSIX/macOS-only tests, paths, cleanup and relative-time assertions.
+  Ruff and installer build passed; Windows is not fully runtime validated.
+  NE-027 follow-up remains; no claim these failures are all test-only defects.
+- Public HEAD HTTP 200 for DMG (131062130 bytes), ZIP (117648652 bytes), and
+  Windows EXE (100368059 bytes). GitHub SHA-256 and complete evidence are in
+  `desktop/docs/releases/v0.5.19-alpha-verification.json`. These release assets
+  were not independently downloaded or installed during publication.
+- Install this first updater-enabled alpha manually once, then choose **Help →
+  Check for Updates…**. It correctly reports up to date until a newer genuine
+  release is published. Actual installed-app replacement/restart and Windows
+  installer execution remain native smoke checks. No dummy release created.
+- Documentation-only follow-up records publication without moving the tested tag.
+  Earlier local/preparation entries below are historical and superseded here.
+
 ## 2026-11-17 — v0.5.19-alpha updater release preparation
 
 - The user requested a new alpha to test the in-app updater. Prepared numeric

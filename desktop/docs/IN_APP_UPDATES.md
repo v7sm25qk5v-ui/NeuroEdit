@@ -82,8 +82,12 @@ failed save and cancellation; check read-only/DMG locations use the manual path.
 On Windows, repeat with a real per-user Inno install, a path containing spaces,
 and the supported OS policies. Verify PowerShell helper launch, silent progress,
 existing directory, automatic restart, project recovery, and failed installer
-feedback. The former pytest path-separator setup assertion is corrected locally;
-no native Windows suite/build/install has run for this feature yet.
+feedback. The former pytest path-separator setup assertion is corrected;
+v0.5.19-alpha hosted Windows now runs 741 tests successfully, with 17 failures
+and 7 skips. Failures cover platform assumptions, paths, cleanup and relative
+time. Both platform installer builds passed; actual native Windows installation
+and update/restart have not been exercised. See
+`releases/v0.5.19-alpha-verification.json` for publication evidence.
 
 Rollback covers failed replacement or rejected OS launch. A successful macOS
 `open` request is not proof that the new app stays healthy; there is no post-start

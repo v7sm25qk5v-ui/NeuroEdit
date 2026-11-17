@@ -1,0 +1,113 @@
+{
+  "release_id": 449005676,
+  "tag": "v0.5.19-alpha",
+  "name": "NeuroEdit v0.5.19-alpha",
+  "source_commit": "193178257b30e4ed32597e43c6821428e8817eb5",
+  "annotated_tag_object": "75cb8c750b9684a4111297391c393791011a0dd1",
+  "release_url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.19-alpha",
+  "published_at": "2026-11-17T18:02:09Z",
+  "verified_at": "2026-11-17T18:04:33.154469+00:00",
+  "draft": false,
+  "prerelease": false,
+  "latest_tag": "v0.5.19-alpha",
+  "sidebar_verified": "NeuroEdit v0.5.19-alpha Latest (live browser accessibility tree)",
+  "local_tests_rerun_for_release_metadata": false,
+  "prior_local_validation": {
+    "passed": 765,
+    "warnings": 2,
+    "seconds": 117.04,
+    "updater_tests": 42,
+    "clean_exit": true,
+    "senior_review": "approved"
+  },
+  "tagged_workflow": {
+    "id": 44142405107,
+    "url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44142405107",
+    "conclusion": "success",
+    "pytest_passed": 765,
+    "pytest_seconds": 88.59,
+    "warnings": 2,
+    "clean_exit": true,
+    "jobs": [
+      {
+        "name": "quality / Test and lint desktop app",
+        "conclusion": "success"
+      },
+      {
+        "name": "quality / Test and lint desktop app (Windows, informational)",
+        "conclusion": "failure"
+      },
+      {
+        "name": "Build Windows (Setup.exe)",
+        "conclusion": "success"
+      },
+      {
+        "name": "Build macOS (.dmg)",
+        "conclusion": "success"
+      },
+      {
+        "name": "Publish GitHub Release",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "main_workflow": {
+    "id": 44142403488,
+    "url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44142403488",
+    "conclusion": "success",
+    "pytest_passed": 765,
+    "pytest_seconds": 79.03
+  },
+  "windows_informational": {
+    "conclusion": "failure",
+    "nonblocking": true,
+    "passed": 741,
+    "failed": 17,
+    "skipped": 7,
+    "warnings": 2,
+    "tagged_pytest_seconds": 105.99,
+    "main_pytest_seconds": 130.4,
+    "previous_fixture_setup_blocker": "fixed; full suite now executes",
+    "failure_categories": [
+      "POSIX/macOS-only executable mode, /bin/sh and os.geteuid assumptions",
+      "Windows paths and invalid directory characters",
+      "File/mask cleanup assertions",
+      "Relative-time assertion"
+    ],
+    "ruff": "passed",
+    "installer_build": "success"
+  },
+  "assets": [
+    {
+      "name": "NeuroEdit-v0.5.19-alpha-macOS-unsigned.dmg",
+      "size": 131062130,
+      "state": "uploaded",
+      "github_reported_digest": "sha256:36625b259b4325121f69d4f1f6a3a1f34d200bdffd3b01c257756fa8d24c3066",
+      "browser_download_url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/download/v0.5.19-alpha/NeuroEdit-v0.5.19-alpha-macOS-unsigned.dmg",
+      "public_head_http_status": 200
+    },
+    {
+      "name": "NeuroEdit-v0.5.19-alpha-macOS-unsigned.zip",
+      "size": 117648652,
+      "state": "uploaded",
+      "github_reported_digest": "sha256:4cb247a9aa7aead61b0294a0e54d2ec086880cb7090bfc607510cc34ea1941c2",
+      "browser_download_url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/download/v0.5.19-alpha/NeuroEdit-v0.5.19-alpha-macOS-unsigned.zip",
+      "public_head_http_status": 200
+    },
+    {
+      "name": "NeuroEdit-v0.5.19-alpha-Windows-Setup.exe",
+      "size": 100368059,
+      "state": "uploaded",
+      "github_reported_digest": "sha256:87858f020b9701e1ef1312602ae94c419e57763ccbc4ca2fcd989d90a49422d2",
+      "browser_download_url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/download/v0.5.19-alpha/NeuroEdit-v0.5.19-alpha-Windows-Setup.exe",
+      "public_head_http_status": 200
+    }
+  ],
+  "asset_verification_scope": "Public HEAD HTTP200 and GitHub-reported SHA256; v0.5.19 installer bytes not independently downloaded or installed.",
+  "remaining_validation": [
+    "Actual installed macOS replacement/restart and project recovery against a newer genuine release",
+    "Native Windows PowerShell/Inno install/restart and project recovery",
+    "Windows suite portability and cleanup/time failures",
+    "Real equipment/media, audio and optional SAM/GPU smoke"
+  ]
+}

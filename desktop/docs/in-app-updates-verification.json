@@ -16,7 +16,7 @@
   "windows_native_install_run": false,
   "branch": "codex/in-app-updates",
   "base_commit": "46530cbd87d33e8ca8b685d364376c21d93a1964",
-  "local_uncommitted": true,
+  "local_uncommitted": false,
   "full_suite": {
     "passed": 765,
     "seconds": 117.04,
@@ -35,5 +35,8 @@
     "sha256": "222eef81a54474b871cd15a6c564746e9718b7089cb8693bdf6690c3dce2416c",
     "installed_or_executed": false,
     "removed_after_verification": true
-  }
+  },
+  "verification_scope": "Historical pre-publication local feature validation using temporary 0.5.18 metadata and the public 0.5.18 asset; published 0.5.19 evidence is in releases/v0.5.19-alpha-verification.json.",
+  "published_source_commit": "193178257b30e4ed32597e43c6821428e8817eb5",
+  "published_tag": "v0.5.19-alpha"
 }
