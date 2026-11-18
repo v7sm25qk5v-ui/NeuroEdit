@@ -876,7 +876,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self.video_view.setStyleSheet(f"background: {VIDEO_CANVAS};")
         self.player.setVideoOutput(self.video_view.video_item)
         self._cue_player.setVideoOutput(self.video_view.cue_video_item)
-        self.video_view.cue_video_item.videoSink().videoFrameChanged.connect(self._cue_frame_arrived)
+        self.video_view.cue_frame_changed.connect(self._cue_frame_arrived)
         self.video_view.sam_point_added.connect(self._add_sam_point)
         self.video_view.annotation_added.connect(self._add_annotation)
         self.video_view.selection_changed.connect(self._on_view_selection_changed)
@@ -1999,8 +1999,9 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         was_cancelled = cancelled or self._import_cancel_requested
         progress = getattr(self, "_import_progress", None)
         if progress is not None:
-            progress.canceled.disconnect()
-            progress.close()
+            # Finishing an import must not emit a user cancellation.
+            progress.hide()
+            progress.deleteLater()
             self._import_progress = None
         metadata = dict(results)
         # Working copies this run made; any that do not end up in the project

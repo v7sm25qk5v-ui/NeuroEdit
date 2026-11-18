@@ -224,6 +224,16 @@ def test_swapped_surface_shows_and_reports_frames(window):
     view.swap_video_items()
 
 
+def test_only_standby_frames_arm_the_next_cut_after_a_swap(window):
+    view = window.video_view
+    view.swap_video_items()
+    window._cue = _PlaybackCue("third", "/tmp/source.mp4", 5000, seek_issued=True)
+    view.video_item.videoSink().setVideoFrame(_frame(5000))
+    assert not window._cue.ready
+    view.cue_video_item.videoSink().setVideoFrame(_frame(5000))
+    assert window._cue.ready
+
+
 # ── Real decoder ──────────────────────────────────────────────────────────
 
 

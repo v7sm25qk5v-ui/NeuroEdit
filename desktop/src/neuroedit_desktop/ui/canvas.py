@@ -789,6 +789,7 @@ class VideoGraphicsView(QGraphicsView):
     """Holds the QGraphicsVideoItem plus the AnnotationGraphicsItem in a single
     scene so macOS paints annotations over the video's Metal surface correctly."""
 
+    cue_frame_changed = Signal(QVideoFrame)
     sam_point_added = Signal(float, float)
     annotation_added = Signal(Annotation)
     selection_changed = Signal(object)  # annotation id or None
@@ -832,7 +833,8 @@ class VideoGraphicsView(QGraphicsView):
         self._transition_seek_ready = False
         for item in (self.video_item, self.cue_video_item):
             item.videoSink().videoFrameChanged.connect(
-                lambda frame, item=item: item is self.video_item and self._video_frame_changed(frame)
+                lambda frame, item=item: self._video_frame_changed(frame)
+                if item is self.video_item else self.cue_frame_changed.emit(frame)
             )
             item.nativeSizeChanged.connect(
                 lambda size, item=item: item is self.video_item and self._native_size_changed(size)

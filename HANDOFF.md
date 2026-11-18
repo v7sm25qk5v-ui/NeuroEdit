@@ -1,5 +1,14 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-17 — Instant cuts release retry
+
+The original push succeeded. The tagged macOS timeout traceback points to
+`progress.canceled.disconnect()` during MPG import completion. The dialog now
+hides and is deleted by Qt after completion. Playback review also found that
+only the original standby surface notified the cue player. Frames now follow
+the current standby surface across swaps, covered by a regression test. The
+retry uses `v0.5.22-alpha.1` to preserve the original tag.
+
 ## 2026-11-17 — v0.5.22-alpha release (instant cuts)
 
 - User asked to commit the instant-cuts fix, tag and release. Fix committed as
@@ -15,8 +24,19 @@
   notes file committed before tagging.**
 - Local verification before tagging: Ruff clean, **831 passed**, 2 existing
   warnings, 54.9 s.
-- Publication results (tag SHA, workflow run, assets) are recorded below once CI
-  finishes.
+- Pushed `main` and annotated tag `v0.5.22-alpha` (tag object `407234b`, commit
+  `398be23`) atomically. `git push` via the configured `gh` credential helper
+  fails (Intel-only binary, no Rosetta); it worked with
+  `-c credential.https://github.com.helper= -c credential.https://github.com.helper=osxkeychain`.
+- **Release build FAILED, nothing published:**
+  [run 44227026968](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44227026968).
+  The macOS Pytest step hung and hit the job's 15-minute limit (cancelled). Ruff
+  passed; installers and publication were skipped. Main quality run
+  44227026734 was cancelled the same way. Windows informational failed in 2 min
+  as usual. A normal macOS run takes ~90 s, so a test hung; most likely
+  something in the new cue-player code on the CI runner. Locally it passes.
+  Logs need a GitHub sign-in; not yet read. The tag points at the failing commit
+  and has no release.
 
 ## 2026-11-17 — Instant cuts between split clips (committed `f7b0b84`)
 
