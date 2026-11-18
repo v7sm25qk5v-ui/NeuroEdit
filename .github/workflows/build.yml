@@ -82,6 +82,15 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out the release notes
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: desktop/docs/releases
+          path: source
+      - name: Require release notes for this tag
+        env:
+          NOTES: source/desktop/docs/releases/${{ github.ref_name }}.md
+        run: test -s "$NOTES"
       - name: Download all build artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -95,14 +104,9 @@ jobs:
           make_latest: "true"
           files: artifacts/**/*
           fail_on_unmatched_files: true
-          body: |
-            Unsigned NeuroEdit build.
-
-            - **macOS**: download the `.dmg`. First launch: right-click the app -> Open.
-            - **Windows**: download the `-Windows-Setup.exe`. First launch: if SmartScreen
-              warns, click "More info" -> "Run anyway".
-
-            Both installers are built from the same commit and are functionally identical.
+          name: NeuroEdit ${{ github.ref_name }}
+          # Notes come from desktop/docs/releases/<tag>.md at the tagged commit.
+          body_path: source/desktop/docs/releases/${{ github.ref_name }}.md
       - name: Verify the repository's Latest release
         env:
           GH_TOKEN: ${{ github.token }}

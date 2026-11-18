@@ -1,6 +1,24 @@
 # NeuroEdit — Session Handoff
 
-## 2026-11-17 — Instant cuts between split clips (not committed yet)
+## 2026-11-17 — v0.5.22-alpha release (instant cuts)
+
+- User asked to commit the instant-cuts fix, tag and release. Fix committed as
+  `f7b0b84`; the release commit bumps `desktop/pyproject.toml` to 0.5.22, updates
+  README download names and what's new, and adds
+  `desktop/docs/releases/v0.5.22-alpha.md`.
+- **Workflow change** (`.github/workflows/build.yml`, release job): it now
+  sparse-checks-out `desktop/docs/releases`, fails if `<tag>.md` is missing or
+  empty, and publishes that file via `body_path` with the name
+  `NeuroEdit <tag>`. Previously it posted a generic body and the notes were
+  pasted afterwards. Reason: `/usr/local/bin/gh` here is Intel-only ("bad CPU
+  type"), so notes can't be edited from this Mac. **Every future tag needs its
+  notes file committed before tagging.**
+- Local verification before tagging: Ruff clean, **831 passed**, 2 existing
+  warnings, 54.9 s.
+- Publication results (tag SHA, workflow run, assets) are recorded below once CI
+  finishes.
+
+## 2026-11-17 — Instant cuts between split clips (committed `f7b0b84`)
 
 - **Report:** the preview froze at cuts between clips that had been split from
   one longer recording. A screen recording showed frozen stretches of

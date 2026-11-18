@@ -4,16 +4,16 @@ NeuroEdit is a standalone desktop video editor for preparing operative video for
 conference, research, and educational use. Editing and export run locally;
 NeuroEdit does not upload video or audio to a cloud editing service.
 
-Current alpha: [v0.5.21-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.21-alpha)
+Current alpha: [v0.5.22-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.22-alpha)
 
 [Download the latest build](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/latest).
 
-### What's new in v0.5.21-alpha
+### What's new in v0.5.22-alpha
 
-- **Mac in-app update fix:** when macOS runs NeuroEdit from a read-only temporary
-  copy, the updater can use a single verified matching copy in Applications.
-  Download the update in the app, then choose **Install and Restart**.
-- Retains inserted slides, which push footage later instead of covering it.
+- **Smooth cuts between split clips:** playback no longer freezes for up to a
+  second when it reaches a cut between clips split from the same long recording.
+  NeuroEdit now prepares the next clip a few seconds before the cut.
+- Retains the Mac in-app update fix and inserted slides from earlier alphas.
 
 The retained security findings are tracked in [SECURITY_FIXES.md](SECURITY_FIXES.md).
 The original scan had partial coverage; these fixes do not constitute a completed audit.
@@ -55,7 +55,7 @@ The original scan had partial coverage; these fixes do not constitute a complete
 
 ### macOS
 
-Download `NeuroEdit-v0.5.21-alpha-macOS-unsigned.dmg` from the release page.
+Download `NeuroEdit-v0.5.22-alpha-macOS-unsigned.dmg` from the release page.
 Open the DMG, drag `NeuroEdit.app` into Applications, then right-click the app
 and choose `Open` for the first launch.
 
@@ -65,7 +65,7 @@ If macOS blocks launch, open `System Settings` -> `Privacy & Security`, choose
 
 ### Windows
 
-Download `NeuroEdit-v0.5.21-alpha-Windows-Setup.exe` from the release page on a
+Download `NeuroEdit-v0.5.22-alpha-Windows-Setup.exe` from the release page on a
 Windows PC. If SmartScreen warns, choose `More info` -> `Run anyway`, then follow
 the installer.
 
@@ -84,7 +84,7 @@ saves your work and reopens the same saved project after restarting. Checks only
 contact GitHub when requested; project media stays local.
 
 Builds from v0.5.19-alpha onward include the updater; v0.5.19-alpha can update
-to v0.5.21-alpha in the app. Older versions must install manually once.
+to v0.5.22-alpha in the app. Older versions must install manually once.
 On macOS, a read-only running copy can update a single identical writable copy
 in `/Applications` or `~/Applications`. Older updater builds may still require
 a one-time manual installation if macOS translocates them. Source checkouts and
