@@ -1,5 +1,22 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-18 — NeuroEdit 1.0 published
+
+- Published [v1.0.0](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v1.0.0)
+  from `5f4ca4809b2d2ca8b5e6af6b747fd99cff12a4f2`, annotated tag
+  `f5bfb8a99938d8596d18f8a30f75d16c2e7148ab`. GitHub Latest matched the
+  checked-in notes. The macOS DMG, macOS ZIP, and Windows installer all
+  returned HTTP 200 and have SHA-256 digests. The v0.5.26-alpha.1 updater
+  accepted the published macOS ZIP and Windows EXE metadata as an upgrade.
+- [Tagged CI](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44408017785)
+  passed 879 macOS tests and built and published both installers.
+  [Main CI](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44408017646)
+  passed. The informational Windows suite recorded 853 passes, 19 failures,
+  and 7 skips. Seventeen failures matched v0.5.26-alpha.1. Both additional
+  failures were variants of `test_copies_bytes_mode_and_times_with_progress`
+  asserting POSIX mode `0600` after copying on Windows. The copied bytes
+  assertion passed in both variants. Native installed-app testing remains open.
+
 ## 2026-11-18 — NeuroEdit 1.0 release preparation
 
 - Prepared NeuroEdit 1.0 with the Save As improvement in `27e80a8`. The
