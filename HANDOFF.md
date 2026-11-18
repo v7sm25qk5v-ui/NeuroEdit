@@ -1,5 +1,57 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-17 — Instant cuts between split clips (not committed yet)
+
+- **Report:** the preview froze at cuts between clips that had been split from
+  one longer recording. A screen recording showed frozen stretches of
+  0.37-0.76 s starting just after the cuts at 3.874 s and 8.772 s. The autosaved
+  project explains why. Those clips come from the same file but jump far apart
+  in the source (151.7 s → 235.4 s). The imported file
+  (`media_convert.py`: libx264 veryfast, default keyint) has one keyframe
+  every ~8.3 s. Seeking the playing `QMediaPlayer` therefore decodes up to
+  8 s of 1080p video before it shows a frame.
+- **Measured** in a standalone Qt script on that file (not NeuroEdit):
+  - Plain seek: 913-939 ms to the first frame.
+  - A standby player that was only seeked (still stopped) decodes nothing
+    until play: 830 ms.
+  - Paused, then seeked, then moving its output to the main surface: 649 ms,
+    because moving the output makes Qt's FFmpeg backend seek again.
+  - Paused, seeked, playing on its **own** surface: **2 ms**.
+- **Fix** (`ui/main_window.py`, `ui/canvas.py`):
+  - A second `QMediaPlayer` (`_cue_player`) has its own muted `QAudioOutput`
+    and its own hidden `QGraphicsVideoItem` (`cue_video_item`).
+  - Within 3 s of a cut that needs a seek or a new source,
+    `_maybe_cue_next_clip` loads the next clip paused at its `trim_start`.
+    `_cue_frame_arrived` marks the cue ready when the target frame lands.
+  - At the cut, `_take_cue` swaps players, audio outputs and surfaces, then
+    plays. Volume and mute carry over, and the idle output is muted.
+  - The cue is skipped for contiguous cuts within one file, image clips, cuts
+    under a full slide, and clips with media problems. A cue that doesn't fit
+    falls back to the old seek path.
+  - Player signals are routed through lambdas that ignore the idle player.
+  - Switching projects releases the cue player's file.
+- **Tests:** `desktop/tests/test_playback_cue.py`, 18 tests:
+  - When to cue, including lead time scaled by playback speed.
+  - Cue seek and readiness filtering, the swap itself, and four fallback
+    cases.
+  - Surface swap.
+  - A real-decoder test that plays a single-keyframe file as two clips 37 s
+    apart. With the cue, the picture changes 5-9 ms after the cut. With the
+    cue disabled it stalls 0.56 s and the test fails (checked by A/B).
+- **Suite:** Ruff clean. Full suite **831 passed**.
+  - Gotcha: `test_undo_history` builds bare windows without `__init__`, so
+    `_cue` has a class-level `None` default.
+  - `test_capture_baseline` can time out under heavy load, as before.
+- **Not verified:** not yet tried in the running app with the user's project.
+  A second app instance was not started, because it would race the autosave.
+- **Open / possible follow-ups:**
+  - Starting playback less than ~1 s before a far cut leaves no time to cue,
+    so that one cut still stalls as before.
+  - Scrubbing and seeks by clicking are still slow on these 8 s-GOP imports.
+    Adding a keyframe interval (e.g. `-g 30`) in `media_convert.py` would help
+    future imports, at some file-size cost.
+  - The cue player keeps a second decoder open while playing.
+
 ## 2026-11-17 — v0.5.21-alpha published and installed on the user's Mac
 
 - Published [NeuroEdit v0.5.21-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.21-alpha)

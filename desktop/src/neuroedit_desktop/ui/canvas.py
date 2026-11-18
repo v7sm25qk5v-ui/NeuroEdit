@@ -813,6 +813,15 @@ class VideoGraphicsView(QGraphicsView):
         self.video_item = QGraphicsVideoItem()
         self.video_item.setSize(QSizeF(1920, 1080))
         scene.addItem(self.video_item)
+        # Standby surface for the main window's cue player, which decodes the
+        # next clip's first frame before a cut. It stays hidden until
+        # swap_video_items() makes it the visible surface. Each player keeps
+        # its own surface: re-pointing a player's output makes Qt's FFmpeg
+        # backend seek again, which is the stall the cue exists to avoid.
+        self.cue_video_item = QGraphicsVideoItem()
+        self.cue_video_item.setSize(QSizeF(1920, 1080))
+        self.cue_video_item.setVisible(False)
+        scene.addItem(self.cue_video_item)
 
         self.transition_item = QGraphicsPixmapItem()
         self.transition_item.setZValue(1)
@@ -821,7 +830,13 @@ class VideoGraphicsView(QGraphicsView):
         self._last_video_frame = QVideoFrame()
         self._transition_target_ms: int | None = None
         self._transition_seek_ready = False
-        self.video_item.videoSink().videoFrameChanged.connect(self._video_frame_changed)
+        for item in (self.video_item, self.cue_video_item):
+            item.videoSink().videoFrameChanged.connect(
+                lambda frame, item=item: item is self.video_item and self._video_frame_changed(frame)
+            )
+            item.nativeSizeChanged.connect(
+                lambda size, item=item: item is self.video_item and self._native_size_changed(size)
+            )
 
         self.image_item = QGraphicsPixmapItem()
         self.image_item.setZValue(5)
@@ -831,8 +846,6 @@ class VideoGraphicsView(QGraphicsView):
         self.annotation_item = AnnotationGraphicsItem(project, self.video_item)
         self.annotation_item.set_size(self.video_item.size())
         scene.addItem(self.annotation_item)
-
-        self.video_item.nativeSizeChanged.connect(self._native_size_changed)
 
         self._drag_start: tuple[float, float] | None = None
         self._drag_current: tuple[float, float] | None = None
@@ -886,6 +899,24 @@ class VideoGraphicsView(QGraphicsView):
                     Qt.TransformationMode.SmoothTransformation,
                 ))
                 self.transition_item.setVisible(True)
+
+    def swap_video_items(self) -> None:
+        """Make the standby surface the visible one, and hide the old one.
+
+        The standby surface already holds the cued frame, so the cut shows
+        the next clip immediately instead of freezing while a decoder seeks.
+        """
+        old, new = self.video_item, self.cue_video_item
+        self.clear_video_transition()
+        new.setSize(old.size())
+        new.setVisible(old.isVisible())
+        old.setVisible(False)
+        self.video_item, self.cue_video_item = new, old
+        self.annotation_item.video_item = new
+        self._last_video_frame = QVideoFrame(new.videoSink().videoFrame())
+        native = new.nativeSize()
+        if native.width() > 0 and native.height() > 0 and native != old.size():
+            self._native_size_changed(native)
 
     def finish_transition_seek(self) -> None:
         self._transition_seek_ready = True

@@ -6,6 +6,7 @@ import math
 import os
 import shutil
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QMimeData, QThread, Qt, QTimer, QUrl
@@ -204,6 +205,17 @@ PANELS: list[tuple[PanelType, str, str]] = [
 _MEDIA_STAT_TTL = 1.0
 
 
+@dataclass
+class _PlaybackCue:
+    """The next clip the cue player is decoding ahead of a cut."""
+
+    clip_id: str
+    path: str
+    target_ms: int
+    seek_issued: bool = False
+    ready: bool = False
+
+
 class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -319,9 +331,28 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self.player = QMediaPlayer(self)
         self.audio = QAudioOutput(self)
         self.player.setAudioOutput(self.audio)
-        self.player.positionChanged.connect(self._position_changed)
-        self.player.durationChanged.connect(self._duration_changed)
-        self.player.mediaStatusChanged.connect(self._media_status_changed)
+        # Cue player: while playback nears a cut, it loads the next clip and
+        # decodes its first frame paused, on its own hidden surface. At the
+        # cut the two players (and their surfaces and audio outputs) trade
+        # places, so the cut is instant. Seeking the playing player instead
+        # stalls for most of a second on long-GOP footage.
+        self._cue_player = QMediaPlayer(self)
+        self._cue_audio = QAudioOutput(self)
+        self._cue_audio.setMuted(True)
+        self._cue_player.setAudioOutput(self._cue_audio)
+        self._cue: _PlaybackCue | None = None
+        for player in (self.player, self._cue_player):
+            player.positionChanged.connect(
+                lambda ms, p=player: p is self.player and self._position_changed(ms)
+            )
+            player.durationChanged.connect(
+                lambda ms, p=player: p is self.player and self._duration_changed(ms)
+            )
+            player.mediaStatusChanged.connect(
+                lambda status, p=player: self._media_status_changed(status)
+                if p is self.player
+                else p is self._cue_player and self._cue_status_changed(status)
+            )
         # A seek issued right after setSource() is silently dropped because the
         # media isn't loaded yet, so a trimmed clip would play from 0 instead of
         # its trim_start. We stash the intended seek (and whether to play) here
@@ -844,6 +875,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self.video_view = VideoGraphicsView(self.project)
         self.video_view.setStyleSheet(f"background: {VIDEO_CANVAS};")
         self.player.setVideoOutput(self.video_view.video_item)
+        self._cue_player.setVideoOutput(self.video_view.cue_video_item)
+        self.video_view.cue_video_item.videoSink().videoFrameChanged.connect(self._cue_frame_arrived)
         self.video_view.sam_point_added.connect(self._add_sam_point)
         self.video_view.annotation_added.connect(self._add_annotation)
         self.video_view.selection_changed.connect(self._on_view_selection_changed)
@@ -1237,6 +1270,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         player = getattr(self, "player", None)
         if player is not None:
             player.stop()
+        if getattr(self, "_cue_player", None) is not None:
+            self._clear_cue(release=True)
         self.store = store
         self.project = project
         self.dirty = False
@@ -2536,6 +2571,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
                 or next_active.id != active.id
             ):
                 self._sync_player_to_timeline(play=True)
+            if self._timeline_playing and self._pending_seek_ms is None:
+                self._maybe_cue_next_clip()
         self.audio_preview.sync(self.project, self._timeline_playing and self._pending_seek_ms is None)
         self.timeline.refresh()
         self.video_view.update_annotations_for_time(previous_time, self.project.current_time)
@@ -2585,9 +2622,11 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             return
 
         source = QUrl.fromLocalFile(clip.path)
-        new_source = self.player.source() != source
         local_s = clip.trim_start + max(0.0, self.project.current_time - clip.start_time)
         target_ms = round(local_s * 1000)
+        if play and self._take_cue(clip, target_ms):
+            return
+        new_source = self.player.source() != source
         if new_source:
             if play and self.video_view.video_item.isVisible():
                 self.video_view.begin_video_transition(target_ms)
@@ -2639,6 +2678,130 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         if self._pending_play and self._timeline_playing:
             self.player.play()
         self._pending_play = False
+
+    # ── Cue player (instant cuts) ─────────────────────────────────────────
+
+    # Start cueing this many seconds (wall clock) before a cut. Cueing a
+    # 1080p clip with an 8 s keyframe interval took ~0.8 s when measured.
+    CUE_LEAD_S = 3.0
+    # How far the playhead may already be past the cued frame when the cut
+    # is taken; beyond this, the normal seek path keeps the picture in sync.
+    CUE_MAX_LATE_MS = 300
+    _cue: _PlaybackCue | None = None
+
+    def _next_cut_clip(self):
+        """Return the video clip that starts at the next cut, if one is due
+        to need a seek. Returns None when the next cut needs no cue."""
+        now = self.project.current_time
+        active = self._clip_at_time(now)
+        if active is None or active.media_type == "image":
+            return None
+        cut = active.start_time + active.display_duration
+        if (cut - now) / max(self.project.playback_rate, 0.01) > self.CUE_LEAD_S:
+            return None
+        nxt = self._clip_at_time(cut)
+        if nxt is None or nxt.id == active.id or nxt.media_type == "image":
+            return None
+        slide = self._slide_at_time(cut)
+        if slide is not None and not slide.overlay:
+            return None
+        if nxt.path == active.path and abs(nxt.trim_start - active.trim_end) * 1000 <= 80:
+            return None  # contiguous footage: the playing player runs straight on
+        if self._cached_clip_media_problem(nxt) is not None:
+            return None
+        return nxt
+
+    def _maybe_cue_next_clip(self) -> None:
+        nxt = self._next_cut_clip()
+        if nxt is None:
+            return
+        target_ms = round(nxt.trim_start * 1000)
+        cue = self._cue
+        if cue is not None and (cue.clip_id, cue.path, cue.target_ms) == (nxt.id, nxt.path, target_ms):
+            return
+        player = self._cue_player
+        source = QUrl.fromLocalFile(nxt.path)
+        # As with the main player, setSource can report the old source's
+        # status while stopping it, so arm the cue only afterwards.
+        self._cue = None
+        player.pause()
+        if player.source() != source:
+            player.setSource(source)
+        self._cue = _PlaybackCue(nxt.id, nxt.path, target_ms)
+        self._cue_status_changed(player.mediaStatus())
+
+    def _cue_status_changed(self, status: QMediaPlayer.MediaStatus) -> None:
+        cue = self._cue
+        if cue is None or cue.seek_issued:
+            return
+        if status in (QMediaPlayer.MediaStatus.NoMedia, QMediaPlayer.MediaStatus.InvalidMedia):
+            self._cue = None
+            return
+        if status not in (
+            QMediaPlayer.MediaStatus.LoadedMedia,
+            QMediaPlayer.MediaStatus.BufferedMedia,
+            QMediaPlayer.MediaStatus.EndOfMedia,
+        ):
+            return
+        cue.seek_issued = True
+        # Paused (not stopped) so the backend decodes and shows the target
+        # frame now, on the hidden surface, rather than at play().
+        self._cue_player.pause()
+        self._cue_player.setPosition(cue.target_ms)
+
+    def _cue_frame_arrived(self, frame) -> None:
+        cue = self._cue
+        if cue is None or not cue.seek_issued or cue.ready or not frame.isValid():
+            return
+        start = frame.startTime()
+        if start >= 0:
+            # Ignore frames from before the seek landed (or from the player's
+            # previous clip): accept only a frame at or just after the cue.
+            target_us = cue.target_ms * 1000
+            if max(start, frame.endTime()) < target_us - 80_000 or start > target_us + 500_000:
+                return
+        cue.ready = True
+
+    def _take_cue(self, clip: VideoClip, target_ms: int) -> bool:
+        """At a cut, swap the cued player in instead of seeking. Returns
+        False (leaving everything as it was) when no matching cue is ready."""
+        cue = self._cue
+        if (
+            cue is None
+            or not cue.ready
+            or cue.clip_id != clip.id
+            or cue.path != clip.path
+            or cue.target_ms != round(clip.trim_start * 1000)
+            or not -80 <= target_ms - cue.target_ms <= self.CUE_MAX_LATE_MS
+            or self._cue_player.source() != QUrl.fromLocalFile(clip.path)
+        ):
+            return False
+        old, new = self.player, self._cue_player
+        old_audio, new_audio = self.audio, self._cue_audio
+        old.pause()
+        new_audio.setVolume(old_audio.volume())
+        new_audio.setMuted(old_audio.isMuted())
+        old_audio.setMuted(True)
+        self.player, self._cue_player = new, old
+        self.audio, self._cue_audio = new_audio, old_audio
+        self._cue = None
+        self._pending_seek_ms = None
+        self._pending_play = False
+        self.video_view.swap_video_items()
+        if not self.video_view.video_item.isVisible():
+            self.video_view.set_image(None)
+        new.setPlaybackRate(self.project.playback_rate)
+        new.play()
+        if new.duration() > 0:
+            self._duration_changed(new.duration())
+        return True
+
+    def _clear_cue(self, *, release: bool = False) -> None:
+        self._cue = None
+        self._cue_player.pause()
+        if release and not self._cue_player.source().isEmpty():
+            self._cue_player.stop()
+            self._cue_player.setSource(QUrl())
 
     def _duration_changed(self, duration_ms: int) -> None:
         clip = self.project.active_clip

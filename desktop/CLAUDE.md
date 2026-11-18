@@ -92,7 +92,8 @@ hf auth login
 
 The updater release collects **765 tests** (`python -m pytest tests/ -q`;
 local clean exit on 2026-11-17). v0.5.20-alpha (inserted slides) collects
-**804** (local clean exit and Ruff on 2026-11-17). Published v0.5.19-alpha passed all 765 macOS
+**804** (local clean exit and Ruff on 2026-11-17). With instant cuts
+(`test_playback_cue.py`) the suite collects **831** (clean local run, 2026-11-17). Published v0.5.19-alpha passed all 765 macOS
 CI tests; both installer builds passed. The Windows fixture path blocker is fixed;
 its informational suite now reports 741 passed, 17 failed and 7 skipped. See
 HANDOFF.md and docs/releases/v0.5.19-alpha-verification.json for evidence and
@@ -142,7 +143,9 @@ A widget-on-top-of-`QVideoWidget` overlay is **broken on macOS Metal** —
 QtMultimedia's native surface paints over the overlay. The fix is to keep
 everything in one `QGraphicsScene` owned by `VideoGraphicsView`:
 
-- `QGraphicsVideoItem` (z=0) — receives output from `QMediaPlayer`.
+- `QGraphicsVideoItem` (z=0) — receives output from `QMediaPlayer`. A second,
+  hidden one (`cue_video_item`) belongs to the cue player (see below);
+  `swap_video_items()` trades them at a cut.
 - `QGraphicsPixmapItem` (z=5) — shown for image clips; hidden for video clips.
 - `AnnotationGraphicsItem` (z=10, custom `QGraphicsObject`) — paints
   annotations, SAM points, slides (when not in overlay mode), and the fade
@@ -159,6 +162,18 @@ the player source is cleared and the pixmap item is shown. Don't try to feed
 image paths into QMediaPlayer. Full-frame slides pause video, but slides with
 `overlay=True` must leave the underlying video playing while the annotation
 layer paints the slide above it.
+
+Instant cuts: within `CUE_LEAD_S` (3 s wall clock) of a cut that would need a
+seek or a new source, `_maybe_cue_next_clip` loads the next clip into
+`_cue_player`, **paused** (a stopped player does not decode on seek), at its
+`trim_start`, on `cue_video_item`. At the cut `_take_cue` swaps the players,
+their audio outputs and the two surfaces, then plays: about 5 ms instead of
+0.5-0.9 s of frozen picture on long-GOP footage. Never move a player's video
+output to the other surface instead: Qt's FFmpeg backend seeks again when the
+output changes, which brings the stall back (measured 649 ms). Contiguous cuts
+within one file need no cue. A cue that doesn't match the clip (edited, not
+ready, or playhead > `CUE_MAX_LATE_MS` past it) falls back to the seek path.
+Signals from the cue player are ignored unless it is `self.player`.
 
 ### State, persistence, and undo/redo
 
