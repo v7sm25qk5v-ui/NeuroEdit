@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QProgressBar,
     QProgressDialog,
     QPushButton,
     QScrollArea,
@@ -1964,11 +1965,13 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             return
         steps = MediaImportWorker.PROGRESS_STEPS
         progress = QProgressDialog("Reading video metadata...", "Cancel", 0, len(videos) * steps, self)
-        progress.setMinimumDuration(0)
         # Window-modal: edits during the import would discard it, so block them.
         # The dialog's own Cancel button still works.
         progress.setWindowModality(Qt.WindowModality.WindowModal)
-        progress.setValue(0)
+        bar = QProgressBar(progress)
+        bar.setRange(0, len(videos) * steps)
+        bar.setValue(0)
+        progress.setBar(bar)
         self._import_progress = progress
         thread = QThread(self)
         media_dir = self.store.project_path.parent / MEDIA_DIR_NAME
@@ -1982,12 +1985,15 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         progress.canceled.connect(self._cancel_media_import)
-        worker.progress.connect(progress.setValue)
+        # QProgressDialog.setValue processes nested events in modal mode. The
+        # import could complete or cancel while that callback is still running.
+        worker.progress.connect(bar.setValue)
         worker.status.connect(progress.setLabelText)
         worker.finished.connect(self._finish_media_import)
         worker.finished.connect(thread.quit)
         worker.finished.connect(worker.deleteLater)
         thread.finished.connect(self._media_import_thread_finished)
+        progress.show()
         thread.start()
 
     def _cancel_media_import(self) -> None:

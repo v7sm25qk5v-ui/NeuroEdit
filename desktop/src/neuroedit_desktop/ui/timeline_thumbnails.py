@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
 from time import monotonic
 
-from PySide6.QtCore import QCoreApplication, QObject, QRunnable, QThread, QThreadPool, QTimer, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtGui import QImage
 
 ThumbnailKey = tuple[str, int]
@@ -15,6 +15,8 @@ _CACHE_SIZE = 192
 _CACHE_SECONDS = 45
 MAX_VISIBLE_THUMBNAILS = 96
 _BATCH_SIZE = 4
+_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="timeline-thumbnails")
+_running_decode: Future | None = None
 
 
 def _decode_thumbnails(path: str, times_ms: list[int], stop: Event) -> dict[int, QImage]:
@@ -49,23 +51,12 @@ def _decode_thumbnails(path: str, times_ms: list[int], stop: Event) -> dict[int,
     return frames
 
 
-def _complete_decode(future: Future, path: str, times: list[int], stop: Event) -> None:
+def _decode_batch(path: str, times: list[int], stop: Event) -> dict[int, QImage]:
     try:
-        future.set_result(_decode_thumbnails(path, times, stop))
+        return _decode_thumbnails(path, times, stop)
     except Exception:
         # Broken/unmounted media should leave the normal clip bar visible.
-        future.set_result({})
-
-
-def _pool() -> QThreadPool:
-    app = QCoreApplication.instance()
-    pool = app.findChild(QThreadPool, "timelineThumbnailPool")
-    if pool is None:
-        pool = QThreadPool(app)
-        pool.setObjectName("timelineThumbnailPool")
-        pool.setMaxThreadCount(1)
-        pool.setThreadPriority(QThread.Priority.LowPriority)
-    return pool
+        return {}
 
 
 class TimelineThumbnails(QObject):
@@ -110,6 +101,7 @@ class TimelineThumbnails(QObject):
         self._cache.clear()
 
     def _advance(self) -> None:
+        global _running_decode
         if self._active is not None:
             future, keys, stop = self._active
             if not future.done():
@@ -137,12 +129,11 @@ class TimelineThumbnails(QObject):
             return
         path = pending[0][0]
         keys = [key for key in pending if key[0] == path][:_BATCH_SIZE]
-        future = Future()
-        stop = Event()
-        times = [key[1] for key in keys]
-        # tryStart never leaves obscured or stale batches queued behind work
-        # from another timeline. Qt owns the worker, which never touches widgets.
-        if _pool().tryStart(QRunnable.create(lambda: _complete_decode(future, path, times, stop))):
-            self._active = future, keys, stop
+        # Submission is coordinated on the GUI thread. Never enqueue stale work
+        # behind another canvas or hand worker ownership to Qt.
+        if _running_decode is None or _running_decode.done():
+            stop = Event()
+            _running_decode = _executor.submit(_decode_batch, path, [key[1] for key in keys], stop)
+            self._active = _running_decode, keys, stop
             self._accept_active = True
         self._timer.start(30)

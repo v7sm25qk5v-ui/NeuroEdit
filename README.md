@@ -4,11 +4,11 @@ NeuroEdit is a standalone desktop video editor for preparing operative video for
 conference, research, and educational use. Editing and export run locally;
 NeuroEdit does not upload video or audio to a cloud editing service.
 
-Current alpha: [v0.5.23-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.23-alpha)
+Current alpha: [v0.5.23-alpha.1](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.23-alpha.1)
 
 [Download the latest build](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/latest).
 
-### What's new in v0.5.23-alpha
+### What's new in v0.5.23-alpha.1
 
 - **Timeline filmstrips** show frames sampled from trimmed video clips, so you
   can find a moment before moving the playhead. Thumbnails load in the background.
@@ -56,7 +56,7 @@ The original scan had partial coverage; these fixes do not constitute a complete
 
 ### macOS
 
-Download `NeuroEdit-v0.5.23-alpha-macOS-unsigned.dmg` from the release page.
+Download `NeuroEdit-v0.5.23-alpha.1-macOS-unsigned.dmg` from the release page.
 Open the DMG, drag `NeuroEdit.app` into Applications, then right-click the app
 and choose `Open` for the first launch.
 
@@ -66,7 +66,7 @@ If macOS blocks launch, open `System Settings` -> `Privacy & Security`, choose
 
 ### Windows
 
-Download `NeuroEdit-v0.5.23-alpha-Windows-Setup.exe` from the release page on a
+Download `NeuroEdit-v0.5.23-alpha.1-Windows-Setup.exe` from the release page on a
 Windows PC. If SmartScreen warns, choose `More info` -> `Run anyway`, then follow
 the installer.
 
@@ -85,7 +85,7 @@ saves your work and reopens the same saved project after restarting. Checks only
 contact GitHub when requested; project media stays local.
 
 Builds from v0.5.19-alpha onward include the updater; v0.5.19-alpha can update
-to v0.5.23-alpha in the app. Older versions must install manually once.
+to v0.5.23-alpha.1 in the app. Older versions must install manually once.
 On macOS, a read-only running copy can update a single identical writable copy
 in `/Applications` or `~/Applications`. Older updater builds may still require
 a one-time manual installation if macOS translocates them. Source checkouts and

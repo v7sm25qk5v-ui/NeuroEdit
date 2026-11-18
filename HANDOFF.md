@@ -31,8 +31,14 @@
   with two existing Qt warnings. After adjusting clip title and over-guidance
   label spacing, the 114 relevant timeline, slide, and thumbnail tests passed
   again and the spacing was checked in an offscreen render.
-- Prepared for release as `v0.5.23-alpha` on 2026-11-18. Release notes,
-  README links and package version are aligned.
+- The `v0.5.23-alpha` tag remained unpublished after two hosted attempts.
+  The first stalled during import cancellation. The second missed the
+  long-GOP cue test's timing window and reported a PySide event-filter
+  error involving a thumbnail QRunnable.
+- The `v0.5.23-alpha.1` retry uses one Python executor for the thumbnail
+  worker, feeds the import progress bar directly to avoid nested Qt events,
+  and waits for a real decoded standby frame before exercising the cut test.
+  The previous tag is preserved.
 
 ## 2026-11-17 — Instant cuts release published
 

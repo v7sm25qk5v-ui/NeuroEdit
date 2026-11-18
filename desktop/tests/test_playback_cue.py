@@ -269,6 +269,15 @@ def test_real_far_jump_in_one_file_is_taken_from_the_cue(window, tmp_path, monke
     window.project.active_clip_id = "a"
     window._load_active_clip()
     window.video_view.set_project(window.project)
+    # Verify the swap of a genuinely decoded cue independently of how fast a
+    # shared CI runner can decode 39 seconds of a long GOP. Lead-window behavior
+    # is covered by the separate scheduling tests above.
+    window._maybe_cue_next_clip()
+    deadline = time.monotonic() + 10
+    while (window._cue is not None and not window._cue.ready
+           and time.monotonic() < deadline):
+        QTest.qWait(10)
+    assert window._cue is not None and window._cue.ready, "decoder did not prepare the next clip"
     taken = []
     original = window._take_cue
     monkeypatch.setattr(window, "_take_cue", lambda clip, ms: taken.append(original(clip, ms)) or taken[-1])
