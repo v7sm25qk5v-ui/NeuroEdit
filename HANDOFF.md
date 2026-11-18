@@ -1,5 +1,21 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-17 — Instant cuts release published
+
+Published [v0.5.22-alpha.1](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.22-alpha.1)
+from `5028ec8`. The [tagged workflow](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44233760533)
+passed macOS lint and all 832 tests (104.38 s), built both platform installers
+and published the checked-in notes. The informational Windows suite had 808
+passes, 17 failures and 7 skips. The failed test names match the original tag.
+All 19 playback tests passed on both platforms.
+
+The first local suite attempt failed the compressed-audio probe because imageio
+could not find a runnable FFmpeg and was interrupted during screenshot capture.
+The complete rerun with native FFmpeg passed all 832 tests in 94.32 s.
+GitHub Latest returned the new tag and notes, the updater parsed both platform
+assets as an upgrade from v0.5.21-alpha, and the DMG, ZIP and EXE links all
+returned HTTP 200. Installed-app playback with the user's footage remains open.
+
 ## 2026-11-17 — Instant cuts release retry
 
 The original push succeeded. The tagged macOS timeout traceback points to
