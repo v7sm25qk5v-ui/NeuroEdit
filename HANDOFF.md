@@ -1,9 +1,16 @@
 # NeuroEdit — Session Handoff
 
-## 2026-11-18 — Style refresh: palette, steppers, radii, wheel guard (uncommitted)
+## 2026-11-18 — v0.5.26-alpha release preparation
+
+- Prepared v0.5.26-alpha from the interface refresh in `35ff4b0` (NE-037 through
+  NE-040). Updated the package version, README, and GitHub release notes.
+  Skipped local test reruns at the user's request. The tag triggers the existing
+  GitHub quality and installer workflow.
+
+## 2026-11-18 — Style refresh: palette, steppers, radii, wheel guard
 
 User asked for a style update, logged as NE-037 to NE-040 in `CODING_TICKETS.md`.
-Nothing is committed yet; work sits on `main` at `a481cdb`.
+The style changes were committed on `main` as `35ff4b0`.
 
 - **NE-037 palette.** `desktop/src/neuroedit_desktop/ui/styles.py` `LIGHT_THEME`
   is now pale watercolor-blue surfaces (`#e6ecf2`/`#f5f8fb`/`#fbfcfe`),
