@@ -1,5 +1,24 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-18 — Clip speed and refreshed controls released
+
+- Published [v0.5.25-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.25-alpha)
+  from `adef38d24d266f99fccf86d6ad1c9e69b90c7eae`, annotated tag
+  `f023494932fa237ea06d347e5be9600a6d0c942d`. GitHub Latest and the
+  checked-in notes agree. The updater accepted the macOS ZIP and Windows EXE
+  as upgrades from v0.5.24-alpha.1. All three installer URLs returned HTTP 200
+  and have GitHub SHA-256 digests.
+- Local Ruff passed and the full rerun on the tagged source had **865 passes**
+  in 60.11 s. The first local run collected Project Library during an edit.
+  The resulting two stale-import failures passed once the finished code loaded.
+  [Tagged CI](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44373935370)
+  passed **865 macOS tests** in 93.99 s. Both installers built and the release
+  published. [Main CI](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44373935369)
+  passed. Informational Windows had 842 passes, 16 failures and 7 skips.
+  The 16 failing test names exactly match v0.5.24-alpha.1.
+- The daily optimization notes remain local. Native Windows interaction and
+  installed-app playback with the user's footage remain open.
+
 ## 2026-11-18 — Clip speed effects and refreshed controls
 
 - Added NE-035 and NE-036 in `CODING_TICKETS.md`. A video clip's right-click
