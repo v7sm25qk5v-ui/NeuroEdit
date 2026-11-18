@@ -6,6 +6,11 @@
   NE-040). Updated the package version, README, and GitHub release notes.
   Skipped local test reruns at the user's request. The tag triggers the existing
   GitHub quality and installer workflow.
+- The [v0.5.26-alpha workflow](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44390296521)
+  stopped before packaging. macOS had 867 passes and one stale assertion for
+  the light theme's canvas color in `test_appearance_action_persists_and_reapplies_theme`.
+  The test now checks both configured canvas tokens. Cut `v0.5.26-alpha.1`
+  for that correction and retained the original Git tag for traceability.
 
 ## 2026-11-18 — Style refresh: palette, steppers, radii, wheel guard
 

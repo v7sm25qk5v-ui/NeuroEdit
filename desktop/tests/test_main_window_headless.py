@@ -453,14 +453,14 @@ def test_appearance_action_persists_and_reapplies_theme(window, app):
     assert settings.value(ui_styles.THEME_SETTING_KEY) == "dark"
     assert window.theme_actions["dark"].isChecked()
     assert ui_styles.resolve_theme_mode("dark") == "dark"
-    assert ui_styles.VIDEO_CANVAS == "#000000"
+    assert ui_styles.VIDEO_CANVAS == ui_styles.DARK_THEME.video_canvas
 
     window.theme_actions["light"].trigger()
     app.processEvents()
 
     assert settings.value(ui_styles.THEME_SETTING_KEY) == "light"
     assert window.theme_actions["light"].isChecked()
-    assert ui_styles.VIDEO_CANVAS == "#11100e"
+    assert ui_styles.VIDEO_CANVAS == ui_styles.LIGHT_THEME.video_canvas
 
 
 @pytest.mark.parametrize("size", [(1085, 600), (1280, 720), (1920, 1080)])
