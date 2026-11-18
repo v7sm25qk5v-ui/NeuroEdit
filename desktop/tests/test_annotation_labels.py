@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 from PySide6.QtCore import QRectF, QSizeF, Qt
-from PySide6.QtGui import QColor, QFont, QFontInfo, QFontMetricsF, QImage, QPainter
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter
 from PySide6.QtWidgets import QApplication
 
 from neuroedit_desktop.annotation_label import annotation_label_layout
@@ -36,8 +36,11 @@ def test_fitted_label_inside_frame_has_matching_preview_and_export(app, tmp_path
     assert layout is not None
     assert layout.frame_shift.x() < 0
     assert QRectF(0, 0, w, h).contains(layout.box)
-    assert layout.flags & int(Qt.TextFlag.TextWordWrap | Qt.TextFlag.TextWrapAnywhere) == 0
+    assert layout.font.pixelSize() > 0
     assert layout.text_box.width() > label.geometry["width"] * w
+    assert layout.text_box.contains(
+        QFontMetricsF(layout.font).boundingRect(layout.text_box, layout.flags, label.label)
+    )
 
     def render(font_family, paint):
         target = QImage(w, h, QImage.Format.Format_RGB32)
@@ -55,16 +58,24 @@ def test_fitted_label_inside_frame_has_matching_preview_and_export(app, tmp_path
     export_image = render("Sans Serif", exporter._paint_annotation_shape)
     assert preview_image == export_image
 
-    # White lettering runs nearly the full measured width, including the first
-    # and last characters. Outside this interior, white may be the shape/border.
+    # Verify the whole reference lettering appears inside the box whether the
+    # local font fits on one line or wraps. Outside this interior, white may be
+    # the shape or border.
+    reference = QImage(w, h, QImage.Format.Format_RGB32)
+    reference.fill(QColor("#000000"))
+    painter = QPainter(reference)
+    painter.setFont(layout.font)
+    painter.setPen(QColor("#ffffff"))
+    painter.drawText(layout.text_box, layout.flags | int(Qt.TextFlag.TextDontClip), label.label)
+    painter.end()
     interior = layout.text_box.toAlignedRect()
-    lit_x = {
-        x for x in range(interior.left(), interior.right() + 1)
-        if any(preview_image.pixelColor(x, y).red() > 220
-               for y in range(interior.top(), interior.bottom() + 1))
+    lettering = {
+        (x, y) for y in range(interior.top(), interior.bottom() + 1)
+        for x in range(interior.left(), interior.right() + 1)
+        if reference.pixelColor(x, y).red() > 220
     }
-    assert min(lit_x) <= interior.left() + 5
-    assert max(lit_x) >= interior.right() - 5
+    assert lettering
+    assert all(preview_image.pixelColor(x, y).red() > 220 for x, y in lettering)
 
 
 def test_oversized_label_wraps_and_shrinks_without_dropping_text(app):
@@ -72,7 +83,7 @@ def test_oversized_label_wraps_and_shrinks_without_dropping_text(app):
     layout = annotation_label_layout(label, 160, 80)
     assert layout is not None
     assert layout.text == label.label
-    assert layout.font.pixelSize() < QFontInfo(QFont("Sans Serif", 96)).pixelSize()
+    assert 0 < layout.font.pixelSize() < 96 * QFontMetricsF(layout.font).fontDpi() / 72
     metrics = QFontMetricsF(layout.font)
     assert layout.text_box.height() > metrics.height() * 2
     assert layout.text_box.contains(metrics.boundingRect(layout.text_box, layout.flags, layout.text))

@@ -23,8 +23,11 @@
   affected tests passed, including the real landscape-to-portrait drag and
   exact native seek. Ruff and `git diff --check` passed. Native Windows and
   installed-app playback with the user's footage remain untested.
-- Prepared for release as `v0.5.24-alpha` on 2026-11-18, with the
-  package version, README download links, and tagged release notes aligned.
+- The initial `v0.5.24-alpha` tag passed all 850 required macOS tests.
+  Windows CI exposed font resolution differences, including an oversized
+  label that failed to fit, and a path separator assertion. Publication was
+  canceled before either installer was posted. The `v0.5.24-alpha.1` retry
+  preserves that tag and includes the corrected font sizing and path check.
 
 ## 2026-11-18 — Timeline filmstrips published in v0.5.23-alpha.1
 

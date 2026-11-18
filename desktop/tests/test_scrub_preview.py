@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 from time import monotonic, sleep
 
 import pytest
@@ -135,4 +136,4 @@ def test_cross_source_scrub_handoff_accepts_sparse_portrait_video(window, tmp_pa
     _send(canvas, QEvent.Type.MouseButtonRelease, 1.41, left, none)
     assert _wait(lambda: window.player.position() == 410 and not window.video_view.showing_scrub_frame)
     assert window.video_view.video_item.isVisible()
-    assert window.player.source().toLocalFile() == str(b)
+    assert Path(window.player.source().toLocalFile()) == b

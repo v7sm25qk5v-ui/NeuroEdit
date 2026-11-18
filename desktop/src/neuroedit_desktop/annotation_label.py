@@ -5,7 +5,7 @@ import math
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QFont, QFontInfo, QFontMetricsF, QPainter, QPen
+from PySide6.QtGui import QBrush, QColor, QFont, QFontMetricsF, QPainter, QPen
 
 from neuroedit_desktop.models import Annotation
 
@@ -46,7 +46,9 @@ def annotation_label_layout(ann: Annotation, width: float, height: float) -> Lab
     font = QFont()
     font.setBold(True)
     font.setPointSize(max(8, int(ann.font_size or 15)))
-    desired_px = QFontInfo(font).pixelSize()
+    # Some font backends retain a point-sized resolved font and report a
+    # pixel size of -1. Convert explicitly so shrinking works there too.
+    desired_px = max(1, round(font.pointSizeF() * QFontMetricsF(font).fontDpi() / 72))
     limit = QRectF(0, 0, max_w, max_h)
 
     def measure(size: int) -> tuple[float, float, int]:
