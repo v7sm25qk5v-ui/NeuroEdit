@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QFileDialog, QInputDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from neuroedit_desktop import media_convert
 from neuroedit_desktop.exporter import ExportSettings, ProjectExporter, resolve_ffmpeg
@@ -421,8 +421,7 @@ def test_save_as_takes_the_working_copy_along(window, mpg, tmp_path, monkeypatch
     old_digest = _digest(old_copy)
     destination = tmp_path / "saved"
     destination.mkdir()
-    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Case", True))
-    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(destination))
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(destination / "Case"), ""))
 
     window._save_project_as()
 

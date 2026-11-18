@@ -1,5 +1,68 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-18 — Save As froze the app; rebuilt with one dialog and a progress bar (committed)
+
+- **Report:** saving a project made the app stop responding, and choosing a
+  new location "did not let" the user. They asked for a streamlined save to any
+  location, with no crash and with a progress bar.
+- **Findings:**
+  - Save As copied every managed file (imported `media/`, ~2.8 GB here) with
+    `shutil.copy2` on the UI thread.
+  - Worse, `_migrate_history_payloads` called `_migrate_managed_assets` once per
+    undo/redo snapshot. Each call re-copied every video, because a copy is never
+    `samefile` with its source. With a deep undo stack that is 100+ GB of
+    synchronous copying.
+  - `~/Documents` is iCloud Desktop & Documents and the disk is 98% full (12 GB
+    free), so macOS had evicted some media to iCloud (`dataless`). Reading those
+    downloads them first. `copy2` also copies `st_flags`, which a normal process
+    can't set, so a save could fail with "Operation not permitted".
+  - The user's interrupted save left `~/Documents/NeuroEdit/bad video example/`
+    with project.json and media copies; one copy was 0 bytes at 15:56. That
+    folder was not modified.
+  - Save As was two prompts: a name text box, then a folder-only picker. That is
+    likely the "doesn't let me pick a location" part; not confirmed with the user.
+- **Fix:**
+  - New `desktop/src/neuroedit_desktop/project_copy.py`: plan (dedupe by
+    destination, skip up-to-date copies), free-space check (same-volume clones
+    not counted), and a copy that clones on APFS or else copies in 8 MB chunks.
+    It copies mode and times only, supports cancel, and on cancel or error
+    removes only files it created.
+  - `ui/main_window.py`:
+    - `_ask_save_destination`: a single `getSaveFileName` dialog that remembers
+      the last folder.
+    - `_save_project_as`: plan → space check → `_run_save_copy` (worker thread,
+      app-modal `QProgressDialog` with bytes, file x of y and an "iCloud" label,
+      local `QEventLoop`) → write project.json → rewrite history against the set
+      of copies.
+    - Replace and non-empty-folder prompts.
+    - `_save_in_place` split out.
+    - `_save_in_progress` guards against a second save and against closing.
+    - `_migrate_managed_assets` gains an optional `copy_file`.
+  - Existing tests switched from `QInputDialog` + `getExistingDirectory` to
+    `getSaveFileName`.
+  - New `desktop/tests/test_project_copy.py`: copier, skip, cancel and error
+    cleanup, space check, single dialog, one copy despite 13 undo steps, cancel,
+    error reporting and the close guard.
+- **Environment gotcha:** 552 repo files and ~36k venv files (1 GB) were also
+  evicted to iCloud. Pytest sat in `read()` during collection for 5+ minutes; a
+  pytest started at 3:03 PM by another session was stuck the same way and was
+  left alone. They were fetched back by reading them in parallel; see the
+  CLAUDE.md venv note.
+- **Verification:**
+  - Ruff clean, and the full suite **879 passed**, 2 existing warnings, 107.7 s,
+    on top of `bc6701f` (v0.5.26-alpha.1, released by another session while this
+    was in progress).
+  - `test_project_copy.py` has 11 tests. The progress dialog runs for real
+    offscreen in the window tests.
+- **Not verified:**
+  - Not tried in the running app, and not with real multi-GB media or a real
+    iCloud-only file (a second app instance would race the autosave).
+  - The native macOS save panel's look, and APFS cloning across volumes, are
+    untested.
+- **Next:** try Save As by hand on the "bad video example" case.
+  Re-saving into that folder skips the four complete copies and recopies the
+  incomplete one. Consider warning when the chosen location is in iCloud.
+
 ## 2026-11-18 — v0.5.26-alpha.1 published
 
 - Published [v0.5.26-alpha.1](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.26-alpha.1)

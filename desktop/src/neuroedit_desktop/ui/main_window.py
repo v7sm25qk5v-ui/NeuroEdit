@@ -5,11 +5,13 @@ import json
 import math
 import os
 import shutil
+import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QMimeData, QThread, Qt, QTimer, QUrl
+from PySide6.QtCore import QEvent, QEventLoop, QMimeData, QThread, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -63,6 +65,7 @@ from neuroedit_desktop.models import (
     VideoClip,
     new_id,
 )
+from neuroedit_desktop import project_copy
 from neuroedit_desktop.project_store import ProjectStore
 from neuroedit_desktop.sam_backend import SamBackend
 from neuroedit_desktop.ui import styles as ui_styles
@@ -1323,16 +1326,22 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
 
     def _migrate_history_payloads(
         self, payloads: list[bytes], old_root: Path, new_root: Path, name: str,
+        copied: set[Path] | None = None,
     ) -> list[bytes]:
         """Point old undo/redo snapshots at the migrated copies of managed assets
         (and the new project name). A snapshot that cannot be migrated keeps its
         old-folder paths, which still resolve because Save As never deletes the
-        original folder's assets."""
+        original folder's assets.
+
+        With ``copied``, nothing is copied: only paths whose copy is in that set
+        are rewritten, and other files keep their old paths. (Copying per snapshot
+        re-copied every imported video once per undo step.)"""
+        copy_file = None if copied is None else (lambda _source, destination: destination in copied)
         migrated = []
         for payload in payloads:
             try:
                 snapshot_project = ProjectState.from_dict(json.loads(payload))
-                self._migrate_managed_assets(snapshot_project, old_root, new_root)
+                self._migrate_managed_assets(snapshot_project, old_root, new_root, copy_file)
                 snapshot_project.project_name = name
                 migrated.append(self._snapshot_payload(self._snapshot(snapshot_project.to_dict())))
             except Exception:
@@ -1670,12 +1679,111 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self.refresh()
 
     def _save_project(self) -> None:
+        if self._save_in_progress:
+            return
         self._flush_pending_edits()
         if (self.store.project_path.parent == default_project_root()
                 or self.store.project_path == self._autosave_blocked_path):
             # Still in autosave location — prompt for a real save destination
             self._save_project_as()
             return
+        self._save_in_place()
+
+    # Set while Save As copies files; class default for windows built without __init__.
+    _save_in_progress = False
+
+    def _run_save_copy(self, jobs: list[project_copy.CopyJob]) -> bool:
+        """Copy Save As files on a worker thread behind a progress dialog.
+        True when done; False when cancelled. Copy errors are re-raised here."""
+        if not jobs:
+            return True
+        progress = project_copy.CopyProgress()
+        cancel = threading.Event()
+        outcome: dict[str, BaseException | None] = {}
+
+        def work() -> None:
+            try:
+                project_copy.copy_files(jobs, progress, cancel.is_set)
+                outcome["error"] = None
+            except BaseException as exc:  # noqa: BLE001 - reported on the UI thread
+                outcome["error"] = exc
+
+        dialog = QProgressDialog("Preparing to save…", "Cancel", 0, 1000, self)
+        dialog.setWindowTitle("Saving Project")
+        # Application-modal: no edits, no second save and no menu actions while
+        # the project's files are being copied. Cancel still works.
+        dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+        dialog.setAutoClose(False)
+        dialog.setAutoReset(False)
+        dialog.setMinimumDuration(0)
+        bar = QProgressBar(dialog)  # setValue on the bar never spins a nested event loop
+        bar.setRange(0, 1000)
+        dialog.setBar(bar)
+
+        def on_cancel() -> None:
+            cancel.set()
+            dialog.setLabelText("Cancelling…")
+
+        dialog.canceled.connect(on_cancel)
+        loop = QEventLoop(self)
+        timer = QTimer(self)
+        timer.setInterval(100)
+
+        def refresh() -> None:
+            if cancel.is_set():
+                dialog.show()  # QProgressDialog hides itself on cancel; keep it up until the thread stops
+            elif progress.count:
+                total = max(progress.total_bytes, 1)
+                bar.setValue(min(1000, progress.done_bytes * 1000 // total))
+                verb = "Downloading from iCloud and copying" if progress.downloading else "Copying"
+                dialog.setLabelText(
+                    f"{verb} file {progress.index} of {progress.count}: {progress.current}\n"
+                    f"{project_copy.format_bytes(progress.done_bytes)} of "
+                    f"{project_copy.format_bytes(progress.total_bytes)}"
+                )
+            if not worker.is_alive():
+                loop.quit()
+
+        timer.timeout.connect(refresh)
+        worker = threading.Thread(target=work, name="neuroedit-save-copy", daemon=True)
+        self._save_in_progress = True
+        try:
+            dialog.show()
+            worker.start()
+            timer.start()
+            if worker.is_alive():
+                loop.exec()
+            worker.join()
+        finally:
+            timer.stop()
+            self._save_in_progress = False
+            dialog.canceled.disconnect(on_cancel)
+            dialog.close()
+            dialog.deleteLater()
+        error = outcome.get("error")
+        if isinstance(error, project_copy.CopyCancelled):
+            return False
+        if error is not None:
+            raise error
+        return True
+
+    @staticmethod
+    def _remove_empty_save_folder(folder: Path, existed: bool) -> None:
+        """After a cancelled or failed Save As, remove the empty folders it made.
+        Never removes a file, or a folder that already existed."""
+        if existed:
+            return
+        for sub in ("masks", "audio", "stills", MEDIA_DIR_NAME):
+            try:
+                (folder / sub).rmdir()
+            except OSError:
+                pass
+        try:
+            folder.rmdir()
+        except OSError:
+            pass
+
+    def _save_in_place(self) -> None:
         try:
             self.store.save(self.project)
             self.dirty = False
@@ -1685,28 +1793,40 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         except Exception as exc:
             QMessageBox.critical(self, "Save failed", str(exc))
 
+    def _ask_save_destination(self) -> Path | None:
+        """One standard Save dialog: the typed name becomes the project folder
+        (``<location>/<name>/project.json``), anywhere the user can write."""
+        settings = QSettings("NeuroEdit", "Desktop")
+        start_dir = Path(str(settings.value("storage/lastSaveParent", "") or ""))
+        if not str(start_dir) or not start_dir.is_dir():
+            start_dir = Path.home() / "Documents"
+        name = (self.project.project_name or "Untitled Case").strip() or "Untitled Case"
+        chosen, _ = QFileDialog.getSaveFileName(
+            self, "Save Project As", str(start_dir / name), "",
+            options=QFileDialog.Option.DontConfirmOverwrite,
+        )
+        if not chosen:
+            return None
+        folder = Path(chosen)
+        if folder.name == "project.json":  # picked an existing project's file
+            folder = folder.parent
+        if not folder.name.strip():
+            return None
+        settings.setValue("storage/lastSaveParent", str(folder.parent))
+        return folder
+
     def _save_project_as(self) -> None:
-        # Step 1: project name
-        name, ok = QInputDialog.getText(
-            self, "Save Project As", "Project name:",
-            text=self.project.project_name,
-        )
-        if not ok or not name.strip():
+        if self._save_in_progress:
             return
-        name = name.strip()
-
-        # Step 2: parent folder to save into
-        parent = QFileDialog.getExistingDirectory(
-            self, "Choose Save Location",
-            str(Path.home() / "Documents" / "NeuroEdit"),
-        )
-        if not parent:
+        project_folder = self._ask_save_destination()
+        if project_folder is None:
             return
-
-        # Create <parent>/<name>/ as the project folder only after confirming
-        # any existing document and staging a self-contained copy of managed assets.
-        project_folder = Path(parent) / name
+        name = project_folder.name.strip()
         project_path = project_folder / "project.json"
+        old_root = self.store.project_path.parent
+        if project_path == self.store.project_path:
+            self._save_in_place()
+            return
         if project_path.exists():
             reply = QMessageBox.question(
                 self,
@@ -1717,21 +1837,50 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return
+        elif project_folder.is_dir() and any(project_folder.iterdir()):
+            reply = QMessageBox.question(
+                self,
+                "Folder Not Empty",
+                f"{project_folder} already exists and contains other files. "
+                "Save the project inside it?",
+                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if reply != QMessageBox.StandardButton.Save:
+                return
 
         self._flush_pending_edits()
-        old_store = self.store
-        old_root = old_store.project_path.parent
+        if getattr(self, "_timeline_playing", False):
+            self._toggle_play()  # don't decode video while copying it
         staged_project = copy.deepcopy(self.project)
         staged_project.project_name = name
+        folder_existed = project_folder.exists()
+        pairs: list[tuple[Path, Path]] = []
         try:
+            # Plan first (validation only, fast), copy once in the background,
+            # and write project.json last, so a failed save never leaves a
+            # project file pointing at missing media.
+            self._migrate_managed_assets(
+                staged_project, old_root, project_folder,
+                lambda source, destination: pairs.append((source, destination)) or True,
+            )
+            jobs = project_copy.plan_copies(pairs)
+            problem = project_copy.space_problem(jobs, project_folder)
+            if problem:
+                raise OSError(problem)
             staged_store = ProjectStore.create(project_folder)
-            self._migrate_managed_assets(staged_project, old_root, project_folder)
+            if not self._run_save_copy(jobs):
+                self._remove_empty_save_folder(project_folder, folder_existed)
+                self.statusBar().showMessage("Save cancelled. The project was not saved.", 5000)
+                return
             staged_store.save(staged_project)
+            copied = {destination for _source, destination in pairs}
             history = (
-                self._migrate_history_payloads(self._undo_stack, old_root, project_folder, name),
-                self._migrate_history_payloads(self._redo_stack, old_root, project_folder, name),
+                self._migrate_history_payloads(self._undo_stack, old_root, project_folder, name, copied),
+                self._migrate_history_payloads(self._redo_stack, old_root, project_folder, name, copied),
             )
         except Exception as exc:
+            self._remove_empty_save_folder(project_folder, folder_existed)
             QMessageBox.critical(self, "Save failed", str(exc))
             return
         self._activate_project(staged_store, staged_project, history=history)
@@ -1745,8 +1894,15 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self.project_name.blockSignals(False)
 
     @staticmethod
-    def _migrate_managed_assets(project: ProjectState, old_root: Path, new_root: Path) -> None:
-        """Copy app-managed assets into Save As and rewrite their project paths."""
+    def _migrate_managed_assets(
+        project: ProjectState, old_root: Path, new_root: Path,
+        copy_file: Callable[[Path, Path], bool] | None = None,
+    ) -> None:
+        """Copy app-managed assets into Save As and rewrite their project paths.
+
+        With ``copy_file``, nothing is copied here: it is called with each
+        (source, destination) after validation, and the path is rewritten only
+        when it returns True. Save As uses this to plan one background copy."""
         def migrate(path_str: str | None) -> str | None:
             if not path_str:
                 return path_str
@@ -1775,13 +1931,16 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
                 raise ValueError(f"Managed asset escapes its directory: {source}")
             if not source.is_file():
                 return path_str
+            if destination.exists() and source.samefile(destination):
+                return str(destination)
+            if source.stat().st_nlink > 1:
+                raise ValueError(f"Hard-linked managed source: {source}")
+            if destination.exists() and destination.stat().st_nlink > 1:
+                raise ValueError(f"Hard-linked managed destination: {destination}")
+            if copy_file is not None:
+                return str(destination) if copy_file(source, destination) else path_str
             destination.parent.mkdir(parents=True, exist_ok=True)
-            if not destination.exists() or not source.samefile(destination):
-                if source.stat().st_nlink > 1:
-                    raise ValueError(f"Hard-linked managed source: {source}")
-                if destination.exists() and destination.stat().st_nlink > 1:
-                    raise ValueError(f"Hard-linked managed destination: {destination}")
-                shutil.copy2(source, destination)
+            shutil.copy2(source, destination)
             return str(destination)
 
         for annotation in project.annotations:
@@ -3298,6 +3457,10 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         return force_terminated
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        if self._save_in_progress:
+            self.statusBar().showMessage("Wait for the save to finish, or cancel it, before closing.", 6000)
+            event.ignore()
+            return
         self._flush_pending_edits()
         updater = getattr(self, "_update_workflow", None)
         if updater is not None and not updater.can_close():

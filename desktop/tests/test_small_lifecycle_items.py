@@ -277,8 +277,7 @@ def test_save_as_keeps_history_migrates_snapshot_assets_and_reloads_frame(window
     monkeypatch.setattr(window, "_load_active_clip", lambda: reloaded.append(True))
     dest = tmp_path / "Saved"
     dest.mkdir()
-    monkeypatch.setattr(mw.QInputDialog, "getText", lambda *a, **k: ("Copy", True))
-    monkeypatch.setattr(mw.QFileDialog, "getExistingDirectory", lambda *a: str(dest))
+    monkeypatch.setattr(mw.QFileDialog, "getSaveFileName", lambda *a, **k: (str(dest / "Copy"), ""))
     window._save_project_as()
 
     new_root = dest / "Copy"

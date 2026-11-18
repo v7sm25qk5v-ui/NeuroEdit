@@ -59,8 +59,7 @@ def test_save_as_folder_creation_failure_preserves_open_project(monkeypatch, tmp
     window.dirty = True
     original_project, original_store = window.project, window.store
     errors = []
-    monkeypatch.setattr(module.QInputDialog, "getText", lambda *args, **kwargs: ("New", True))
-    monkeypatch.setattr(module.QFileDialog, "getExistingDirectory", lambda *args: str(tmp_path))
+    monkeypatch.setattr(module.QFileDialog, "getSaveFileName", lambda *a, **k: (str(tmp_path / "New"), ""))
     monkeypatch.setattr(module.QMessageBox, "critical", lambda *args: errors.append(args))
 
     def fail_create(_folder):

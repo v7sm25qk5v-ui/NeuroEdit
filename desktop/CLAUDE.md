@@ -104,6 +104,11 @@ Releases sidebar. Verify `/releases/latest` resolves to the new tag, alongside
 the installer assets and README links. The publication workflow explicitly sets
 `prerelease: false` and `make_latest: "true"` for visibility; retain alpha and
 unsigned-build labels in the tag and notes when applicable.
+Release notes are published from `docs/releases/<tag>.md` at the tagged commit
+(`body_path` in `build.yml`). The release job fails if that file is missing, so
+commit the notes before tagging. `/usr/local/bin/gh` on this Mac is Intel-only
+and cannot run; push with
+`git -c credential.https://github.com.helper= -c credential.https://github.com.helper=osxkeychain push …`.
 `tests/conftest.py` redirects NeuroEdit's application preferences to a temporary
 INI file; tests must not read or write the user's native QSettings store.
 
@@ -118,6 +123,12 @@ include torch, so `SamBackend.probe()` returns "missing" and SAM features
 no-op until `pip install -e ".[sam]"` is run. If torch cold-start ever becomes
 painful, the fix is to `pip install -e ".[sam]"` once and accept the first-run
 sync delay — not to move the venv off iCloud.
+When the disk gets nearly full, macOS evicts iCloud files to free space,
+including venv and repo files. Their contents then live only in iCloud ("dataless", `st_flags & 0x40000000`).
+Pytest then sits for minutes in `read()` during imports, with no faulthandler
+dump, and looks like a hang. Reading a file downloads it (~1 s each). Read the
+evicted files in parallel (a 32-thread pool) to bring them back, rather than
+waiting on them one at a time.
 
 ## Big-picture architecture
 
@@ -176,6 +187,26 @@ ready, or playhead > `CUE_MAX_LATE_MS` past it) falls back to the seek path.
 Signals from the cue player are ignored unless it is `self.player`.
 
 ### State, persistence, and undo/redo
+
+Save As (`_save_project_as`) uses one standard Save dialog
+(`_ask_save_destination`). The typed name becomes the folder
+`<location>/<name>/project.json`; the last parent folder is remembered in
+`storage/lastSaveParent`.
+- `_migrate_managed_assets(..., copy_file=...)` validates and **plans** the
+  copies without doing them.
+- `project_copy.copy_files` runs on a worker thread behind an
+  application-modal `QProgressDialog` (`_run_save_copy`, which spins a local
+  `QEventLoop`, so callers stay synchronous). It clones on APFS, otherwise
+  copies in 8 MB chunks with Cancel. It copies mode and times only: copying
+  `st_flags`, as `copy2` does, fails on iCloud dataless files.
+- `project.json` is written only after every copy succeeds. Cancel or an error
+  removes only files the save created.
+- Undo/redo snapshots are rewritten against the set of copies
+  (`_migrate_history_payloads(..., copied)`), never copied per snapshot. The old
+  per-snapshot copy re-copied every imported video once per undo step and froze
+  the app.
+- A free-space check runs first, and `closeEvent` refuses to close while
+  `_save_in_progress` is set.
 
 - `models.py` is the single source of truth for all serializable state. Every
   user-editable thing is a dataclass with `to_dict`/`from_dict` round-tripping
