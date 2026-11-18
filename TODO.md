@@ -362,6 +362,42 @@ items above remain open (the ticket wave touched `editor_panels.py` /
 `models.py` for other reasons but did not address the double-rewind, the
 reorder-replacement scope question, or the no-redaction early return).
 
+### 2026-11-18 incremental run (`947503b..7a2fb21`, v0.5.18–v0.5.22 waves + working tree)
+
+Reviewed the MPG working-copy import (v0.5.18), in-app updater (v0.5.19),
+inserted slides (v0.5.20), translocated-app update fix (v0.5.21), instant cuts
+(v0.5.22), and the uncommitted working-tree change adding timeline filmstrip
+thumbnails + scrub throttling. Most of this code was multi-agent reviewed and
+self-benchmarked per the release records; the findings below are the residual
+items.
+
+- [ ] **Filmstrip key tuples are rebuilt on every playhead repaint (per-tick
+  allocation on the hot path).** `TimelineCanvas._paint_filmstrip`
+  (`ui/editor_panels.py`) runs whenever the paint rect intersects the filmstrip
+  band. During playback `RichTimelineWidget.refresh_playhead` invalidates a
+  16px **full-height** strip (`canvas.update(x-7, 0, 16, height)`), which always
+  intersects that band, so `_paint_filmstrip` fires each tick and rebuilds the
+  `videos` / `redactions` / `covers` comprehension tuples (O(clips+annotations+
+  slides)) just to compute `key` and compare it to `_filmstrip_key` — then skips
+  the re-layout because the key is unchanged. The static-cache design
+  deliberately keeps playhead-only repaints to a cheap blit; this reintroduces
+  per-tick allocation. Fix: skip the key rebuild when the repaint rect is the
+  narrow playhead strip and `_filmstrip_key` is already set, or memoize the
+  project-derived tuples on a document fingerprint like `_static_fingerprint`.
+  Low risk; payoff grows with clip/annotation count. Affected:
+  `ui/editor_panels.py`.
+
+- [ ] **Playback tick now performs ~6 linear clip/slide scans per frame.**
+  `_tick_timeline_playback` (`ui/main_window.py:2555`) already calls
+  `_clip_at_time` / `_slide_at_time` four times (active, active_slide,
+  next_active, next_slide); the v0.5.22 cue path adds `_maybe_cue_next_clip` →
+  `_next_cut_clip` → another `_clip_at_time` (plus the next-cut lookup) every
+  tick. CLAUDE.md already rules the per-tick `_clip_at_time` scan an accepted
+  O(n) cost for small n, so this is a low-priority consolidation, not a bug:
+  if projects grow, compute the active clip/slide once per tick and thread the
+  result (and `now`) into `_next_cut_clip` instead of re-scanning. Watch item;
+  only act if a large-project profile shows it. Affected: `ui/main_window.py`.
+
 ## P0 — Unblock and ship the current alpha
 
 - [x] Fix the dev environment — Python 3.13 reinstalled 2026-06-10; venv

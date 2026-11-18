@@ -329,7 +329,25 @@ Other PHI safeguards:
   (`exporter._frame_for_clip`) reads CFR frames forward instead of re-seeking,
   and `AudioPreview.sync` caches narration-file existence for one second instead
   of `stat`-ing every track per playback tick.
-- **Last reviewed:** 2026-11-17 (HEAD `947503b`) — incremental run over
+- **Last reviewed:** 2026-11-18 (HEAD `7a2fb21`) — incremental run over
+  `947503b..7a2fb21` (v0.5.18–v0.5.22 waves + uncommitted working tree): 46
+  committed files +5.7k/-182, plus the working-tree filmstrip-thumbnail /
+  scrub-throttle change. Deep-dived the perf-relevant new code: timeline
+  filmstrip (`ui/timeline_thumbnails.py`, off-thread LRU thumbnail decode) and
+  its paint integration (`_paint_filmstrip` / `_layout_filmstrip`), the instant-
+  cuts cue player (`_maybe_cue_next_clip` / `_next_cut_clip` / `_take_cue`), and
+  the inserted-slide model helpers (`insert_gap`, `slide_insert_point`,
+  `move/place/resize_inserted_slide`, `move_redactions_with_clips`). Two low-
+  priority findings filed (see TODO "2026-11-18 incremental run"): per-tick
+  rebuild of the filmstrip key tuples on the playhead-only repaint, and the
+  playback tick now doing ~6 linear clip/slide scans per frame via the cue path.
+  The updater modules (`update_*.py`, `ui/update_*.py`) and `media_convert.py`
+  are user-driven (network/import), not paint/playback paths — no findings. The
+  three 2026-11-13 items stay open (the waves touched `editor_panels.py` /
+  `models.py` but did not address them; `move_redactions_with_clips` gained an
+  all-zero-shift early return but still builds+sorts `moves` before checking for
+  any redaction, so item 340 stands).
+- **Prior reviewed (2026-11-17, `947503b`):** incremental run over
   `e1b0839..947503b`, the NE-012–NE-031 ticket wave shipped in v0.5.17-alpha
   (`2343eb6`): 74 files, +10.6k/-3.0k. Deep-dived the perf-relevant changes
   (`exporter.py` overlay transform + cross-volume publish + ffmpeg resolution,
@@ -364,7 +382,7 @@ Other PHI safeguards:
   line-count-driven, and keep a true pre-`to_dict()` undo shortcut deferred
   unless the model gains a trustworthy document revision signal.
 - **Mode:** incremental going forward. Next review should deep-dive files changed
-  after `947503b` plus one hop. (Full-sweep baselines: `22085f9` 2026-06-17 and
+  after `7a2fb21` plus one hop. (Full-sweep baselines: `22085f9` 2026-06-17 and
   `3e00fc0` 2026-11-12.)
 - **Out-of-scope paths:** `desktop/dist/` and any build output; `*.lock`;
   `.venv/` (symlinked into iCloud, see venv note); vendored deps; iCloud
@@ -416,6 +434,21 @@ Other PHI safeguards:
     but that render only runs on edits (cache miss), and `_tick_timeline_playback`
     uses the cached `MainWindow._project_end_time()`. Playback is unaffected; not
     worth threading a cache through `TimelineCanvas`.
+  - `ui/timeline_thumbnails.py` (`TimelineThumbnails`) decodes filmstrip frames
+    off the GUI thread on a single low-priority `QThreadPool` (named
+    `timelineThumbnailPool`), batches `_BATCH_SIZE=4` per 30 ms cycle, caches
+    `QImage`s in an LRU (`_CACHE_SIZE=192`) with a 45 s expiry, and caps the
+    visible strip at `MAX_VISIBLE_THUMBNAILS=96`. Decode is correct-by-design
+    (null-frame and broken-media paths leave the plain clip bar; cancelled
+    batches let the visible strip retry). Do not re-flag the decode/cache as a
+    perf issue — the only residual cost is the per-paint key rebuild in
+    `_paint_filmstrip` (open TODO 2026-11-18), not the worker.
+  - `_paint_filmstrip` redacted-source protection: `_layout_filmstrip` drops
+    thumbnails for any video whose source is covered by a redaction (by
+    normcase+abspath path, so other splits of that source are protected too) and
+    for tiles under a non-overlay, non-inserted cover slide, so raw PHI frames
+    can never surface in the strip. Keep this filter if the filmstrip layout is
+    touched. `test_timeline_thumbnails.py` locks it.
   - Export per-frame decode (`exporter._frame_for_clip`) already avoids the
     NE-026 benchmark's seek-per-frame cost for constant-frame-rate sources: it
     trusts OpenCV's CFR index and reads frames forward (`read_forward` /
@@ -424,6 +457,12 @@ Other PHI safeguards:
     `benchmark_export_decode.py` 5× seek-vs-sequential gap is the worst-case VFR
     cost, not the common path — do not re-flag export decode as a caching/seek
     optimization. (NE-026 also measured static composition and chose no new cache.)
+  - `media_convert.py` (MPG→MP4 working-copy transcode) and the updater modules
+    (`update_release.py`, `update_service.py`, `update_install.py`,
+    `ui/update_dialog.py`, `ui/update_workflow.py`) are user-driven import/network
+    paths, not paint/playback hot paths. Transcode is a one-time per-file ffmpeg
+    pass at import; the updater has no startup network check. No per-tick cost —
+    out of scope for playback/paint optimization unless their logic changes.
 - **Architecture notes (high-signal):**
   - Narration recording (v0.5.14, `ui/audio_panel.py`) now waits for
     `QMediaRecorder` `StoppedState` before probing the *recorded file's* real

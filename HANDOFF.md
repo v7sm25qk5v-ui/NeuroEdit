@@ -1,5 +1,45 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-18 — Style refresh: palette, steppers, radii, wheel guard (uncommitted)
+
+User asked for a style update, logged as NE-037 to NE-040 in `CODING_TICKETS.md`.
+Nothing is committed yet; work sits on `main` at `a481cdb`.
+
+- **NE-037 palette.** `desktop/src/neuroedit_desktop/ui/styles.py` `LIGHT_THEME`
+  is now pale watercolor-blue surfaces (`#e6ecf2`/`#f5f8fb`/`#fbfcfe`),
+  blue-gray borders and charcoal text/primary (`#25292e`, `#33383e`).
+  `DARK_THEME` is charcoal (`#161819`…`#2a2e33`) with a washed-blue primary
+  `#8fb4d8` and dark `on_primary` label text. Status hues keep their meaning;
+  timeline lanes are blue/sage/lilac/ochre. All pairs were checked against
+  every rule in `tests/test_design_tokens.py` before editing. The SAM point
+  toggle (`ui/sam_panel.py`) and export audio warning (`ui/dialogs.py`) no
+  longer hard-code old dark-palette hex values. The first-run appearance text
+  in `__main__.py` and `docs/DESIGN_LANGUAGE.md` were updated. Out of scope:
+  the identity mark SVGs, annotation preset colours, SAM mask palette and the
+  green/red SAM include/exclude point buttons.
+- **NE-038 steppers.** Spin boxes get a stepper column with themed chevron
+  SVGs and hover/pressed/at-limit states; combo boxes get a matching chevron.
+  QSS needs file URLs for arrow images, so `_chevron_icon()` writes tiny SVGs
+  to `<tempdir>/neuroedit-ui-icons/` (named by colour, written once).
+- **NE-039 radii.** `RADIUS_SM/MD/LG` are 10/12/16 (were 7/8/12) and moved
+  above `_build_stylesheet`, which now uses them for buttons, inputs, popups
+  and list rows. Circular swatches and the 6px scrollbar pills are unchanged.
+- **NE-040 wheel guard.** New `ui/wheel_guard.py`, installed app-wide in
+  `__main__.main()`. Spin boxes, combo boxes and sliders (not scrollbars) take
+  the wheel only when focused; otherwise the event goes to the parent so the
+  panel scrolls. Their `WheelFocus` policy becomes `StrongFocus` on polish so
+  the wheel can't focus them. Test: `tests/test_wheel_guard.py`.
+- **Verification:** `tests/test_wheel_guard.py` + `tests/test_design_tokens.py`
+  pass (20). `ruff check src tests scripts` passes. Offscreen renders of the
+  controls in both themes look right. The first full-suite run stopped at
+  `test_capture_baseline.py` (its capture subprocess hit the 180 s timeout
+  during a very slow iCloud-venv run: 56 tests in 9.6 min); a rerun was still
+  in progress at commit time, so the full suite is **not yet confirmed green**.
+  Not checked in the running app: the list-row overlap seen in the offscreen
+  render (likely pre-existing QSS padding), native Windows look.
+- **Next:** confirm the full suite, check the real app in both themes, then
+  update the design-system artifact to the new palette and radii.
+
 ## 2026-11-18 — Clip speed and refreshed controls released
 
 - Published [v0.5.25-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.25-alpha)
@@ -91,6 +131,27 @@
   label that failed to fit, and a path separator assertion. Publication was
   canceled before either installer was posted. The `v0.5.24-alpha.1` retry
   preserves that tag and includes the corrected font sizing and path check.
+
+## 2026-11-18 — Daily optimization automation ran (incremental, no code changes)
+
+- Scanned `947503b..7a2fb21` (v0.5.18–v0.5.22 waves + the uncommitted working
+  tree): 46 committed files +5.7k/-182, plus the working-tree filmstrip-thumbnail
+  and scrub-throttle change. Deep-dived the perf-relevant new code — timeline
+  filmstrip (`ui/timeline_thumbnails.py`, `_paint_filmstrip` / `_layout_filmstrip`),
+  the instant-cuts cue player (`_maybe_cue_next_clip` / `_next_cut_clip` /
+  `_take_cue`), and the inserted-slide model helpers. The updater modules and
+  `media_convert.py` are user-driven import/network paths, not paint/playback hot
+  paths — no findings there.
+- TODO.md "Optimization Backlog": added a 2026-11-18 run note with two
+  low-priority findings — the filmstrip key tuples are rebuilt on every
+  playhead-only repaint (per-tick allocation the static-cache design otherwise
+  avoids), and the playback tick now does ~6 linear clip/slide scans per frame
+  via the cue path (watch item; CLAUDE.md already accepts the O(n) scan for small
+  n). The three 2026-11-13 items remain open.
+- CLAUDE.md memory: "Last reviewed" → `7a2fb21` / 2026-11-18; recorded the
+  `TimelineThumbnails` off-thread LRU decode and redacted-source filmstrip
+  protection as architecture notes, and the updater/`media_convert` modules as
+  out-of-scope-for-playback false positives.
 
 ## 2026-11-18 — Timeline filmstrips published in v0.5.23-alpha.1
 

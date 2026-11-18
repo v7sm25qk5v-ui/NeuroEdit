@@ -16,6 +16,7 @@ from neuroedit_desktop.ui.styles import (
     stored_theme_mode,
     theme_preference_exists,
 )
+from neuroedit_desktop.ui.wheel_guard import install_wheel_guard
 
 _RESOURCES = Path(__file__).parent / "resources"
 
@@ -70,7 +71,7 @@ def _choose_first_run_theme(app: QApplication) -> ThemeMode:
     dialog.setWindowTitle("Choose Appearance")
     dialog.setText("Choose NeuroEdit's appearance.")
     dialog.setInformativeText(
-        "Light uses the warm cream Figma direction. Dark keeps the high-contrast editor theme. "
+        "Light uses soft watercolor blues with charcoal text. Dark uses charcoal panels with washed-blue accents. "
         "System follows your OS setting."
     )
     light_btn = dialog.addButton("Light", QMessageBox.ButtonRole.AcceptRole)
@@ -97,6 +98,7 @@ def main() -> int:
     )
     app = QApplication(sys.argv)
     sys.excepthook = handle_unhandled_exception
+    install_wheel_guard(app)
     mode = _choose_first_run_theme(app)
     apply_app_style(app, mode)
 

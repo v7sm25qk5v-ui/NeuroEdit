@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 from PySide6.QtCore import QSettings, Qt
@@ -47,65 +49,65 @@ class ThemeTokens:
 
 
 LIGHT_THEME = ThemeTokens(
-    bg_primary="#f5f0e8",
-    bg_secondary="#fffdf8",
-    bg_tertiary="#f0ebe2",
-    bg_card="#fffaf1",
-    bg_hover="#e8dfd2",
-    border="#d8cfc1",
-    border_bright="#b9aa98",
-    primary="#1a1714",
-    primary_hover="#332c25",
-    accent_cyan="#2f6f4e",
+    bg_primary="#e6ecf2",
+    bg_secondary="#f5f8fb",
+    bg_tertiary="#dde5ed",
+    bg_card="#fbfcfe",
+    bg_hover="#d3dfea",
+    border="#c4d1dd",
+    border_bright="#93a7ba",
+    primary="#33383e",
+    primary_hover="#4a5058",
+    accent_cyan="#2f6690",
     accent_emerald="#276749",
     accent_amber="#76500f",
     accent_red="#9f2f24",
-    accent_slides="#8a5570",
-    selection_outline="#8f3f25",
-    text_primary="#1a1714",
-    text_secondary="#635b52",
-    text_muted="#6f665c",
-    text_dim="#8b8176",
+    accent_slides="#76588a",
+    selection_outline="#2a6fb0",
+    text_primary="#25292e",
+    text_secondary="#4a525b",
+    text_muted="#56606b",
+    text_dim="#77818c",
     on_primary="#ffffff",
     on_primary_hover="#ffffff",
     on_success="#ffffff",
-    video_canvas="#11100e",
-    timeline_video="#c46f47",
-    timeline_audio="#4f8a63",
-    timeline_slides="#9f5f7a",
-    timeline_markers="#9a6b16",
+    video_canvas="#15171a",
+    timeline_video="#6f9cc4",
+    timeline_audio="#7aa58e",
+    timeline_slides="#a38bb5",
+    timeline_markers="#b8914a",
     playhead="#9f2f24",
 )
 
 DARK_THEME = ThemeTokens(
-    bg_primary="#090a0f",
-    bg_secondary="#10131a",
-    bg_tertiary="#151923",
-    bg_card="#1b202b",
-    bg_hover="#242a36",
-    border="#2c3340",
-    border_bright="#465161",
-    primary="#4f7cff",
-    primary_hover="#3f68dc",
-    accent_cyan="#22d3ee",
-    accent_emerald="#10b981",
-    accent_amber="#f59e0b",
-    accent_red="#ef4444",
-    accent_slides="#8b5cf6",
+    bg_primary="#161819",
+    bg_secondary="#1c1f22",
+    bg_tertiary="#22262a",
+    bg_card="#2a2e33",
+    bg_hover="#33383e",
+    border="#3a4047",
+    border_bright="#56606b",
+    primary="#8fb4d8",
+    primary_hover="#a6c4e2",
+    accent_cyan="#7cc0dc",
+    accent_emerald="#3ccf93",
+    accent_amber="#f5b23d",
+    accent_red="#f26b6b",
+    accent_slides="#b6a0dc",
     selection_outline="#FFD60A",
-    text_primary="#e2e8f0",
-    text_secondary="#94a3b8",
-    text_muted="#8093ab",
-    text_dim="#64748b",
-    on_primary="#ffffff",
-    on_primary_hover="#ffffff",
-    on_success="#052e16",
+    text_primary="#e7eaee",
+    text_secondary="#b4bcc5",
+    text_muted="#9ba5b0",
+    text_dim="#78828d",
+    on_primary="#15181b",
+    on_primary_hover="#15181b",
+    on_success="#06281a",
     video_canvas="#000000",
-    timeline_video="#4f7cff",
-    timeline_audio="#ef4444",
-    timeline_slides="#8b5cf6",
-    timeline_markers="#f59e0b",
-    playhead="#ef4444",
+    timeline_video="#8fb4d8",
+    timeline_audio="#7fb89c",
+    timeline_slides="#b6a0dc",
+    timeline_markers="#f5b23d",
+    playhead="#f26b6b",
 )
 
 THEMES: dict[ResolvedTheme, ThemeTokens] = {
@@ -166,7 +168,36 @@ def _rgba(hex_color: str, alpha: float) -> str:
     return f"rgba({r}, {g}, {b}, {alpha:.2f})"
 
 
+# ── Shape / spacing scale (px) ──────────────────────────────────────────────
+RADIUS_SM = 10
+RADIUS_MD = 12
+RADIUS_LG = 16
+SPACE_XS, SPACE_SM, SPACE_MD, SPACE_LG = 4, 8, 12, 16
+ICON_SM, ICON_MD = 18, 32
+
+_ICON_DIR = Path(tempfile.gettempdir()) / "neuroedit-ui-icons"
+_CHEVRON_POINTS = {"up": "2,6.5 5,3.5 8,6.5", "down": "2,3.5 5,6.5 8,3.5"}
+
+
+def _chevron_icon(direction: str, color: str) -> str:
+    """Write a themed chevron SVG for QSS ``image: url(...)`` and return its path."""
+    path = _ICON_DIR / f"chevron-{direction}-{color.lstrip('#').lower()}.svg"
+    if not path.exists():
+        _ICON_DIR.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" width="10" height="10">'
+            f'<polyline points="{_CHEVRON_POINTS[direction]}" fill="none" stroke="{color}"'
+            ' stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+            encoding="utf-8",
+        )
+    return path.as_posix()
+
+
 def _build_stylesheet(t: ThemeTokens) -> str:
+    up = _chevron_icon("up", t.text_secondary)
+    down = _chevron_icon("down", t.text_secondary)
+    up_dim = _chevron_icon("up", t.text_dim)
+    down_dim = _chevron_icon("down", t.text_dim)
     return f"""
 QMainWindow,
 QWidget#appRoot {{
@@ -230,7 +261,7 @@ QPushButton,
 QToolButton {{
     background: {t.bg_card};
     border: 1px solid {t.border};
-    border-radius: 10px;
+    border-radius: {RADIUS_MD}px;
     color: {t.text_primary};
     padding: 7px 11px;
     font-weight: 600;
@@ -373,9 +404,65 @@ QSpinBox,
 QDoubleSpinBox {{
     background: {t.bg_card};
     border: 1px solid {t.border};
-    border-radius: 8px;
+    border-radius: {RADIUS_MD}px;
     color: {t.text_primary};
     padding: 7px 9px;
+}}
+
+QSpinBox,
+QDoubleSpinBox {{
+    padding-right: 30px;
+}}
+
+QAbstractSpinBox::up-button,
+QAbstractSpinBox::down-button {{
+    subcontrol-origin: border;
+    width: 24px;
+    border: none;
+    border-left: 1px solid {t.border};
+    background: transparent;
+}}
+
+QAbstractSpinBox::up-button {{
+    subcontrol-position: top right;
+    border-top-right-radius: {RADIUS_MD - 1}px;
+}}
+
+QAbstractSpinBox::down-button {{
+    subcontrol-position: bottom right;
+    border-bottom-right-radius: {RADIUS_MD - 1}px;
+}}
+
+QAbstractSpinBox::up-button:hover,
+QAbstractSpinBox::down-button:hover {{
+    background: {t.bg_hover};
+}}
+
+QAbstractSpinBox::up-button:pressed,
+QAbstractSpinBox::down-button:pressed {{
+    background: {t.border};
+}}
+
+QAbstractSpinBox::up-arrow {{
+    image: url("{up}");
+    width: 10px;
+    height: 10px;
+}}
+
+QAbstractSpinBox::down-arrow {{
+    image: url("{down}");
+    width: 10px;
+    height: 10px;
+}}
+
+QAbstractSpinBox::up-arrow:disabled,
+QAbstractSpinBox::up-arrow:off {{
+    image: url("{up_dim}");
+}}
+
+QAbstractSpinBox::down-arrow:disabled,
+QAbstractSpinBox::down-arrow:off {{
+    image: url("{down_dim}");
 }}
 
 QLineEdit:focus,
@@ -387,15 +474,31 @@ QDoubleSpinBox:focus {{
     border-color: {t.primary};
 }}
 
+QComboBox {{
+    padding-right: 30px;
+}}
+
 QComboBox::drop-down {{
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
     border: none;
-    width: 22px;
+    width: 28px;
+}}
+
+QComboBox::down-arrow {{
+    image: url("{down}");
+    width: 10px;
+    height: 10px;
+}}
+
+QComboBox::down-arrow:disabled {{
+    image: url("{down_dim}");
 }}
 
 QComboBox QAbstractItemView {{
     background: {t.bg_tertiary};
     border: 1px solid {t.border_bright};
-    border-radius: 8px;
+    border-radius: {RADIUS_MD}px;
     color: {t.text_primary};
     selection-background-color: {t.primary};
     selection-color: {t.on_primary};
@@ -407,7 +510,7 @@ QListWidget {{
 
 QListWidget::item {{
     border: 1px solid transparent;
-    border-radius: 8px;
+    border-radius: {RADIUS_SM}px;
     padding: 9px;
     margin: 2px;
     color: {t.text_secondary};
@@ -569,14 +672,6 @@ EXPORTED_COLOR_NAMES = (
     "TIMELINE_VIDEO", "TIMELINE_AUDIO", "TIMELINE_SLIDES", "TIMELINE_MARKERS",
     "PLAYHEAD",
 )
-
-# ── Shape / spacing scale (px) ──────────────────────────────────────────────
-RADIUS_SM = 7
-RADIUS_MD = 8
-RADIUS_LG = 12
-SPACE_XS, SPACE_SM, SPACE_MD, SPACE_LG = 4, 8, 12, 16
-ICON_SM, ICON_MD = 18, 32
-
 
 def _ui_font() -> QFont:
     """Platform-native UI font."""

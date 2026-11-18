@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 from neuroedit_desktop.captions import build_caption_cues
 from neuroedit_desktop.models import ProjectState
 from neuroedit_desktop.ui.project_library import relative_time
-from neuroedit_desktop.ui.styles import TEXT_MUTED
+from neuroedit_desktop.ui.styles import ACCENT_AMBER, TEXT_MUTED
 from neuroedit_desktop.ui.timeline_utils import fmt_time as format_time
 
 if TYPE_CHECKING:
@@ -476,7 +476,7 @@ class ExportChecklistDialog(QDialog):
         self.audio_check.setChecked(project.audio_reviewed_for_phi)
         self.audio_warning = QLabel()
         self.audio_warning.setWordWrap(True)
-        self.audio_warning.setStyleSheet("color: #f59e0b;")
+        self.audio_warning.setStyleSheet(f"color: {ACCENT_AMBER};")
         audio_note = (
             "This export includes audio. Spoken identifiers (patient name, MRN, "
             "date of birth) are not covered by the Redact tool."
@@ -545,7 +545,7 @@ class ExportChecklistDialog(QDialog):
         if self.audio_check.isChecked():
             self.audio_warning.setStyleSheet(f"color: {TEXT_MUTED};")
         else:
-            self.audio_warning.setStyleSheet("color: #f59e0b;")
+            self.audio_warning.setStyleSheet(f"color: {ACCENT_AMBER};")
 
     def apply_to_project(self, project: ProjectState) -> None:
         project.phi_review_confirmed = self.phi_check.isChecked()

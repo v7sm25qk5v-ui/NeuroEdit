@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from neuroedit_desktop.models import Annotation, ProjectState
+from neuroedit_desktop.ui import styles
 class SamPanel(QWidget):
     segment_requested = Signal()
     propagate_requested = Signal()
@@ -389,11 +390,11 @@ class SamPanel(QWidget):
             if enabled
             else "Point Placement Off"
         )
-        color = "#22d3ee" if enabled else "#64748b"
-        bg = "rgba(34, 211, 238, 0.16)" if enabled else "rgba(100, 116, 139, 0.10)"
+        color = styles.ACCENT_CYAN if enabled else styles.TEXT_DIM
+        bg = styles._rgba(color, 0.16 if enabled else 0.10)
         self.point_toggle.setStyleSheet(
             f"QPushButton {{ background: {bg}; color: {color};"
-            f" border: 1px solid {color}; border-radius: 8px;"
+            f" border: 1px solid {color}; border-radius: {styles.RADIUS_MD}px;"
             f" padding: 7px 10px; font-weight: 700; }}"
             f"QPushButton:hover {{ background: rgba(255,255,255,0.06); }}"
         )
@@ -403,10 +404,10 @@ class SamPanel(QWidget):
         if active:
             return (
                 f"QPushButton {{ background: {color}; color: white; border: 1px solid {color};"
-                f"  border-radius: 8px; padding: 6px 10px; font-weight: 700; }}"
+                f"  border-radius: {styles.RADIUS_MD}px; padding: 6px 10px; font-weight: 700; }}"
             )
         return (
             f"QPushButton {{ background: transparent; color: {color}; border: 1px solid {color};"
-            f"  border-radius: 8px; padding: 6px 10px; font-weight: 600; }}"
+            f"  border-radius: {styles.RADIUS_MD}px; padding: 6px 10px; font-weight: 600; }}"
             f"QPushButton:hover {{ background: rgba(255,255,255,0.05); }}"
         )

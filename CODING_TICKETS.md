@@ -1073,3 +1073,45 @@ horizontal and vertical scrolling and timeline scrollbar visibility.
 
 **Evidence.** Offscreen screenshots checked both themes. Compact editor tests
 verify the timeline scrollbar stays visible and can be dragged.
+
+## NE-037 — Charcoal and watercolor-blue palette
+
+**Reported 2026-11-18.** The user wants the app's warm cream/tan palette
+replaced by a charcoal-gray and washed, light watercolor-blue palette.
+
+**Acceptance.** Light theme: pale washed-blue surfaces, blue-gray borders,
+charcoal text and charcoal primary actions. Dark theme: charcoal surfaces with
+a washed-blue primary. Status colours keep their meaning (red only for danger,
+amber caution, green success). Every pair in `tests/test_design_tokens.py`
+still passes. Chrome that hard-codes old palette colours follows the tokens.
+The identity mark and annotation/mask colours are out of scope.
+
+## NE-038 — Arrow steppers on number fields
+
+**Reported 2026-11-18.** Spin boxes (fade in/out, durations, times) show the
+default Qt up/down button blocks, which look broken next to the rounded fields.
+
+**Acceptance.** `QSpinBox`/`QDoubleSpinBox` show themed chevron arrows in a
+clean stepper column inside the field, with hover/pressed/disabled states in
+both themes. Combo boxes show a matching down chevron. Typing values and
+keyboard up/down still work.
+
+## NE-039 — Rounder corners
+
+**Reported 2026-11-18.** Controls should use more rounded corners.
+
+**Acceptance.** The radius scale grows (`RADIUS_SM/MD/LG` 10/12/16 px) and the
+shared stylesheet takes radii from those constants instead of literals.
+Buttons, inputs, list rows, popups and tabs are visibly rounder; circular
+swatches stay circular.
+
+## NE-040 — Stop accidental scroll-wheel value changes
+
+**Reported 2026-11-18.** Scrolling a panel over a spin box, combo box or
+slider changes its value by accident.
+
+**Acceptance.** These controls ignore the wheel unless they already have
+keyboard focus (clicked or tabbed into); the wheel then scrolls the
+surrounding panel instead. Wheel scrolling never gives them focus. Once
+focused, the wheel still adjusts the value. Timeline and scroll-area wheel
+behaviour is unchanged. A test covers unfocused vs focused wheel events.

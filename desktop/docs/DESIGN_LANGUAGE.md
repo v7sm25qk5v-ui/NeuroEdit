@@ -9,9 +9,10 @@ this brief is the contract for *where* each decision lands in code.
 
 ## Visual grammar
 
-1. **Warm light editor chrome by default.** The primary app shell follows the
-   Figma screenshot: cream canvas, bone panels, tan borders, near-black text,
-   and earthy accents. Dark remains available as the high-contrast alternate.
+1. **Watercolor-blue light chrome by default (NE-037, 2026-11-18).** Pale
+   washed-blue canvas and panels, blue-gray borders, charcoal text and charcoal
+   primary actions. Dark uses charcoal surfaces with a washed-blue primary.
+   (Replaces the earlier cream/tan Figma direction.)
 2. **Dark video canvas in every theme.** The video frame is always the
    brightest or most dominant thing on screen. Light mode keeps the preview
    near-black instead of turning the footage area into a white panel.
@@ -19,8 +20,9 @@ this brief is the contract for *where* each decision lands in code.
    contrast targets (see `tests/test_design_tokens.py`): body text ≥ 4.5:1,
    muted metadata ≥ 4.5:1, auxiliary/dim text ≥ 3:1, and filled button labels
    ≥ 3:1 so the preserved dark primary blue remains valid.
-4. **Modern rounded panels.** `RADIUS_SM/MD/LG` (7/8/12 px) — buttons and tabs
-   small, inputs/list rows/timeline blocks medium, dialogs/previews large.
+4. **Modern rounded panels.** `RADIUS_SM/MD/LG` (10/12/16 px, NE-039) — list
+   rows small, buttons/tabs/inputs/popups medium, dialogs/previews large.
+   Number fields use themed chevron steppers (NE-038).
 5. **Clear hierarchy between media / timeline / inspector areas.** Three-pane
    layout (media explorer · video column · inspector stack) over a full-width
    timeline; panes separated by `BORDER_SUBTLE` 1px lines, never heavy chrome.
@@ -30,28 +32,28 @@ this brief is the contract for *where* each decision lands in code.
    (unreviewed audio, missing markers). Emerald (`SUCCESS`) marks confirmed/
    export-ready states.
 7. **Pastel timeline semantics in light mode.** Video, audio, color/markers,
-   and narration/slides use peach, sage, amber, and mauve lanes. Dark mode
-   keeps the older high-contrast accent mapping.
+   and narration/slides use watercolor blue, sage, ochre, and lilac lanes. Dark mode
+   uses brighter versions of the same hues on charcoal.
 
 ## Token reference
 
 | Semantic token | Role | Light value | Dark value |
 |---|---|---|---|
-| `SURFACE_SUNKEN` | app background | `#f5f0e8` | `#090a0f` |
-| `SURFACE` | panels, timeline background | `#fffdf8` | `#10131a` |
-| `SURFACE_HEADER` | header, status bar, popovers | `#f0ebe2` | `#151923` |
-| `SURFACE_RAISED` | buttons, inputs, cards | `#fffaf1` | `#1b202b` |
-| `BG_HOVER` | hover fill | `#e8dfd2` | `#242a36` |
-| `BORDER_SUBTLE` / `BORDER_BRIGHT` | resting / engaged borders | `#d8cfc1` / `#b9aa98` | `#2c3340` / `#465161` |
-| `ACCENT_PRIMARY` (+`PRIMARY_HOVER`) | primary action, selection | `#1a1714` / `#332c25` | `#4f7cff` / `#3f68dc` |
-| `ACCENT_CLINICAL` | SAM / stills / captions cues | `#2f6f4e` | `#22d3ee` |
-| `ACCENT_SLIDES` | slides track + panel accent | `#8a5570` | `#8b5cf6` |
-| `DANGER` | destructive / privacy risk only | `#9f2f24` | `#ef4444` |
-| `WARNING` | non-blocking caution | `#76500f` | `#f59e0b` |
-| `SUCCESS` | confirmation / ready | `#276749` | `#10b981` |
-| `SELECTION_OUTLINE` | timeline selected block + snap guide | `#8f3f25` | `#FFD60A` |
-| `VIDEO_CANVAS` | video viewer background | `#11100e` | `#000000` |
-| `TEXT_PRIMARY` → `TEXT_DIM` | 4-step text ramp | `#1a1714 #635b52 #6f665c #8b8176` | `#e2e8f0 #94a3b8 #8093ab #64748b` |
+| `SURFACE_SUNKEN` | app background | `#e6ecf2` | `#161819` |
+| `SURFACE` | panels, timeline background | `#f5f8fb` | `#1c1f22` |
+| `SURFACE_HEADER` | header, status bar, popovers | `#dde5ed` | `#22262a` |
+| `SURFACE_RAISED` | buttons, inputs, cards | `#fbfcfe` | `#2a2e33` |
+| `BG_HOVER` | hover fill | `#d3dfea` | `#33383e` |
+| `BORDER_SUBTLE` / `BORDER_BRIGHT` | resting / engaged borders | `#c4d1dd` / `#93a7ba` | `#3a4047` / `#56606b` |
+| `ACCENT_PRIMARY` (+`PRIMARY_HOVER`) | primary action, selection | `#33383e` / `#4a5058` | `#8fb4d8` / `#a6c4e2` |
+| `ACCENT_CLINICAL` | SAM / stills / captions cues | `#2f6690` | `#7cc0dc` |
+| `ACCENT_SLIDES` | slides track + panel accent | `#76588a` | `#b6a0dc` |
+| `DANGER` | destructive / privacy risk only | `#9f2f24` | `#f26b6b` |
+| `WARNING` | non-blocking caution | `#76500f` | `#f5b23d` |
+| `SUCCESS` | confirmation / ready | `#276749` | `#3ccf93` |
+| `SELECTION_OUTLINE` | timeline selected block + snap guide | `#2a6fb0` | `#FFD60A` |
+| `VIDEO_CANVAS` | video viewer background | `#15171a` | `#000000` |
+| `TEXT_PRIMARY` → `TEXT_DIM` | 4-step text ramp | `#25292e #4a525b #56606b #77818c` | `#e7eaee #b4bcc5 #9ba5b0 #78828d` |
 
 `styles.py` owns both themes, the `appearance/themeMode` setting, the Qt
 palette, QSS sheet, and timeline semantic colors. Startup applies the saved
