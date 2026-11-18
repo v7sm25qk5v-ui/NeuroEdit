@@ -2,23 +2,27 @@ from __future__ import annotations
 
 import math
 import time
+from collections.abc import Callable
 
-from PySide6.QtCore import QPointF, QRectF, QSizeF, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, QSizeF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
     QFont,
     QFontMetricsF,
+    QImage,
     QPainter,
     QPen,
     QPixmap,
     QPolygonF,
+    QTransform,
 )
 from PySide6.QtMultimedia import QVideoFrame
 from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 from PySide6.QtWidgets import QFrame, QGraphicsObject, QGraphicsPixmapItem, QGraphicsScene, QGraphicsView, QWidget
 
 from neuroedit_desktop import diagnostics
+from neuroedit_desktop.annotation_label import annotation_label_layout, paint_annotation_label
 from neuroedit_desktop.captions import CaptionCue, build_caption_cues, cue_at_time, paint_caption
 from neuroedit_desktop.models import Annotation, ProjectState, new_id
 from neuroedit_desktop.stills import read_upright_image
@@ -256,11 +260,9 @@ class AnnotationGraphicsItem(QGraphicsObject):
             self._paint_arrow(painter, ann, w, h, color)
         elif ann.type == "brush":
             self._paint_brush(painter, ann, w, h)
-        elif ann.type == "text":
-            self._paint_text(painter, ann, w, h, color)
 
-        if not preview and ann.type in {"rect", "ellipse", "arrow"}:
-            self._paint_attached_label(painter, ann, w, h, color)
+        if ann.type == "text" or (not preview and ann.type in {"rect", "ellipse", "arrow"}):
+            paint_annotation_label(painter, ann, w, h, color)
 
         if not preview and self.project.selected_annotation_id == ann.id:
             self._paint_selection(painter, ann, w, h)
@@ -287,32 +289,6 @@ class AnnotationGraphicsItem(QGraphicsObject):
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
         painter.setPen(pen)
         painter.drawPolyline(polyline)
-
-    def _paint_text(
-        self,
-        painter: QPainter,
-        ann: Annotation,
-        w: float,
-        h: float,
-        color: QColor,
-    ) -> None:
-        label = ann.label or "Text"
-        x = float(ann.geometry.get("x", 0.5)) * w
-        y = float(ann.geometry.get("y", 0.5)) * h
-        font = QFont(painter.font())
-        font.setPointSize(max(8, int(ann.font_size or 15)))
-        font.setBold(True)
-        painter.setFont(font)
-        metrics = QFontMetricsF(font)
-        text_rect = metrics.boundingRect(label).adjusted(-10, -6, 10, 6)
-        text_rect.moveTopLeft(QPointF(x, y))
-        bg = QColor("#000000")
-        bg.setAlpha(160)
-        painter.setPen(QPen(color, 1))
-        painter.setBrush(QBrush(bg))
-        painter.drawRoundedRect(text_rect, 6, 6)
-        painter.setPen(color)
-        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, label)
 
     def _paint_selection(self, painter: QPainter, ann: Annotation, w: float, h: float) -> None:
         bounds = self.selection_bounds(ann, w, h)
@@ -345,16 +321,8 @@ class AnnotationGraphicsItem(QGraphicsObject):
             return QRectF(QPointF(min(x1, x2), min(y1, y2)),
                           QPointF(max(x1, x2), max(y1, y2)))
         if ann.type == "text":
-            label = ann.label or "Text"
-            font = QFont()
-            font.setPointSize(max(8, int(ann.font_size or 15)))
-            font.setBold(True)
-            metrics = QFontMetricsF(font)
-            x = float(ann.geometry.get("x", 0.5)) * w
-            y = float(ann.geometry.get("y", 0.5)) * h
-            rect = metrics.boundingRect(label).adjusted(-10, -6, 10, 6)
-            rect.moveTopLeft(QPointF(x, y))
-            return rect
+            layout = annotation_label_layout(ann, w, h)
+            return layout.box if layout is not None else None
         if ann.type == "brush":
             points = ann.geometry.get("points", [])
             if not isinstance(points, list) or not points:
@@ -428,15 +396,6 @@ class AnnotationGraphicsItem(QGraphicsObject):
                 return ann
         return None
 
-    def hit_test_attached_label(self, ann: Annotation, norm_x: float, norm_y: float) -> bool:
-        w, h = self._size.width(), self._size.height()
-        if w <= 0 or h <= 0:
-            return False
-        rect = self.attached_label_rect(ann, w, h)
-        if rect is None:
-            return False
-        return rect.contains(QPointF(norm_x * w, norm_y * h))
-
     def hit_test_handle(
         self, ann: Annotation, norm_x: float, norm_y: float
     ) -> int | None:
@@ -494,67 +453,11 @@ class AnnotationGraphicsItem(QGraphicsObject):
         painter.setBrush(QBrush(color))
         painter.drawPolygon(QPolygonF([end, left, right]))
 
-    def _label_should_show(self, ann: Annotation) -> bool:
-        if not getattr(ann, "show_label", True):
-            return False
-        label = ann.label.strip()
-        if not label:
-            return False
-        return label.lower() != ann.type
-
     def attached_label_rect(self, ann: Annotation, w: float, h: float) -> QRectF | None:
-        if ann.type not in {"rect", "ellipse", "arrow"} or not self._label_should_show(ann):
+        if ann.type not in {"rect", "ellipse", "arrow"}:
             return None
-        label = ann.label.strip()
-        font = QFont()
-        font.setPointSize(max(8, int(ann.font_size or 15)))
-        font.setBold(True)
-        metrics = QFontMetricsF(font)
-        text_rect = QRectF(metrics.boundingRect(label).adjusted(-8, -5, 8, 5))
-
-        if ann.type == "arrow":
-            anchor = QPointF(
-                float(ann.geometry.get("x1", 0.0)) * w + 10,
-                float(ann.geometry.get("y1", 0.0)) * h - text_rect.height() - 8,
-            )
-            if anchor.y() < 0:
-                anchor.setY(float(ann.geometry.get("y1", 0.0)) * h + 8)
-        else:
-            bounds = self._rect_from_geometry(ann, w, h)
-            anchor = bounds.topLeft() + QPointF(0, -text_rect.height() - 8)
-            if anchor.y() < 0:
-                anchor = bounds.bottomLeft() + QPointF(0, 8)
-
-        anchor += QPointF(
-            float(ann.geometry.get("label_dx", 0.0)) * w,
-            float(ann.geometry.get("label_dy", 0.0)) * h,
-        )
-        text_rect.moveTopLeft(anchor)
-        return text_rect
-
-    def _paint_attached_label(
-        self,
-        painter: QPainter,
-        ann: Annotation,
-        w: float,
-        h: float,
-        color: QColor,
-    ) -> None:
-        label = ann.label.strip()
-        text_rect = self.attached_label_rect(ann, w, h)
-        if text_rect is None:
-            return
-        font = QFont(painter.font())
-        font.setPointSize(max(8, int(ann.font_size or 15)))
-        font.setBold(True)
-        painter.setFont(font)
-        bg = QColor("#000000")
-        bg.setAlpha(170)
-        painter.setPen(QPen(color, 1))
-        painter.setBrush(QBrush(bg))
-        painter.drawRoundedRect(text_rect, 6, 6)
-        painter.setPen(QColor("#ffffff"))
-        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, label)
+        layout = annotation_label_layout(ann, w, h)
+        return layout.box if layout is not None else None
 
     def _active_slide(self):
         # Half-open end (`<`) to match exporter._slide_at_time so preview and export
@@ -790,6 +693,7 @@ class VideoGraphicsView(QGraphicsView):
     scene so macOS paints annotations over the video's Metal surface correctly."""
 
     cue_frame_changed = Signal(QVideoFrame)
+    scrub_seek_failed = Signal()
     sam_point_added = Signal(float, float)
     annotation_added = Signal(Annotation)
     selection_changed = Signal(object)  # annotation id or None
@@ -845,6 +749,18 @@ class VideoGraphicsView(QGraphicsView):
         self.image_item.setVisible(False)
         scene.addItem(self.image_item)
 
+        # A drag preview shares the annotation surface, including redactions.
+        self.scrub_item = QGraphicsPixmapItem()
+        self.scrub_item.setZValue(5)
+        self.scrub_item.setVisible(False)
+        scene.addItem(self.scrub_item)
+        self._showing_scrub = False
+        self._scrub_seek_ms: int | None = None
+        self._scrub_seek_allowed: Callable[[float], bool] | None = None
+        self._scrub_seek_timer = QTimer(self)
+        self._scrub_seek_timer.setSingleShot(True)
+        self._scrub_seek_timer.timeout.connect(self._fail_scrub_seek)
+
         self.annotation_item = AnnotationGraphicsItem(project, self.video_item)
         self.annotation_item.set_size(self.video_item.size())
         scene.addItem(self.annotation_item)
@@ -862,6 +778,10 @@ class VideoGraphicsView(QGraphicsView):
         self._fit()
 
     def _native_size_changed(self, size: QSizeF) -> None:
+        if not self._showing_scrub:
+            self._set_frame_size(size)
+
+    def _set_frame_size(self, size: QSizeF) -> None:
         if size.width() > 0 and size.height() > 0:
             self.video_item.setSize(size)
             self.annotation_item.set_size(size)
@@ -870,6 +790,24 @@ class VideoGraphicsView(QGraphicsView):
             self._fit()
 
     def _video_frame_changed(self, frame: QVideoFrame) -> None:
+        if self._showing_scrub:
+            if self._scrub_seek_ms is None or not frame.isValid():
+                return
+            target_us = self._scrub_seek_ms * 1000
+            start = frame.startTime()
+            # Ignore a frame from before the seek, in either direction. The
+            # FFmpeg backend can render the first frame after an interior VFR
+            # seek. Allow that wider gap only with matching timed redactions.
+            allowed = self._scrub_seek_allowed
+            lookahead_us = 250_000 if allowed is not None else 50_000
+            if (start < 0 or start > target_us + lookahead_us
+                    or max(start, frame.endTime()) < target_us - 50_000
+                    or (allowed is not None and not allowed(start / 1_000_000))):
+                return
+            self.clear_scrub_frame()
+            self.video_item.setVisible(True)
+            size = self.video_item.nativeSize()
+            self._set_frame_size(QSizeF(frame.size()) if size.isEmpty() else size)
         if not frame.isValid():
             # EndOfMedia can clear the surface just before the timeline clock
             # crosses the cut. Keep that last frame through the handoff too.
@@ -887,6 +825,59 @@ class VideoGraphicsView(QGraphicsView):
                 return
             self.clear_video_transition()
         self._last_video_frame = QVideoFrame(frame)
+
+    def show_scrub_frame(self, image: QImage | None, size: tuple[int, int] | None = None) -> None:
+        self.clear_video_transition()
+        self._showing_scrub = True
+        self._scrub_seek_ms = None
+        self._scrub_seek_allowed = None
+        self._scrub_seek_timer.stop()
+        self.video_item.setVisible(False)
+        self.image_item.setVisible(False)
+        if image is None:
+            self.scrub_item.setPixmap(QPixmap())
+            self.scrub_item.setVisible(False)
+            return
+        self.scrub_item.setPixmap(QPixmap.fromImage(image))
+        width, height = size or (image.width(), image.height())
+        self.scrub_item.setTransform(QTransform.fromScale(width / image.width(), height / image.height()))
+        self._set_frame_size(QSizeF(width, height))
+        self.scrub_item.setVisible(True)
+
+    @property
+    def showing_scrub_frame(self) -> bool:
+        return self._showing_scrub
+
+    @property
+    def waiting_scrub_seek(self) -> bool:
+        return self._showing_scrub and self._scrub_seek_ms is not None
+
+    def arm_scrub_seek(
+        self, target_ms: int, *, use_current_frame: bool = False,
+        allowed: Callable[[float], bool] | None = None,
+    ) -> None:
+        self._scrub_seek_ms = target_ms
+        self._scrub_seek_allowed = allowed
+        self.watch_scrub_seek()
+        if use_current_frame:
+            frame = self.video_item.videoSink().videoFrame()
+            if 0 <= frame.startTime() <= target_ms * 1000 <= frame.endTime():
+                self._video_frame_changed(frame)
+
+    def watch_scrub_seek(self) -> None:
+        self._scrub_seek_timer.start(4000)
+
+    def _fail_scrub_seek(self) -> None:
+        self.clear_scrub_frame()
+        self.scrub_seek_failed.emit()
+
+    def clear_scrub_frame(self) -> None:
+        self._showing_scrub = False
+        self._scrub_seek_ms = None
+        self._scrub_seek_allowed = None
+        self._scrub_seek_timer.stop()
+        self.scrub_item.setVisible(False)
+        self.scrub_item.setPixmap(QPixmap())
 
     def begin_video_transition(self, target_ms: int) -> None:
         self._transition_target_ms = target_ms
@@ -935,7 +926,7 @@ class VideoGraphicsView(QGraphicsView):
         if not path:
             self.image_item.setPixmap(QPixmap())
             self.image_item.setVisible(False)
-            self.video_item.setVisible(True)
+            self.video_item.setVisible(not self._showing_scrub)
             return
         # Same decoder as import and export, so orientation always agrees.
         pix = QPixmap.fromImage(read_upright_image(path))
@@ -980,7 +971,7 @@ class VideoGraphicsView(QGraphicsView):
         self._fit()
 
     def _fit(self) -> None:
-        rect = self.video_item.boundingRect()
+        rect = self.sceneRect() if self._showing_scrub else self.video_item.boundingRect()
         if rect.width() <= 0 or rect.height() <= 0:
             return
         self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
@@ -1000,7 +991,7 @@ class VideoGraphicsView(QGraphicsView):
 
     def _scene_to_norm(self, event_pos, clamp: bool = False) -> tuple[float, float] | None:
         scene_pos = self.mapToScene(event_pos)
-        rect = self.video_item.boundingRect()
+        rect = self.sceneRect() if self._showing_scrub else self.video_item.boundingRect()
         if rect.width() <= 0 or rect.height() <= 0:
             return None
         x = scene_pos.x() / rect.width()
@@ -1330,17 +1321,10 @@ class VideoGraphicsView(QGraphicsView):
         current = next(
             (a for a in project.annotations if a.id == current_id), None
         ) if current_id else None
+        size = self.annotation_item.boundingRect().size()
+        w, h = size.width(), size.height()
 
         if current is not None:
-            if (
-                current.type in {"rect", "ellipse", "arrow"}
-                and self.annotation_item.hit_test_attached_label(current, *norm)
-            ):
-                self._select_mode = "label"
-                self._select_target_id = current.id
-                self._select_start_geometry = dict(current.geometry)
-                self._drag_start = norm
-                return
             handle = self.annotation_item.hit_test_handle(current, *norm)
             if handle is not None:
                 self._select_mode = "resize"
@@ -1349,6 +1333,18 @@ class VideoGraphicsView(QGraphicsView):
                 self._select_start_geometry = dict(current.geometry)
                 self._drag_start = norm
                 return
+            if current.type in {"rect", "ellipse", "arrow"}:
+                layout = annotation_label_layout(current, w, h)
+                if layout is not None and layout.box.contains(QPointF(norm[0] * w, norm[1] * h)):
+                    self._select_mode = "label"
+                    self._select_target_id = current.id
+                    start = self._select_start_geometry = dict(current.geometry)
+                    # Drag from the displayed box, even when its saved anchor
+                    # put it past an edge before fitting the label.
+                    start["label_dx"] = float(start.get("label_dx", 0.0)) + layout.frame_shift.x() / w
+                    start["label_dy"] = float(start.get("label_dy", 0.0)) + layout.frame_shift.y() / h
+                    self._drag_start = norm
+                    return
 
         hit = self.annotation_item.hit_test(*norm)
         if hit is None:
@@ -1363,6 +1359,11 @@ class VideoGraphicsView(QGraphicsView):
         self._select_mode = "move"
         self._select_target_id = hit.id
         self._select_start_geometry = dict(hit.geometry)
+        if hit.type == "text":
+            layout = annotation_label_layout(hit, w, h)
+            if layout is not None:
+                self._select_start_geometry["x"] = layout.box.x() / w
+                self._select_start_geometry["y"] = layout.box.y() / h
         self._drag_start = norm
         self.annotation_item.update()
 

@@ -1017,3 +1017,33 @@ Windows fixture setup blocker. Hosted Windows now runs: 741 passed, 17 failed,
 file/mask cleanup and relative-time assertions; determine runtime defects versus
 test portability issues before closing. Windows Ruff and installer build passed;
 actual installer/update/restart behavior still needs native smoke verification.
+
+## NE-033 — Fit annotation labels inside the frame
+
+**Reported 2026-11-18.** A label reading “Resection cavity” can lose its first
+and last characters when the font or placement exceeds the available box.
+
+**Acceptance.** Fit the complete text inside its background and the video
+frame. Grow and reposition the box first, with wrapping or font reduction as
+needed. Preview selection and burned-in export must follow the fitted geometry.
+
+**Status:** Verified (software), 2026-11-18. Sol approved shared label layout.
+Preview and export matched on the reported text near the frame edge. Tests
+also cover oversized multiline text and dragging a fitted label.
+
+## NE-034 — Show frames during scrubbing and fill visible filmstrips sooner
+
+**Reported 2026-11-18.** Viewer feedback still lags while dragging the playhead,
+and visible filmstrips can be incomplete after opening a project.
+
+**Acceptance.** The viewer presents frames during the drag and settles at the
+exact release point. Old frames cannot cross clip, project, or cover-slide
+boundaries, and timed redactions remain correct for the displayed frame.
+Visible thumbnails load progressively without blocking editing. Verify with
+synthetic encoded footage and retain the existing filmstrip protection for
+redacted sources.
+
+**Status:** Verified (software), 2026-11-18. Synthetic tests verify picture
+changes while dragging, exact release, source and aspect changes, timed
+redaction boundaries, and progressive visible filmstrip loading. Installed-app
+playback with the user's footage and native Windows remain open.

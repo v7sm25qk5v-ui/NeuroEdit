@@ -14,7 +14,8 @@ ThumbnailKey = tuple[str, int]
 _CACHE_SIZE = 192
 _CACHE_SECONDS = 45
 MAX_VISIBLE_THUMBNAILS = 96
-_BATCH_SIZE = 4
+_BATCH_SIZE = 6
+_POLL_MS = 12
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="timeline-thumbnails")
 _running_decode: Future | None = None
 
@@ -33,13 +34,36 @@ def _decode_thumbnails(path: str, times_ms: list[int], stop: Event) -> dict[int,
             cv2.CAP_PROP_READ_TIMEOUT_MSEC, 800,
         ]):
             return {}
-        for ms in times_ms:
+        # Nearby tiles on a long GOP can share the frames already decoded by
+        # the last seek. Grabbing forward avoids reconstructing the entire GOP
+        # again for each thumbnail and skips conversion of intermediate frames.
+        previous_ms = -1.0
+        for ms in sorted(times_ms):
             if stop.is_set():
                 break
-            if not cap.set(cv2.CAP_PROP_POS_MSEC, ms):
-                continue
-            ok, frame = cap.read()
+            grabbed = False
+            if 0 <= previous_ms <= ms and ms - previous_ms <= 1000:
+                for _ in range(60):
+                    if previous_ms >= ms:
+                        break
+                    if stop.is_set() or not cap.grab():
+                        break
+                    current_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
+                    if not current_ms > previous_ms:
+                        break
+                    previous_ms = current_ms
+                grabbed = previous_ms >= ms
+            if stop.is_set():
+                break
+            if grabbed:
+                ok, frame = cap.retrieve()
+            else:
+                previous_ms = -1.0
+                if not cap.set(cv2.CAP_PROP_POS_MSEC, ms):
+                    continue
+                ok, frame = cap.read()
             if ok and frame is not None:
+                previous_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
                 height, width = frame.shape[:2]
                 scale = min(1.0, 96 / width, 54 / height)
                 frame = cv2.resize(frame, (max(1, round(width * scale)), max(1, round(height * scale))),
@@ -78,7 +102,7 @@ class TimelineThumbnails(QObject):
             self._cache.move_to_end(key)
             return entry[1]
         if entry is not None and not self._timer.isActive():
-            self._timer.start(70)
+            self._timer.start(0)
         return None
 
     def show(self, keys: list[ThumbnailKey]) -> None:
@@ -86,8 +110,12 @@ class TimelineThumbnails(QObject):
             self.pause()
             return
         self._wanted = tuple(dict.fromkeys(keys))[:MAX_VISIBLE_THUMBNAILS]
+        if self._active is not None:
+            _, batch_keys, stop = self._active
+            if not any(key in self._wanted for key in batch_keys):
+                stop.set()
         if not self._timer.isActive():
-            self._timer.start(70)
+            self._timer.start(0)
 
     def pause(self) -> None:
         self._wanted = ()
@@ -105,7 +133,7 @@ class TimelineThumbnails(QObject):
         if self._active is not None:
             future, keys, stop = self._active
             if not future.done():
-                self._timer.start(30)
+                self._timer.start(_POLL_MS)
                 return
             self._active = None
             if self._accept_active:
@@ -129,6 +157,13 @@ class TimelineThumbnails(QObject):
             return
         path = pending[0][0]
         keys = [key for key in pending if key[0] == path][:_BATCH_SIZE]
+        # Load one still from each new source before filling its strip. A slow
+        # source should not make the entire viewport wait for several seeks.
+        seen_paths = {key[0] for key in self._cache}
+        unseen = next((key for key in pending if key[0] not in seen_paths), None)
+        if unseen is not None:
+            path = unseen[0]
+            keys = [unseen]
         # Submission is coordinated on the GUI thread. Never enqueue stale work
         # behind another canvas or hand worker ownership to Qt.
         if _running_decode is None or _running_decode.done():
@@ -136,4 +171,4 @@ class TimelineThumbnails(QObject):
             _running_decode = _executor.submit(_decode_batch, path, [key[1] for key in keys], stop)
             self._active = _running_decode, keys, stop
             self._accept_active = True
-        self._timer.start(30)
+        self._timer.start(_POLL_MS)

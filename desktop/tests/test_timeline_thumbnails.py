@@ -81,6 +81,40 @@ def test_redaction_drops_raw_linked_clip_thumbnails_even_after_caching(app, monk
         scroll.close()
 
 
+def test_open_timeline_populates_visible_sources_before_filling_their_strips(app, monkeypatch):
+    batches = []
+
+    def decode(path, times, _stop):
+        batches.append((path, times))
+        image = QImage(96, 54, QImage.Format.Format_RGB32)
+        image.fill(QColor("blue"))
+        return {ms: image for ms in times}
+
+    monkeypatch.setattr(timeline_thumbnails, "_decode_thumbnails", decode)
+    clips = [
+        VideoClip(id=str(i), path=f"/tmp/clip-{i}.mp4", name=f"Clip {i}",
+                  start_time=4 * i, trim_start=0, trim_end=4)
+        for i in range(4)
+    ]
+    canvas = TimelineCanvas(ProjectState(clips=clips, zoom=100.0))
+    scroll = QScrollArea()
+    scroll.resize(875, 310)
+    scroll.setWidget(canvas)
+    scroll.show()
+    try:
+        deadline = monotonic() + 5
+        while not canvas._filmstrip_tiles or any(
+                canvas._thumbnails.image(key) is None for key, _ in canvas._filmstrip_tiles):
+            assert monotonic() < deadline, "Visible filmstrip did not finish loading"
+            QTest.qWait(20)
+        assert len(canvas._filmstrip_tiles) > 6
+        assert batches[0][0] == clips[0].path and len(batches[0][1]) == 1
+        assert batches[1][0] == clips[1].path and len(batches[1][1]) == 1
+        assert {path for path, _ in batches} == {clips[0].path, clips[1].path}
+    finally:
+        scroll.close()
+
+
 def test_decoder_returns_small_stills_at_the_requested_source_times(tmp_path):
     from neuroedit_desktop.exporter import resolve_ffmpeg
 

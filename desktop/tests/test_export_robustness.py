@@ -241,34 +241,22 @@ def test_g_report_warns_and_omits_free_text(tmp_path):
 
 # ------------------------------------------------------------------ h
 
-def _painter():
-    image = QImage(400, 200, QImage.Format.Format_RGB888)
-    return image, QPainter(image)
-
-
 @pytest.mark.parametrize("kind", ["rect", "text"])
 def test_h_zero_font_size_matches_preview_rule(qt_app, kind):
-    def size_for(font_size):
+    def render(font_size):
         project = ProjectState()
         ann = Annotation(id="a", type=kind, frame_time=0.0, ann_duration=0.0, color="#ff0000",
                          label="hello", font_size=font_size,
                          geometry={"x": 0.1, "y": 0.3, "width": 0.3, "height": 0.3})
         exp = ProjectExporter(project, ExportSettings(Path("x.mp4"), 400, 200, 30, 20, "t"))
-        image, painter = _painter()
-        from PySide6.QtGui import QColor
-        if kind == "rect":
-            exp._paint_attached_label(painter, ann, 400, 200, QColor("#ff0000"))
-            rect = exp._attached_label_rect(ann, 400, 200)
-        else:
-            exp._paint_text_label(painter, ann, 400, 200, QColor("#ff0000"))
-            rect = None
-        point = painter.font().pointSize()
+        image = QImage(400, 200, QImage.Format.Format_RGB888)
+        image.fill(0)
+        painter = QPainter(image)
+        exp._paint_annotation_shape(painter, ann, 400, 200)
         painter.end()
-        return point, rect
+        return image
 
-    zero_pt, zero_rect = size_for(0)
-    assert zero_pt == 15
-    assert (zero_pt, zero_rect) == size_for(15)
+    assert render(0) == render(15)
 
 
 # ------------------------------------------------------------------ i

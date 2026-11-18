@@ -1,5 +1,31 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-18 — Fit labels and show frames while dragging the playhead
+
+- Added NE-033 and NE-034 in `CODING_TICKETS.md`. GPT-6.2 Sol at extra-high
+  reasoning reviewed the approaches and working changes. Separate agents
+  implemented label fitting and the scrub viewer.
+- Preview and export share annotation label layout and painting. The backing
+  box follows its text and shifts inside the frame. Oversized text wraps or
+  shrinks. Selection and drags use the fitted box. A synthetic image reproduced
+  the original “Resection cavity” case near a frame edge.
+- The editor shows background-decoded video frames during a timeline drag.
+  It keeps the newest requested position, checks clip identity and redaction
+  timing before displaying the frame, and uses the native player for the exact
+  release seek. Filmstrip decoding pauses during the drag.
+- Visible filmstrips schedule a first still for each source before filling the
+  rest of its strip. Nearby thumbnails reuse decoded frames. In a synthetic
+  1080p long-GOP clip, six adjacent stills took a median of 0.33 seconds versus
+  1.65 seconds before the change. The startup test covers multiple visible
+  batches and confirms that offscreen clips do not delay those results.
+- Full macOS offscreen suite passed 849 tests with two existing Qt warnings.
+  After the final deferred-seek callback and sparse-frame handoff fixes, 129
+  affected tests passed, including the real landscape-to-portrait drag and
+  exact native seek. Ruff and `git diff --check` passed. Native Windows and
+  installed-app playback with the user's footage remain untested.
+- Prepared for release as `v0.5.24-alpha` on 2026-11-18, with the
+  package version, README download links, and tagged release notes aligned.
+
 ## 2026-11-18 — Timeline filmstrips published in v0.5.23-alpha.1
 
 - Published [v0.5.23-alpha.1](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.23-alpha.1)

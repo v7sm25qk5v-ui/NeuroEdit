@@ -97,6 +97,7 @@ from neuroedit_desktop.ui.export_workflow import ExportWorkflowMixin
 from neuroedit_desktop.ui.audio_preview import AudioPreview
 from neuroedit_desktop.ui.history import HistoryMixin
 from neuroedit_desktop.ui.media_import_worker import MediaImportWorker
+from neuroedit_desktop.ui.scrub_preview import ScrubDecoder, ScrubFrame, ScrubTarget
 from neuroedit_desktop.ui.labels_panel import (
     ANATOMY_PRESETS,
     SWATCH_COLORS,
@@ -329,6 +330,15 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         return super().eventFilter(watched, event)
 
     def _build_media(self) -> None:
+        self._scrub_project: ProjectState | None = None
+        self._scrub_decoder: ScrubDecoder | None = None
+        self._scrub_target: ScrubTarget | None = None
+        self._scrub_frame: ScrubFrame | None = None
+        self._scrub_resume_play = False
+        self._scrub_frame_timer = QTimer(self)
+        self._scrub_frame_timer.setInterval(16)
+        self._scrub_frame_timer.timeout.connect(self._poll_scrub_frame)
+        self._scrub_still: str | None = None
         self.player = QMediaPlayer(self)
         self.audio = QAudioOutput(self)
         self.player.setAudioOutput(self.audio)
@@ -955,6 +965,10 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         # Timeline
         self.timeline = RichTimelineWidget(self.project)
         self.timeline.seek_requested.connect(self._seek_global)
+        self.timeline.scrub_requested.connect(self._preview_scrub)
+        self.timeline.scrub_finished.connect(self._finish_scrub)
+        self.timeline.scrub_cancelled.connect(self._settle_cancelled_scrub)
+        self.video_view.scrub_seek_failed.connect(self._on_scrub_seek_failed)
         self.timeline.project_changed.connect(self._mark_review_relevant_project_dirty)
         self.timeline.view_changed.connect(self._mark_timeline_view_dirty)
         self.timeline.item_activated.connect(self._timeline_item_activated)
@@ -1128,6 +1142,9 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
     # ── Refresh ───────────────────────────────────────────────────────────
 
     def refresh(self) -> None:
+        if (getattr(self.video_view, "showing_scrub_frame", False)
+                and self.video_view.annotation_item.project is not self.project):
+            self._seek_global(self.project.current_time)
         self.project_name.blockSignals(True)
         self.project_name.setText(self.project.project_name)
         self.project_name.blockSignals(False)
@@ -1267,6 +1284,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         *, history: tuple[list[bytes], list[bytes]] | None = None,
     ) -> None:
         self._flush_pending_edits()  # record it against the project it belongs to
+        self._cancel_scrub_preview()
         overlay = getattr(self, "_tutorial_overlay", None)
         if overlay is not None:
             overlay.close()
@@ -2503,7 +2521,136 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
     def _step_frame(self, direction: int) -> None:
         self._seek_global(self.project.current_time + direction / 30)
 
-    def _seek_global(self, time_s: float) -> None:
+    def _scrub_target_at(self, time_s: float) -> ScrubTarget | None:
+        clip = self._clip_at_time(time_s)
+        slide = self._slide_at_time(time_s)
+        if clip is None or clip.media_type == "image" or (slide is not None and not slide.overlay):
+            return None
+        source_ms = round((clip.trim_start + time_s - clip.start_time) * 1000)
+        return ScrubTarget(clip.id, clip.path, clip.start_time, clip.trim_start, clip.trim_end, source_ms)
+
+    def _can_show_scrub_frame(
+        self, frame: ScrubFrame | None, target: ScrubTarget | None, requested_time: float,
+    ) -> bool:
+        if frame is None or target is None or frame.target.clip_key != target.clip_key:
+            return False
+        source_time = frame.source_ms / 1000
+        if not target.trim_start <= source_time < target.trim_end:
+            return False
+        frame_time = target.start + source_time - target.trim_start
+        actual = self._scrub_target_at(frame_time)
+        if actual is None or actual.clip_key != target.clip_key:
+            return False
+        # The annotation item paints at requested time. Never reuse a raw
+        # frame whose timed redactions are different from that paint state.
+        return all(ann.is_visible_at(frame_time) == ann.is_visible_at(requested_time)
+                   for ann in self.project.annotations if ann.type == "redact")
+
+    def _preview_scrub(self, time_s: float) -> None:
+        if self._scrub_project is not self.project:
+            self._cancel_scrub_preview()
+            self._scrub_project = self.project
+            self._scrub_resume_play = self._timeline_playing
+            self._timeline_playing = False
+            self.timeline_clock.stop()
+            self.player.pause()
+            self.audio_preview.stop()
+            self._pending_seek_ms = None
+            self._pending_play = False
+            self._clear_cue(release=True)
+
+        previous_time = self.project.current_time
+        self.project.duration = self._project_end_time()
+        self.project.current_time = max(0.0, min(time_s, self.project.duration))
+        target = self._scrub_target_at(self.project.current_time)
+        self._scrub_target = target
+        if target is None:
+            self._scrub_frame = None
+            clip = self._clip_at_time(self.project.current_time)
+            slide = self._slide_at_time(self.project.current_time)
+            still = clip.path if (clip is not None and clip.media_type == "image"
+                                  and (slide is None or slide.overlay)) else None
+            if still is None or still != self._scrub_still:
+                self.video_view.show_scrub_frame(None)
+                if still is not None:
+                    image = _read_upright_image(Path(still))
+                    if not image.isNull():
+                        self.video_view.show_scrub_frame(image)
+            self._scrub_still = still
+        else:
+            self._scrub_still = None
+            if not self._can_show_scrub_frame(self._scrub_frame, target, self.project.current_time):
+                self._scrub_frame = None
+                self.video_view.show_scrub_frame(None)
+            if self._scrub_decoder is None:
+                self._scrub_decoder = ScrubDecoder()
+                self._scrub_frame_timer.start()
+            self._scrub_decoder.request(target)
+        self.timeline.refresh_playhead(previous_time)
+        self.video_view.update_annotations()
+        self.time_label.setText(format_time(self.project.current_time))
+
+    def _poll_scrub_frame(self) -> None:
+        if self._scrub_project is not self.project:
+            self._cancel_scrub_preview()
+            return
+        if self._scrub_decoder is None:
+            return
+        frame = self._scrub_decoder.take()
+        if frame is not None and self._can_show_scrub_frame(frame, self._scrub_target, self.project.current_time):
+            self._scrub_frame = frame
+            self.video_view.show_scrub_frame(frame.image, frame.size)
+
+    def _stop_scrub_decoder(self) -> None:
+        self._scrub_frame_timer.stop()
+        if self._scrub_decoder is not None:
+            self._scrub_decoder.close()
+            self._scrub_decoder = None
+        self._scrub_project = None
+        self._scrub_frame = None
+        self._scrub_target = None
+        self._scrub_still = None
+        self._scrub_resume_play = False
+
+    def _cancel_scrub_preview(self) -> None:
+        if getattr(self, "_scrub_frame_timer", None) is None:
+            return
+        self._stop_scrub_decoder()
+        self.video_view.clear_scrub_frame()
+
+    def _settle_cancelled_scrub(self) -> None:
+        if self._scrub_project is self.project and not getattr(self, "_closing", False):
+            self._finish_scrub(self.project.current_time)
+
+    def _on_scrub_seek_failed(self) -> None:
+        self._timeline_playing = False
+        self._pending_seek_ms = None
+        self._pending_play = False
+        self.timeline_clock.stop()
+        self.player.pause()
+        self.audio_preview.stop()
+        self.play_button.setText("▶")
+        self.statusBar().showMessage("The viewer could not display the requested frame. Try seeking again.", 5000)
+
+    def _finish_scrub(self, time_s: float) -> None:
+        time_s = max(0.0, min(time_s, self._project_end_time()))
+        target = self._scrub_target_at(time_s)
+        if target is None:
+            self.video_view.clear_scrub_frame()
+        elif not self._can_show_scrub_frame(self._scrub_frame, target, time_s):
+            self.video_view.show_scrub_frame(None)
+        resume = self._scrub_resume_play
+        self._stop_scrub_decoder()
+        self._timeline_playing = resume
+        self._seek_global(time_s, preserve_scrub_frame=True)
+        if resume:
+            self.timeline_clock.start()
+
+    def _seek_global(self, time_s: float, *, preserve_scrub_frame: bool = False) -> None:
+        if getattr(self, "_scrub_project", None) is not None:
+            self._stop_scrub_decoder()
+        if not preserve_scrub_frame and getattr(self.video_view, "showing_scrub_frame", False):
+            self.video_view.show_scrub_frame(None)
         previous_time = self.project.current_time
         previous_clip = self.project.active_clip_id
         previous_duration = self.project.duration
@@ -2568,7 +2715,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         # A clip's source is still loading toward its deferred seek: hold the
         # playhead here for the few ms until _media_status_changed seeks+plays,
         # so we don't advance past it or re-issue a play() that starts at 0.
-        if self._pending_seek_ms is not None:
+        if self._pending_seek_ms is not None or getattr(self.video_view, "waiting_scrub_seek", False):
             self.audio_preview.sync(self.project, False)
             return
 
@@ -2628,15 +2775,21 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             self.player.pause()
             if not self.player.source().isEmpty():
                 self.player.setSource(QUrl())
+            if getattr(self.video_view, "showing_scrub_frame", False):
+                self.video_view.clear_scrub_frame()
             self.video_view.show_black()
             return
         if slide is not None and not slide.overlay:
+            if getattr(self.video_view, "showing_scrub_frame", False):
+                self.video_view.clear_scrub_frame()
             self.player.pause()
             self.video_view.update_annotations()
             return
 
         problem = self._cached_clip_media_problem(clip)
         if problem is not None:
+            if getattr(self.video_view, "showing_scrub_frame", False):
+                self.video_view.clear_scrub_frame()
             self.player.pause()
             self.player.setSource(QUrl())
             self.video_view.set_image(None)
@@ -2649,6 +2802,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             self.project.active_clip_id = clip.id
 
         if clip.media_type == "image":
+            if getattr(self.video_view, "showing_scrub_frame", False):
+                self.video_view.clear_scrub_frame()
             # Switch the view to the image; never feed it to QMediaPlayer.
             if clip_changed or not self.video_view.image_item.isVisible():
                 self.player.stop()
@@ -2677,11 +2832,14 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             self.player.setPlaybackRate(self.project.playback_rate)
             self._pending_seek_ms = target_ms
             self._pending_play = play
+            if getattr(self.video_view, "showing_scrub_frame", False):
+                self.video_view.watch_scrub_seek()
             if not exact_seek:
                 self.audio_preview.sync(self.project, False)
             self._media_status_changed(self.player.mediaStatus())
             return
-        if not self.video_view.video_item.isVisible():
+        showing_scrub = getattr(self.video_view, "showing_scrub_frame", False)
+        if not self.video_view.video_item.isVisible() and not showing_scrub:
             self.video_view.set_image(None)
         if self._pending_seek_ms is not None:
             self._pending_seek_ms = target_ms
@@ -2690,8 +2848,9 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self._pending_seek_ms = None
         # The tolerance avoids needless seeks at contiguous playback cuts.
         # User seeks, including frame stepping, must reach the exact position.
-        if abs(self.player.position() - target_ms) > (0 if exact_seek else 80):
-            self.player.setPosition(target_ms)
+        if (showing_scrub
+                or abs(self.player.position() - target_ms) > (0 if exact_seek else 80)):
+            self._set_video_position(target_ms, use_current_frame=self.player.position() == target_ms)
         if play:
             self.player.play()
 
@@ -2705,18 +2864,43 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             self._pending_seek_ms = None
             self._pending_play = False
             self.video_view.clear_video_transition()
+            if getattr(self.video_view, "showing_scrub_frame", False):
+                self.video_view.clear_scrub_frame()
+                self._on_scrub_seek_failed()
             return
         if status not in (
             QMediaPlayer.MediaStatus.LoadedMedia,
             QMediaPlayer.MediaStatus.BufferedMedia,
         ):
             return
-        self.video_view.finish_transition_seek()
-        self.player.setPosition(self._pending_seek_ms)
+        target_ms, play = self._pending_seek_ms, self._pending_play
         self._pending_seek_ms = None
-        if self._pending_play and self._timeline_playing:
-            self.player.play()
         self._pending_play = False
+        self.video_view.finish_transition_seek()
+        self._set_video_position(target_ms)
+        if play and self._timeline_playing:
+            self.player.play()
+
+    def _set_video_position(self, target_ms: int, *, use_current_frame: bool = False) -> None:
+        if getattr(self.video_view, "showing_scrub_frame", False):
+            # A stopped player records a new position without necessarily
+            # presenting the decoded frame. Pause before the release seek.
+            self.player.pause()
+            requested_time = self.project.current_time
+            target = self._scrub_target_at(requested_time)
+
+            def allowed(source_time: float) -> bool:
+                if target is None:
+                    return False
+                frame_time = target.start + source_time - target.trim_start
+                actual = self._scrub_target_at(frame_time)
+                if actual is None or target.clip_key != actual.clip_key:
+                    return False
+                return all(not ann.is_visible_at(frame_time) or ann.is_visible_at(requested_time)
+                           for ann in self.project.annotations if ann.type == "redact")
+
+            self.video_view.arm_scrub_seek(target_ms, use_current_frame=use_current_frame, allowed=allowed)
+        self.player.setPosition(target_ms)
 
     # ── Cue player (instant cuts) ─────────────────────────────────────────
 
@@ -3181,6 +3365,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             event.ignore()
             return
         self._closing = True
+        self._cancel_scrub_preview()
         self.audio_preview.stop()
         for timer_attr in ("autosave_timer", "_sam_heartbeat_timer",
                            "_startup_sam_timer", "_startup_tutorial_timer"):

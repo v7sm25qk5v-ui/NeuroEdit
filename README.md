@@ -4,17 +4,18 @@ NeuroEdit is a standalone desktop video editor for preparing operative video for
 conference, research, and educational use. Editing and export run locally;
 NeuroEdit does not upload video or audio to a cloud editing service.
 
-Current alpha: [v0.5.23-alpha.1](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.23-alpha.1)
+Current alpha: [v0.5.24-alpha](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.24-alpha)
 
 [Download the latest build](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/latest).
 
-### What's new in v0.5.23-alpha.1
+### What's new in v0.5.24-alpha
 
-- **Timeline filmstrips** show frames sampled from trimmed video clips, so you
-  can find a moment before moving the playhead. Thumbnails load in the background.
-- **Smoother scrubbing** combines rapid pointer moves and seeks to the exact
-  release position. Project restore and close repeat fewer media checks.
-- The optional SAM backend loads when you first open its panel.
+- **Labels fit inside the frame** in the viewer and in exports with burned-in
+  annotations. Long labels wrap or shrink as needed.
+- **Live scrub previews** update the viewer while you drag the playhead. The
+  player seeks to the exact release position when you let go.
+- **Timeline thumbnails fill in sooner.** Each visible source gets a first
+  still before the rest of its strip fills in.
 
 The retained security findings are tracked in [SECURITY_FIXES.md](SECURITY_FIXES.md).
 The original scan had partial coverage; these fixes do not constitute a completed audit.
@@ -56,7 +57,7 @@ The original scan had partial coverage; these fixes do not constitute a complete
 
 ### macOS
 
-Download `NeuroEdit-v0.5.23-alpha.1-macOS-unsigned.dmg` from the release page.
+Download `NeuroEdit-v0.5.24-alpha-macOS-unsigned.dmg` from the release page.
 Open the DMG, drag `NeuroEdit.app` into Applications, then right-click the app
 and choose `Open` for the first launch.
 
@@ -66,7 +67,7 @@ If macOS blocks launch, open `System Settings` -> `Privacy & Security`, choose
 
 ### Windows
 
-Download `NeuroEdit-v0.5.23-alpha.1-Windows-Setup.exe` from the release page on a
+Download `NeuroEdit-v0.5.24-alpha-Windows-Setup.exe` from the release page on a
 Windows PC. If SmartScreen warns, choose `More info` -> `Run anyway`, then follow
 the installer.
 
@@ -84,8 +85,8 @@ notes, download a verified update, and choose **Install and Restart**. The app
 saves your work and reopens the same saved project after restarting. Checks only
 contact GitHub when requested; project media stays local.
 
-Builds from v0.5.19-alpha onward include the updater; v0.5.19-alpha can update
-to v0.5.23-alpha.1 in the app. Older versions must install manually once.
+Builds from v0.5.19-alpha onward include the updater and can update to
+v0.5.24-alpha in the app. Older versions must install manually once.
 On macOS, a read-only running copy can update a single identical writable copy
 in `/Applications` or `~/Applications`. Older updater builds may still require
 a one-time manual installation if macOS translocates them. Source checkouts and

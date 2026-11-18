@@ -15,6 +15,7 @@ import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QFont, QFontMetricsF, QImage, QPainter, QPen, QPolygonF
 
+from neuroedit_desktop.annotation_label import paint_annotation_label
 from neuroedit_desktop.captions import build_caption_cues, cue_at_time, paint_caption
 from neuroedit_desktop.models import Annotation, AudioTrack, ProjectState, Slide, VideoClip
 from neuroedit_desktop.stills import read_upright_image
@@ -1036,10 +1037,8 @@ class ProjectExporter:
             self._paint_arrow(painter, ann, w, h, color)
         elif ann.type == "brush":
             self._paint_brush(painter, ann, w, h)
-        elif ann.type == "text":
-            self._paint_text_label(painter, ann, w, h, color)
-        if ann.type in ("rect", "ellipse", "arrow"):
-            self._paint_attached_label(painter, ann, w, h, color)
+        if ann.type in ("text", "rect", "ellipse", "arrow"):
+            paint_annotation_label(painter, ann, w, h, color)
 
     def _paint_brush(self, painter: QPainter, ann: Annotation, w: int, h: int) -> None:
         points = ann.geometry.get("points", [])
@@ -1082,78 +1081,6 @@ class ProjectExporter:
         right = QPointF(end.x() - head_len * math.cos(angle + spread), end.y() - head_len * math.sin(angle + spread))
         painter.setBrush(QBrush(color))
         painter.drawPolygon(QPolygonF([end, left, right]))
-
-    def _label_should_show(self, ann: Annotation) -> bool:
-        if not getattr(ann, "show_label", True):
-            return False
-        label = ann.label.strip()
-        if not label:
-            return False
-        return label.lower() != ann.type
-
-    def _attached_label_rect(self, ann: Annotation, w: int, h: int) -> QRectF | None:
-        if ann.type not in ("rect", "ellipse", "arrow") or not self._label_should_show(ann):
-            return None
-        label = ann.label.strip()
-        font = QFont()
-        font.setBold(True)
-        font.setPointSize(max(8, int(ann.font_size or 15)))
-        metrics = QFontMetricsF(font)
-        text_rect = QRectF(metrics.boundingRect(label).adjusted(-8, -5, 8, 5))
-        if ann.type == "arrow":
-            anchor = QPointF(
-                float(ann.geometry.get("x1", 0.0)) * w + 10,
-                float(ann.geometry.get("y1", 0.0)) * h - text_rect.height() - 8,
-            )
-            if anchor.y() < 0:
-                anchor.setY(float(ann.geometry.get("y1", 0.0)) * h + 8)
-        else:
-            bounds = self._annotation_rect(ann, w, h)
-            anchor = bounds.topLeft() + QPointF(0, -text_rect.height() - 8)
-            if anchor.y() < 0:
-                anchor = bounds.bottomLeft() + QPointF(0, 8)
-        anchor += QPointF(
-            float(ann.geometry.get("label_dx", 0.0)) * w,
-            float(ann.geometry.get("label_dy", 0.0)) * h,
-        )
-        text_rect.moveTopLeft(anchor)
-        return text_rect
-
-    def _paint_attached_label(self, painter: QPainter, ann: Annotation, w: int, h: int, color: QColor) -> None:
-        label = ann.label.strip()
-        text_rect = self._attached_label_rect(ann, w, h)
-        if text_rect is None:
-            return
-        font = QFont(painter.font())
-        font.setBold(True)
-        font.setPointSize(max(8, int(ann.font_size or 15)))
-        painter.setFont(font)
-        bg = QColor("#000000")
-        bg.setAlpha(170)
-        painter.setPen(QPen(color, 1))
-        painter.setBrush(QBrush(bg))
-        painter.drawRoundedRect(text_rect, 6, 6)
-        painter.setPen(QColor("#ffffff"))
-        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, label)
-
-    def _paint_text_label(self, painter: QPainter, ann: Annotation, w: int, h: int, color: QColor) -> None:
-        label = ann.label or "Text"
-        x = float(ann.geometry.get("x", 0.5)) * w
-        y = float(ann.geometry.get("y", 0.5)) * h
-        font = QFont(painter.font())
-        font.setPointSize(max(8, int(ann.font_size or 15)))
-        font.setBold(True)
-        painter.setFont(font)
-        metrics = QFontMetricsF(font)
-        text_rect = metrics.boundingRect(label).adjusted(-10, -6, 10, 6)
-        text_rect.moveTopLeft(QPointF(x, y))
-        bg = QColor("#000000")
-        bg.setAlpha(160)
-        painter.setPen(QPen(color, 1))
-        painter.setBrush(QBrush(bg))
-        painter.drawRoundedRect(text_rect, 6, 6)
-        painter.setPen(color)
-        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, label)
 
     def _paint_captions(self, painter: QPainter, time_s: float, w: int, h: int) -> None:
         cue = cue_at_time(self._caption_cues, time_s)

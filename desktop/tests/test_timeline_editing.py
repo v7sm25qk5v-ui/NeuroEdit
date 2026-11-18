@@ -1039,20 +1039,24 @@ def test_dragging_on_empty_timeline_scrubs_the_playhead() -> None:
     canvas = TimelineCanvas(project)
     counts = _signal_counts(canvas)
     seeks: list[float] = []
-    canvas.seek_requested.connect(seeks.append)
+    previews = []
+    canvas.scrub_requested.connect(previews.append)
+    canvas.scrub_finished.connect(seeks.append)
     y = canvas.RULER_H // 2   # ruler: no item there
 
     _press(canvas, canvas.LABEL_W + 100, y)
     _move(canvas, canvas.LABEL_W + 200, y)
     _move(canvas, canvas.LABEL_W + 350, y)
-    assert seeks == [1.0]  # only the immediate press so far
+    assert previews == [1.0]  # only the immediate press so far
+    assert seeks == []
     QTest.qWait(70)
-    assert seeks == pytest.approx([1.0, 3.5])
+    assert previews == pytest.approx([1.0, 3.5])
     _move(canvas, canvas.LABEL_W + 360, y)
     _release(canvas, canvas.LABEL_W + 420, y)  # no final mouse-move event
     QTest.qWait(70)  # no stale queued seek after release
 
-    assert seeks == pytest.approx([1.0, 3.5, 4.2])
+    assert previews == pytest.approx([1.0, 3.5])
+    assert seeks == pytest.approx([4.2])
     assert counts == {"edit": 0, "view": 0}
     assert canvas._drag is None
 
@@ -1062,31 +1066,35 @@ def test_pending_scrub_is_cancelled_when_opening_another_project() -> None:
 
     canvas = TimelineCanvas(_project(clips=[_clip(duration=10)]))
     seeks = []
-    canvas.seek_requested.connect(seeks.append)
+    cancelled = []
+    canvas.scrub_requested.connect(seeks.append)
+    canvas.scrub_cancelled.connect(lambda: cancelled.append(True))
     y = canvas.RULER_H // 2
     _press(canvas, canvas.LABEL_W + 100, y)
     _move(canvas, canvas.LABEL_W + 200, y)
     canvas.set_project(_project(clips=[_clip(duration=10)]))
     QTest.qWait(70)
     assert seeks == [1.0]
+    assert cancelled == [True]
 
 
-def test_scrub_release_seeks_again_if_playback_advanced() -> None:
+def test_scrub_release_requests_exact_seek_even_at_same_position() -> None:
     canvas = TimelineCanvas(_project(clips=[_clip(duration=10)]))
-    canvas.seek_requested.connect(lambda time_s: setattr(canvas.project, "current_time", time_s))
+    canvas.scrub_requested.connect(lambda time_s: setattr(canvas.project, "current_time", time_s))
+    releases = []
+    canvas.scrub_finished.connect(releases.append)
     y = canvas.RULER_H // 2
     _press(canvas, canvas.LABEL_W + 100, y)
     assert canvas.project.current_time == 1.0
-    canvas.project.current_time = 1.15
     _release(canvas, canvas.LABEL_W + 100, y)
-    assert canvas.project.current_time == 1.0
+    assert releases == [1.0]
 
 
 def test_scrub_is_clamped_to_the_project_end() -> None:
     project = _project(clips=[_clip(duration=4)])
     canvas = TimelineCanvas(project)
     seeks: list[float] = []
-    canvas.seek_requested.connect(seeks.append)
+    canvas.scrub_finished.connect(seeks.append)
     y = canvas.RULER_H // 2
 
     _press(canvas, canvas.LABEL_W + 100, y)

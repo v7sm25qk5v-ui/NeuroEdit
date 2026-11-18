@@ -257,6 +257,9 @@ class MediaExplorerPanel(QWidget):
 
 class TimelineCanvas(QWidget):
     seek_requested = Signal(float)
+    scrub_requested = Signal(float)
+    scrub_finished = Signal(float)
+    scrub_cancelled = Signal()
     project_changed = Signal()
     # View state saved with the project (active clip) changed; the document did not.
     view_changed = Signal()
@@ -307,7 +310,7 @@ class TimelineCanvas(QWidget):
         # True while the button is held after pressing empty space: moves seek.
         self._scrubbing = False
         self._scrub_x: float | None = None
-        self._last_scrub_seek: tuple[float, float] | None = None
+        self._last_scrub_seek: float | None = None
         self._scrub_timer = QTimer(self)
         self._scrub_timer.setSingleShot(True)
         self._scrub_timer.setInterval(33)
@@ -735,7 +738,8 @@ class TimelineCanvas(QWidget):
         if key != self._filmstrip_key:
             self._filmstrip_key = key
             self._filmstrip_tiles = self._layout_filmstrip(viewport, zoom, videos, redactions, covers)
-            self._thumbnails.show([tile_key for tile_key, _rect in self._filmstrip_tiles])
+            if not self._scrubbing:
+                self._thumbnails.show([tile_key for tile_key, _rect in self._filmstrip_tiles])
         clip_bounds = painter.clipBoundingRect()
         for tile_key, tile in self._filmstrip_tiles:
             if not tile.intersects(clip_bounds):
@@ -984,23 +988,30 @@ class TimelineCanvas(QWidget):
         painter.setBrush(QColor(PLAYHEAD))
         painter.drawEllipse(QPointF(x, 4), 5, 5)
 
-    def _stop_scrub(self) -> None:
+    def _stop_scrub(self, *, cancelled: bool = True) -> None:
         self._scrub_timer.stop()
+        was_scrubbing = self._scrubbing
         self._scrubbing = False
         self._scrub_x = None
         self._last_scrub_seek = None
+        if was_scrubbing:
+            self._filmstrip_key = None
+            self._refresh_filmstrip()
+            if cancelled:
+                self.scrub_cancelled.emit()
+
+    def _scrub_time(self, x: float) -> float:
+        time_s = max(0.0, (x - self.LABEL_W) / max(1.0, self.project.zoom))
+        return min(time_s, project_end_time(self.project))
 
     def _flush_scrub(self) -> None:
         if self._scrub_x is None:
             return
-        time_s = max(0.0, (self._scrub_x - self.LABEL_W) / max(1.0, self.project.zoom))
-        time_s = min(time_s, project_end_time(self.project))
+        time_s = self._scrub_time(self._scrub_x)
         self._scrub_x = None
-        # While playing, the project can advance after the last preview seek.
-        if self._last_scrub_seek != (time_s, self.project.current_time):
-            self.seek_requested.emit(time_s)
-            if self._scrubbing:
-                self._last_scrub_seek = (time_s, self.project.current_time)
+        if self._last_scrub_seek != time_s:
+            self._last_scrub_seek = time_s
+            self.scrub_requested.emit(time_s)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         if event.button() != Qt.MouseButton.LeftButton:
@@ -1052,6 +1063,7 @@ class TimelineCanvas(QWidget):
             self._set_selection(None)
             self.update()
         self._scrubbing = True
+        self._thumbnails.pause()
         self._scrub_x = pos.x()
         self._flush_scrub()
 
@@ -1229,9 +1241,9 @@ class TimelineCanvas(QWidget):
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         if self._scrubbing and event.button() == Qt.MouseButton.LeftButton:
-            self._scrub_x = event.position().x()
-            self._flush_scrub()
-            self._stop_scrub()
+            position = self._scrub_time(event.position().x())
+            self._stop_scrub(cancelled=False)
+            self.scrub_finished.emit(position)
         drag = self._drag
         self._drag = None
         trim_origin = self._trim_drag_origin
@@ -1751,6 +1763,9 @@ class TimelineScrollArea(QScrollArea):
 
 class RichTimelineWidget(QWidget):
     seek_requested = Signal(float)
+    scrub_requested = Signal(float)
+    scrub_finished = Signal(float)
+    scrub_cancelled = Signal()
     project_changed = Signal()
     # Zoom or the active clip changed: saved with the project, not an edit.
     view_changed = Signal()
@@ -1865,6 +1880,9 @@ class RichTimelineWidget(QWidget):
 
         self.canvas = TimelineCanvas(project)
         self.canvas.seek_requested.connect(self.seek_requested)
+        self.canvas.scrub_requested.connect(self.scrub_requested)
+        self.canvas.scrub_finished.connect(self.scrub_finished)
+        self.canvas.scrub_cancelled.connect(self.scrub_cancelled)
         self.canvas.project_changed.connect(self.project_changed)
         self.canvas.view_changed.connect(self.view_changed)
         self.canvas.edit_preview_changed.connect(self._refresh_edit_preview)
