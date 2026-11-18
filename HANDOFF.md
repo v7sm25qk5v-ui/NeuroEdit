@@ -1,5 +1,23 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-18 — v0.5.26-alpha.1 published
+
+- Published [v0.5.26-alpha.1](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.26-alpha.1)
+  from `6ed57e3077ae5614c542befdc243538179142161`, annotated tag
+  `5ac7c210f8483f4fcbae9c04345b3a7a49bdbb29`. GitHub Latest matched the
+  checked-in notes and the public Latest URL resolved to the release. The
+  macOS DMG, macOS ZIP, and Windows installer each returned HTTP 200 and
+  have GitHub SHA-256 digests. The repository sidebar was not verified because
+  browser access timed out.
+- [Tagged CI](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44391141664)
+  passed 868 macOS tests, built both installers, and published the release.
+  [Main CI](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44391141390)
+  passed. The informational Windows suite had 844 passes, 17 failures, and
+  7 skips. Sixteen failures matched v0.5.25-alpha. The additional failure was
+  a relative-date boundary assertion in `test_small_lifecycle_items.py`.
+  Neither that test nor its implementation changed in this release. No tests
+  were run locally at the user's request.
+
 ## 2026-11-18 — v0.5.26-alpha release preparation
 
 - Prepared v0.5.26-alpha from the interface refresh in `35ff4b0` (NE-037 through
