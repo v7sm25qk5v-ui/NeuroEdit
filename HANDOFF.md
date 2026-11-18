@@ -1,5 +1,27 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-18 — Label fitting and live scrub previews released
+
+- Published [v0.5.24-alpha.1](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.24-alpha.1)
+  at `e5e1ebfe8b844affef4814ee6fad704e4085271a`, with annotated tag
+  `2102409fa2e324fa091e3aa722e5443294c1bb27`. GitHub Latest and the
+  checked-in notes agree. The updater accepts the macOS ZIP and Windows
+  EXE as upgrades from v0.5.23-alpha.1. All three public installer URLs
+  returned HTTP 200 and have GitHub SHA-256 digests.
+- The first tag remains unpublished and unchanged. The replacement converts
+  point size to positive pixel size even on Windows font backends that leave
+  pixel size unresolved. It verifies complete text while allowing fonts to
+  wrap differently. The cross-source scrub test uses native path comparison.
+- Local Ruff and all **850 tests** passed on the released source (58.41 s).
+  [Tagged CI](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44348625738)
+  passed **850 macOS tests** (83.70 s), built both installers and published
+  all assets. [Main CI](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44348626059)
+  passed. Informational Windows had 827 passes, 16 failures, and 7 skips.
+  The failing test names exactly match v0.5.23-alpha.1, and all four new
+  label and scrub failures from the first v0.5.24 tag are resolved.
+- The separate daily automation notes remain local. Native runtime checks
+  on Windows and playback with the user's footage remain open.
+
 ## 2026-11-18 — Fit labels and show frames while dragging the playhead
 
 - Added NE-033 and NE-034 in `CODING_TICKETS.md`. GPT-6.2 Sol at extra-high
