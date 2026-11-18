@@ -1,5 +1,12 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-18 — NeuroEdit 1.0 release preparation
+
+- Prepared NeuroEdit 1.0 with the Save As improvement in `27e80a8`. The
+  `v1.0.0` tag and `1.0.0` package version match the version format used by
+  the installed updater and Windows packaging. Updated README and added the
+  checked-in notes used by the tagged GitHub installer workflow.
+
 ## 2026-11-18 — Save As froze the app; rebuilt with one dialog and a progress bar (committed)
 
 - **Report:** saving a project made the app stop responding, and choosing a
