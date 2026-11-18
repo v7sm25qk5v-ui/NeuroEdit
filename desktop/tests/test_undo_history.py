@@ -51,6 +51,9 @@ class _StubTimeline:
     def refresh(self) -> None:
         self.refresh_count += 1
 
+    def refresh_playhead(self, _previous_time: float) -> None:
+        self.refresh()
+
 
 class _StubPlayer:
     def __init__(
@@ -694,7 +697,7 @@ def test_small_timeline_seek_forces_audio_position():
     window._timeline_playing = True
     window.time_label = _StubLabel()
     window._project_end_time = lambda: 10
-    window._sync_player_to_timeline = lambda *, play: None
+    window._sync_player_to_timeline = lambda **kwargs: None
     calls = []
     window.audio_preview.sync = lambda project, playing, **kwargs: calls.append((project.current_time, playing, kwargs))
     window._seek_global(1.1)

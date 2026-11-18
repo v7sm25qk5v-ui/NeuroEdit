@@ -132,6 +132,7 @@ class SamWorkflowMixin:
         # Guard against double-calls while a probe is already in flight
         if getattr(self, "_sam_probe_thread", None) is not None:
             return
+        self._sam_probe_started = True
         self.sam_panel.set_status("Loading SAM backend… (importing PyTorch)")
         self.sam_panel.set_busy(True)
         self.statusBar().showMessage("Loading SAM backend…")

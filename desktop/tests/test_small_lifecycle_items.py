@@ -192,6 +192,39 @@ def test_clip_media_problem_check_stats_once_per_interval(app, tmp_path, monkeyp
     assert stub._cached_clip_media_problem(clip) == "file is missing"
 
 
+def test_split_clips_share_source_validation(app, tmp_path, monkeypatch):
+    from neuroedit_desktop.models import VideoClip
+    from neuroedit_desktop.ui import main_window
+
+    source = tmp_path / "shared.mp4"
+    source.write_bytes(b"original")
+    clips = [
+        VideoClip(id=str(i), path=str(source), name="Part", duration=10,
+                  start_time=i, trim_start=i, trim_end=i + 1)
+        for i in range(3)
+    ]
+    stub = main_window.MainWindow.__new__(main_window.MainWindow)
+    stub._media_problem_cache = {}
+    stub._media_stat_cache = {}
+    clock = _Clock()
+    probes = []
+
+    def probe(path):
+        probes.append(path)
+        return (10, 160, 90) if path.read_bytes() == b"original" else (0, 0, 0)
+
+    monkeypatch.setattr(main_window.time, "monotonic", clock)
+    monkeypatch.setattr(main_window, "probe_video", probe)
+    for clip in clips:
+        assert stub._cached_clip_media_problem(clip) is None
+    assert probes == [source]
+    source.write_bytes(b"replacement")
+    clock.now += 1.1
+    for clip in clips:
+        assert stub._cached_clip_media_problem(clip) == "video could not be read"
+    assert probes == [source, source]
+
+
 # ---- d: import progress dialog is window-modal ----------------------------------
 
 def test_import_progress_dialog_is_window_modal_and_cancel_works(window, tmp_path, monkeypatch):

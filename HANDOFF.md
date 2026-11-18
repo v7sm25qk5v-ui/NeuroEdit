@@ -1,5 +1,39 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-17 — Editor responsiveness and timeline filmstrips
+
+- The Video row shows stills sampled from each clip's trimmed source range.
+  Visible tiles decode in one low priority worker, with a small memory cache
+  and no thumbnail files written to disk. Labels and trim handles remain above
+  and beside the filmstrip. Cover slides hide their underlying tiles. A source
+  with a timeline redaction uses plain clip bars across its split clips.
+- Timeline drags coalesce pointer events into preview seeks about every 33 ms,
+  then seek to the release position. Explicit seeks and frame stepping use
+  the exact target. Playhead-only updates repaint the old and new playhead
+  strips without updating timeline geometry and editing controls.
+- Project loading checks readability once per distinct source and rechecks
+  after file signature changes. Editor refresh reuses unchanged widget styles.
+  The optional SAM backend starts when its panel first opens. Close cleanup
+  resolves each distinct mask or media path once across undo and saved state.
+- On this Mac with synthetic projects, median restore of 120 splits from one
+  file improved from 220 ms to 152 ms (120 probes to one). Median close with
+  36 undo revisions improved from 56 ms to 7 ms. A warm refresh with 120 clips
+  improved from 1.35 ms to 1.01 ms. Empty startup was roughly unchanged. An
+  offscreen burst of 150 pointer moves across a dense project took 37 ms vs
+  2.35 s before coalescing. That measures UI work without video decoding.
+- A real FFmpeg fixture verified thumbnail source times and the offscreen
+  timeline rendered all 20 visible stills from two synthetic clips. Long-GOP
+  source seek latency still depends on decoding. Hiding or closing the timeline
+  cancels its thumbnail work between frames, so exit can wait for the current
+  file open or frame seek on slow media. Native Windows and playback with the
+  user's footage remain untested in this pass.
+- Ruff and diff checks passed. The full macOS suite passed 841 tests in 54.27 s
+  with two existing Qt warnings. After adjusting clip title and over-guidance
+  label spacing, the 114 relevant timeline, slide, and thumbnail tests passed
+  again and the spacing was checked in an offscreen render.
+- Prepared for release as `v0.5.23-alpha` on 2026-11-18. Release notes,
+  README links and package version are aligned.
+
 ## 2026-11-17 — Instant cuts release published
 
 Published [v0.5.22-alpha.1](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.22-alpha.1)

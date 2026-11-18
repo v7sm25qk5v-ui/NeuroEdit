@@ -237,8 +237,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self._restoring = False  # True while applying a history snapshot
         self._media_warnings_shown: set[str] = set()
         self._media_problem_cache: dict[tuple[str, str, int, int], str | None] = {}
-        # (clip id, path) -> (monotonic time of last stat, cache key). Keeps the
-        # 33 ms playback tick from stat-ing the clip file every time.
+        # (media type, path) -> (monotonic time of last stat, cache key).
+        # Split clips share a source and can reuse its readability check.
         self._media_stat_cache: dict[tuple[str, str], tuple[float, tuple[str, str, int, int]]] = {}
         self._project_end_time_cache: float | None = None
 
@@ -266,6 +266,10 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self._build_statusbar()
         self._warn_if_newer_project(self.project)
         self._build_autosave()
+        self._sam_probe_started = False
+        self._startup_sam_timer = QTimer(self)
+        self._startup_sam_timer.setSingleShot(True)
+        self._startup_sam_timer.timeout.connect(self._load_sam_backend)
         self._validate_loaded_project_media("Autosave restore")
         self._load_active_clip()
         self.refresh()
@@ -276,10 +280,6 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self._undo_hashes.append(self._payload_hash(initial_payload))
         self._undo_sizes.append(len(initial_payload))
         self._update_history_actions()
-        self._startup_sam_timer = QTimer(self)
-        self._startup_sam_timer.setSingleShot(True)
-        self._startup_sam_timer.timeout.connect(self._load_sam_backend)
-        self._startup_sam_timer.start(0)
         # Defer the first-run prompt until the window has actually painted.
         self._startup_tutorial_timer = QTimer(self)
         self._startup_tutorial_timer.setSingleShot(True)
@@ -1156,7 +1156,9 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         for color, btn in self._swatch_buttons.items():
             checked = color.lower() == self.project.draw_color.lower()
             btn.setChecked(checked)
-            btn.setStyleSheet(self._swatch_css(color, checked=checked))
+            style = self._swatch_css(color, checked=checked)
+            if btn.styleSheet() != style:
+                btn.setStyleSheet(style)
 
         # Panel tabs — active tab gets its accent color
         for panel, label, accent in PANELS:
@@ -1166,19 +1168,26 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             border = accent if active else "transparent"
             bg = f"rgba({QColor(accent).red()}, {QColor(accent).green()}, {QColor(accent).blue()}, 0.18)" if active else "transparent"
             weight = "700" if active else "600"
-            btn.setStyleSheet(
+            style = (
                 f"QPushButton {{ background: {bg}; border: 1px solid {border};"
                 f"  color: {TEXT_PRIMARY if active else TEXT_SECONDARY};"
                 f"  border-radius: 7px; font-weight: {weight}; padding: 5px 9px; }}"
                 f"QPushButton:hover {{ background: {BG_HOVER}; color: {TEXT_PRIMARY};"
                 f" border-color: {BORDER_BRIGHT}; }}"
             )
+            if btn.styleSheet() != style:
+                btn.setStyleSheet(style)
 
         # Panel stack
         for i, (panel, *_) in enumerate(PANELS):
             if panel == self.project.active_panel:
                 self.panels.setCurrentIndex(i)
                 break
+        # Importing the optional SAM runtime competes with playback and can
+        # delay an immediate quit. Only probe when the editor shows SAM.
+        if (self.project.active_panel == "sam" and not self._sam_probe_started
+                and not self._startup_sam_timer.isActive()):
+            self._startup_sam_timer.start(0)
 
         self.audio_preview.sync(self.project, self._timeline_playing)
         self.video_view.set_project(self.project)
@@ -1192,7 +1201,6 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             self.project,
             self.store.project_path.parent / "audio",
         )
-        self.timeline.refresh()
         self.video_view.update_annotations()
         self.time_label.setText(format_time(self.project.current_time))
         self.speed_btn.setText(f"{self.project.playback_rate:g}×")
@@ -1279,6 +1287,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             self._media_warnings_shown.clear()
         if hasattr(self, "_media_problem_cache"):
             self._media_problem_cache.clear()
+        if hasattr(self, "_media_stat_cache"):
+            self._media_stat_cache.clear()
         self._invalidate_project_end_time()
         if history is None:
             self._seed_history()
@@ -2033,7 +2043,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
                         clip.name = path.stem  # keep the name the user knows
                         converted += 1
                         unused_copies.discard(media_path)
-                    self._media_problem_cache[(clip.id, clip.path, *signature)] = None
+                    self._media_problem_cache[(clip.media_type, clip.path, *signature)] = None
                 else:
                     failures.append(f"{path.name} ({error})" if error else path.name)
             elif suffix in IMAGE_EXTENSIONS:
@@ -2138,6 +2148,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
                 item.width, item.height = image.width(), image.height()
                 item.thumbnail_path = None
         self._media_problem_cache.clear()
+        self._media_stat_cache.clear()
         self._media_warnings_shown.clear()
         if kind == "clip" and self.project.active_clip_id is None:
             self.project.active_clip_id = item.id
@@ -2299,17 +2310,18 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
 
     def _cached_clip_media_problem(self, clip: VideoClip) -> str | None:
         now = time.monotonic()
-        checked = self._media_stat_cache.get((clip.id, clip.path))
+        source = (clip.media_type, clip.path)
+        checked = self._media_stat_cache.get(source)
         if checked is not None and 0 <= now - checked[0] < _MEDIA_STAT_TTL:
             key = checked[1]
         else:
             path = Path(clip.path)
             try:
                 stat = path.stat()
-                key = (clip.id, clip.path, stat.st_mtime_ns, stat.st_size)
+                key = (*source, stat.st_mtime_ns, stat.st_size)
             except FileNotFoundError:
-                key = (clip.id, clip.path, -1, -1)
-            self._media_stat_cache[(clip.id, clip.path)] = (now, key)
+                key = (*source, -1, -1)
+            self._media_stat_cache[source] = (now, key)
         if key not in self._media_problem_cache:
             self._media_problem_cache[key] = self._clip_media_problem(clip)
         return self._media_problem_cache[key]
@@ -2486,14 +2498,27 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self._seek_global(self.project.current_time + direction / 30)
 
     def _seek_global(self, time_s: float) -> None:
+        previous_time = self.project.current_time
+        previous_clip = self.project.active_clip_id
+        previous_duration = self.project.duration
         self.project.duration = self._project_end_time()
         time_s = max(0.0, min(time_s, self.project.duration))
         self.project.current_time = time_s
-        self._sync_player_to_timeline(play=self._timeline_playing)
+        self._sync_player_to_timeline(play=self._timeline_playing, exact_seek=True)
+        if self._timeline_playing:
+            self._last_timeline_tick = time.monotonic()
         self.audio_preview.sync(self.project, self._timeline_playing and self._pending_seek_ms is None, seek=True)
-        self.timeline.refresh()
+        self._refresh_timeline_playhead(previous_time, previous_clip, previous_duration)
         self.video_view.update_annotations()
         self.time_label.setText(format_time(self.project.current_time))
+
+    def _refresh_timeline_playhead(
+        self, previous_time: float, previous_clip: str | None, previous_duration: float,
+    ) -> None:
+        if previous_clip != self.project.active_clip_id or previous_duration != self.project.duration:
+            self.timeline.refresh()
+        else:
+            self.timeline.refresh_playhead(previous_time)
 
     def _position_changed(self, position_ms: int) -> None:
         # The monotonic timeline clock drives playback so variable-frame-rate
@@ -2542,6 +2567,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             return
 
         previous_time = self.project.current_time
+        previous_clip = self.project.active_clip_id
+        previous_duration = self.project.duration
         active = self._clip_at_time(previous_time)
         active_slide = self._slide_at_time(previous_time)
         on_image = active is not None and active.media_type == "image"
@@ -2575,12 +2602,14 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             if self._timeline_playing and self._pending_seek_ms is None:
                 self._maybe_cue_next_clip()
         self.audio_preview.sync(self.project, self._timeline_playing and self._pending_seek_ms is None)
-        self.timeline.refresh()
+        self._refresh_timeline_playhead(previous_time, previous_clip, previous_duration)
         self.video_view.update_annotations_for_time(previous_time, self.project.current_time)
         self.time_label.setText(format_time(self.project.current_time))
 
-    def _sync_player_to_timeline(self, *, play: bool) -> None:
-        self.audio_preview.sync(self.project, play and self._pending_seek_ms is None)
+    def _sync_player_to_timeline(self, *, play: bool, exact_seek: bool = False) -> None:
+        # An explicit seek syncs narration once, after the video seek is set.
+        if not exact_seek:
+            self.audio_preview.sync(self.project, play and self._pending_seek_ms is None)
         slide = self._slide_at_time(self.project.current_time)
         clip = self._clip_at_time(self.project.current_time)
         if clip is None:
@@ -2625,7 +2654,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         source = QUrl.fromLocalFile(clip.path)
         local_s = clip.trim_start + max(0.0, self.project.current_time - clip.start_time)
         target_ms = round(local_s * 1000)
-        if play and self._take_cue(clip, target_ms):
+        if play and not exact_seek and self._take_cue(clip, target_ms):
             return
         new_source = self.player.source() != source
         if new_source:
@@ -2642,7 +2671,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             self.player.setPlaybackRate(self.project.playback_rate)
             self._pending_seek_ms = target_ms
             self._pending_play = play
-            self.audio_preview.sync(self.project, False)
+            if not exact_seek:
+                self.audio_preview.sync(self.project, False)
             self._media_status_changed(self.player.mediaStatus())
             return
         if not self.video_view.video_item.isVisible():
@@ -2652,7 +2682,9 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             self._pending_play = play
             return
         self._pending_seek_ms = None
-        if abs(self.player.position() - target_ms) > 80:
+        # The tolerance avoids needless seeks at contiguous playback cuts.
+        # User seeks, including frame stepping, must reach the exact position.
+        if abs(self.player.position() - target_ms) > (0 if exact_seek else 80):
             self.player.setPosition(target_ms)
         if play:
             self.player.play()

@@ -42,22 +42,23 @@ def referenced_mask_paths(project_dicts: list[dict]) -> set[str]:
         for ann in data.get("annotations") or []:
             mask_path = ann.get("mask_path")
             if mask_path:
-                referenced.add(str(Path(str(mask_path)).resolve()))
+                referenced.add(str(mask_path))
             for frame in ann.get("mask_frames") or []:
                 frame_path = frame.get("mask_path")
                 if frame_path:
-                    referenced.add(str(Path(str(frame_path)).resolve()))
-    return referenced
+                    referenced.add(str(frame_path))
+    return {str(Path(path).resolve()) for path in referenced}
 
 
 def referenced_clip_paths(project_dicts: list[dict]) -> set[str]:
     """Every clip media file referenced by the given project dicts, resolved."""
-    return {
-        str(Path(str(clip["path"])).resolve())
+    referenced = {
+        str(clip["path"])
         for data in project_dicts
         for clip in data.get("clips") or []
         if clip.get("path")
     }
+    return {str(Path(path).resolve()) for path in referenced}
 
 
 def delete_orphan_masks(masks_dir: Path, referenced: set[str], only=None) -> int:

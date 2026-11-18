@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import os
 import time
 from pathlib import Path
 from typing import Literal
@@ -71,6 +72,11 @@ from neuroedit_desktop.ui.styles import (
     TIMELINE_MARKERS,
     TIMELINE_SLIDES,
     TIMELINE_VIDEO,
+)
+from neuroedit_desktop.ui.timeline_thumbnails import (
+    MAX_VISIBLE_THUMBNAILS,
+    ThumbnailKey,
+    TimelineThumbnails,
 )
 from neuroedit_desktop.ui.timeline_utils import fmt_time, project_end_time
 
@@ -261,6 +267,8 @@ class TimelineCanvas(QWidget):
     LABEL_W = 92
     RULER_H = 30
     TRACK_H = 46
+    VIDEO_TRACK_H = 58
+    FILMSTRIP_CELL_W = 46
     TRACKS: list[tuple[str, str, str]] = [
         ("video", "Video", TIMELINE_VIDEO),
         ("audio", "Audio", TIMELINE_AUDIO),
@@ -298,6 +306,12 @@ class TimelineCanvas(QWidget):
         self._trim_drag_origin: tuple[str, list] | None = None
         # True while the button is held after pressing empty space: moves seek.
         self._scrubbing = False
+        self._scrub_x: float | None = None
+        self._last_scrub_seek: tuple[float, float] | None = None
+        self._scrub_timer = QTimer(self)
+        self._scrub_timer.setSingleShot(True)
+        self._scrub_timer.setInterval(33)
+        self._scrub_timer.timeout.connect(self._flush_scrub)
         # _drag_document_state() at press, so release can tell a click from an edit.
         self._drag_start_state: tuple | None = None
         self._slide_lanes_key: tuple | None = None
@@ -312,6 +326,10 @@ class TimelineCanvas(QWidget):
         # pixmap so playhead-only repaints during playback/scrub are one blit.
         self._static_cache: QPixmap | None = None
         self._static_cache_key: tuple | None = None
+        self._thumbnails = TimelineThumbnails(self)
+        self._thumbnails.changed.connect(self._refresh_filmstrip)
+        self._filmstrip_key: tuple | None = None
+        self._filmstrip_tiles: list[tuple[ThumbnailKey, QRectF]] = []
         self._snap_indicator_time: float | None = None
         self._hover_item: tuple[str, str] | None = None  # (kind, item_id)
         # Floating delete target (set by RichTimelineWidget) + whether the
@@ -330,6 +348,9 @@ class TimelineCanvas(QWidget):
 
     def set_project(self, project: ProjectState) -> None:
         if project is not self.project:
+            self._thumbnails.clear()
+            self._filmstrip_key = None
+            self._stop_scrub()
             self._drag = None
             self._drag_start_state = None
             self._slide_drag_origin = None
@@ -388,6 +409,8 @@ class TimelineCanvas(QWidget):
             self._static_cache_key = None
             self._paint_static(painter, zoom)
 
+        if event.rect().intersects(self._filmstrip_band()):
+            self._paint_filmstrip(painter, zoom)
         self._paint_snap_indicator(painter, zoom)
         self._paint_playhead(painter, zoom)
         diagnostics.record_paint(
@@ -504,10 +527,12 @@ class TimelineCanvas(QWidget):
         y = self._track_y(track_idx) + 6
         # A short video must not cover its neighbor's body/trim hit targets.
         minimum_width = 1.0 if track_idx == 0 else 28.0
-        return QRectF(x, y, max(minimum_width, duration * zoom), self.TRACK_H - 12)
+        height = self.VIDEO_TRACK_H if track_idx == 0 else self.TRACK_H
+        return QRectF(x, y, max(minimum_width, duration * zoom), height - 12)
 
     def _track_heights(self) -> list[int]:
         heights = [self.TRACK_H for _track in self.TRACKS]
+        heights[0] = self.VIDEO_TRACK_H
         heights[2] = max(self.TRACK_H, self.TRACK_H * self._slide_lane_count())
         heights[3] = self.TRACK_H * (max(self._annotation_lanes().values(), default=0) + 1)
         return heights
@@ -563,6 +588,7 @@ class TimelineCanvas(QWidget):
         *,
         selected: bool = False,
         hovered: bool = False,
+        label_rect: QRectF | None = None,
     ) -> None:
         fill = QColor(color)
         if selected:
@@ -580,7 +606,7 @@ class TimelineCanvas(QWidget):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRoundedRect(rect, 8, 8)
         painter.setPen(QColor(TEXT_PRIMARY))
-        text_rect = rect.adjusted(8, 0, -8, 0)
+        text_rect = rect.adjusted(8, 0, -8, 0) if label_rect is None else label_rect
         if text_rect.width() > 0:
             text = painter.fontMetrics().elidedText(label, Qt.TextElideMode.ElideRight, int(text_rect.width()))
             painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter, text)
@@ -624,20 +650,32 @@ class TimelineCanvas(QWidget):
         fill_alpha = 110 if dragging else 70 if active else 46
         selected = self.selected_item == ("clip", clip.id)
         hovered = self._hover_item == ("clip", clip.id)
+        max_clip_s, _guidance = recommended_continuous_clip_seconds(self.project)
+        is_video = clip.media_type == "video"
+        over_guidance = is_video and clip.display_duration > max_clip_s
+        warning = "over guidance"
+        warning_width = painter.fontMetrics().horizontalAdvance(warning) if over_guidance else 0
+        show_warning = over_guidance and rect.width() >= warning_width + 42
+        label_rect = rect.adjusted(8, 0, -8, 0) if is_video else None
+        if label_rect is not None:
+            label_rect.setHeight(19)
+            if show_warning:
+                label_rect.setRight(label_rect.right() - warning_width - 8)
         self._paint_block(
             painter, rect, clip.name, color, fill_alpha,
             selected=selected, hovered=hovered,
+            label_rect=label_rect,
         )
-        max_clip_s, _guidance = recommended_continuous_clip_seconds(self.project)
-        if clip.media_type == "video" and clip.display_duration > max_clip_s:
+        if over_guidance:
             painter.setPen(QPen(QColor(ACCENT_RED), 2))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRoundedRect(rect.adjusted(2, 2, -2, -2), 8, 8)
+        if show_warning:
             painter.setPen(QColor(ACCENT_RED))
             painter.drawText(
-                rect.adjusted(8, 4, -8, -4),
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
-                "over guidance",
+                QRectF(rect.right() - 8 - warning_width, rect.top(), warning_width, 19),
+                Qt.AlignmentFlag.AlignVCenter,
+                warning,
             )
         # Trim-handle accents at left and right edges.
         handle_color = QColor("#ffffff")
@@ -652,6 +690,107 @@ class TimelineCanvas(QWidget):
             painter.setPen(QPen(QColor("#ffffff"), 2 if dragging else 1))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 8, 8)
+
+    def _filmstrip_band(self) -> QRect:
+        return QRect(self.LABEL_W, self.RULER_H + 25, max(0, self.width() - self.LABEL_W),
+                     self.VIDEO_TRACK_H - 34)
+
+    def _refresh_filmstrip(self) -> None:
+        # Keep the static backing pixmap and repaint just the visible strip.
+        self.update(self._filmstrip_band().intersected(self.visibleRegion().boundingRect()))
+
+    def _on_filmstrip_vertical_scroll(self, top: int) -> None:
+        # When the strip scrolls completely out of view it gets no paint event.
+        if top > self._filmstrip_band().bottom():
+            self._thumbnails.pause()
+            self._filmstrip_key = None
+
+    def hideEvent(self, event) -> None:  # noqa: N802
+        self._stop_scrub()
+        self._thumbnails.pause()
+        self._filmstrip_key = None
+        super().hideEvent(event)
+
+    def _paint_filmstrip(self, painter: QPainter, zoom: float) -> None:
+        viewport = self.visibleRegion().boundingRect().intersected(self._filmstrip_band())
+        # A clip being moved can overlap another clip visually. Its normal
+        # selection, glow and trim handles should remain the topmost item.
+        if viewport.isEmpty() or self._clip_preview_positions:
+            self._thumbnails.pause()
+            self._filmstrip_key = None
+            return
+        videos = tuple(
+            (clip.path, clip.start_time, clip.trim_start, clip.trim_end)
+            for clip in self.project.clips if clip.media_type == "video"
+        )
+        redactions = tuple(
+            (ann.frame_time, ann.frame_time + ann.ann_duration if ann.ann_duration > 0 else math.inf)
+            for ann in self.project.annotations if ann.type == "redact"
+        )
+        covers = tuple(
+            (slide.start_time, slide.start_time + slide_span(slide))
+            for slide in self.project.slides if not slide.overlay and not slide_is_inserted(slide)
+        )
+        key = (viewport, zoom, videos, redactions, covers)
+        if key != self._filmstrip_key:
+            self._filmstrip_key = key
+            self._filmstrip_tiles = self._layout_filmstrip(viewport, zoom, videos, redactions, covers)
+            self._thumbnails.show([tile_key for tile_key, _rect in self._filmstrip_tiles])
+        clip_bounds = painter.clipBoundingRect()
+        for tile_key, tile in self._filmstrip_tiles:
+            if not tile.intersects(clip_bounds):
+                continue
+            image = self._thumbnails.image(tile_key)
+            if image is None:
+                continue
+            # Fill the tile without distorting tall or wide source footage.
+            scale = max(tile.width() / image.width(), tile.height() / image.height())
+            w, h = tile.width() / scale, tile.height() / scale
+            source = QRectF((image.width() - w) / 2, (image.height() - h) / 2, w, h)
+            painter.drawImage(tile, image, source)
+
+    def _layout_filmstrip(self, viewport, zoom, videos, redactions, covers):
+        # Use plain clip bars for any source covered by a redaction, including
+        # other splits of that source, so thumbnails cannot reveal its raw frames.
+        def path_key(path: str) -> str:
+            return os.path.normcase(os.path.abspath(path))
+
+        protected = {
+            path_key(path) for path, start, trim_in, trim_out in videos
+            if any(lo <= start + trim_out - trim_in and hi >= start for lo, hi in redactions)
+        }
+        band = self._filmstrip_band()
+        tiles = []
+        inset = self.HANDLE_PX + 2
+        for path, start, trim_in, trim_out in videos:
+            clip_width = (trim_out - trim_in) * zoom
+            if not math.isfinite(clip_width) or clip_width < 30 or not path:
+                continue
+            clip_left = self.LABEL_W + start * zoom
+            left = clip_left + inset
+            right = clip_left + clip_width - inset
+            if right <= viewport.left() or left >= viewport.right() + 1:
+                continue
+            if protected and path_key(path) in protected:
+                continue
+            count = math.ceil((right - left) / self.FILMSTRIP_CELL_W)
+            cell = (right - left) / count
+            first = max(0, math.floor((viewport.left() - left) / cell))
+            last = min(count, math.ceil((viewport.right() + 1 - left) / cell))
+            for index in range(first, last):
+                x = left + index * cell
+                offset = (x - clip_left) / zoom
+                tile_start = start + offset
+                tile_end = tile_start + cell / zoom
+                if any(lo < tile_end and hi > tile_start for lo, hi in covers):
+                    continue
+                source_ms = (trim_in + offset + cell / (2 * zoom)) * 1000
+                if not math.isfinite(source_ms):
+                    continue
+                tiles.append(((path, math.floor(source_ms)), QRectF(x, band.top(), cell - 1, band.height())))
+                if len(tiles) == MAX_VISIBLE_THUMBNAILS:
+                    return tiles
+        return tiles
 
     def _paint_audio_blocks(self, painter: QPainter, zoom: float) -> None:
         for track in self.project.audio_tracks:
@@ -845,18 +984,35 @@ class TimelineCanvas(QWidget):
         painter.setBrush(QColor(PLAYHEAD))
         painter.drawEllipse(QPointF(x, 4), 5, 5)
 
+    def _stop_scrub(self) -> None:
+        self._scrub_timer.stop()
+        self._scrubbing = False
+        self._scrub_x = None
+        self._last_scrub_seek = None
+
+    def _flush_scrub(self) -> None:
+        if self._scrub_x is None:
+            return
+        time_s = max(0.0, (self._scrub_x - self.LABEL_W) / max(1.0, self.project.zoom))
+        time_s = min(time_s, project_end_time(self.project))
+        self._scrub_x = None
+        # While playing, the project can advance after the last preview seek.
+        if self._last_scrub_seek != (time_s, self.project.current_time):
+            self.seek_requested.emit(time_s)
+            if self._scrubbing:
+                self._last_scrub_seek = (time_s, self.project.current_time)
+
     def mousePressEvent(self, event) -> None:  # noqa: N802
         if event.button() != Qt.MouseButton.LeftButton:
             return super().mousePressEvent(event)
 
         # A release can be lost (focus change mid-drag); do not lose its edit.
         self._report_drag_edit()
-        self._scrubbing = False
+        self._stop_scrub()
         self._slide_drag_origin = None
         pos = event.position()
         if pos.x() < self.LABEL_W:
             return
-        time_s = max(0.0, (pos.x() - self.LABEL_W) / max(1.0, self.project.zoom))
         hit = self._hit_block(pos.x(), pos.y())
         if hit is not None:
             kind, item_id, offset = hit
@@ -896,13 +1052,19 @@ class TimelineCanvas(QWidget):
             self._set_selection(None)
             self.update()
         self._scrubbing = True
-        self.seek_requested.emit(min(time_s, project_end_time(self.project)))
+        self._scrub_x = pos.x()
+        self._flush_scrub()
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
         if self._drag is None and self._scrubbing:
-            time_s = max(0.0, (event.position().x() - self.LABEL_W) / max(1.0, self.project.zoom))
-            self.seek_requested.emit(min(time_s, project_end_time(self.project)))
-            return
+            if event.buttons() & Qt.MouseButton.LeftButton:
+                # Pointer events can arrive faster than the decoder can seek.
+                # Keep only the newest position for the next preview.
+                self._scrub_x = event.position().x()
+                if not self._scrub_timer.isActive():
+                    self._scrub_timer.start()
+                return
+            self._stop_scrub()
         if self._drag is None:
             self._update_hover(event.position())
             return super().mouseMoveEvent(event)
@@ -1066,9 +1228,12 @@ class TimelineCanvas(QWidget):
             self.trash_target.set_armed(over)
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if self._scrubbing and event.button() == Qt.MouseButton.LeftButton:
+            self._scrub_x = event.position().x()
+            self._flush_scrub()
+            self._stop_scrub()
         drag = self._drag
         self._drag = None
-        self._scrubbing = False
         trim_origin = self._trim_drag_origin
         self._trim_drag_origin = None
         slide_origin = self._slide_drag_origin
@@ -1712,6 +1877,7 @@ class RichTimelineWidget(QWidget):
         self.scroll.setWidgetResizable(False)
         self.scroll.setFixedHeight(self._timeline_scroll_height())
         self.scroll.horizontalScrollBar().valueChanged.connect(self._scroll_changed)
+        self.scroll.verticalScrollBar().valueChanged.connect(self.canvas._on_filmstrip_vertical_scroll)
 
         # Floating delete target, overlaid on the scroll viewport (so it stays
         # put as the timeline scrolls). Shown only while something is selected.
@@ -1759,9 +1925,7 @@ class RichTimelineWidget(QWidget):
         self.zoom_slider.blockSignals(True)
         self.zoom_slider.setValue(int(max(2.0, min(300.0, self.project.zoom))))
         self.zoom_slider.blockSignals(False)
-        self.time_label.setText(
-            f"{fmt_time(self.project.current_time)} / {fmt_time(self.project.duration)}"
-        )
+        self._refresh_time_label()
         self.canvas.refresh_geometry()
         self.canvas.update()
         self.scroll.setFixedHeight(self._timeline_scroll_height())
@@ -1788,6 +1952,21 @@ class RichTimelineWidget(QWidget):
                 idx = self.fade_color_combo.findData("#ffffff")
             self.fade_color_combo.setCurrentIndex(max(0, idx))
         self.fade_color_combo.blockSignals(False)
+
+    def refresh_playhead(self, previous_time: float) -> None:
+        self._refresh_time_label()
+        zoom = max(1.0, self.project.zoom)
+        # Invalidate both the previous and current playhead strips. The rest of
+        # the timeline geometry and controls are unchanged.
+        for time_s in (previous_time, self.project.current_time):
+            x = self.canvas.LABEL_W + time_s * zoom
+            if -9 < x < self.canvas.width() + 7:
+                self.canvas.update(math.floor(x) - 7, 0, 16, self.canvas.height())
+
+    def _refresh_time_label(self) -> None:
+        label = f"{fmt_time(self.project.current_time)} / {fmt_time(self.project.duration)}"
+        if self.time_label.text() != label:
+            self.time_label.setText(label)
 
     def _refresh_edit_preview(self) -> None:
         self.project.duration = project_end_time(self.project)

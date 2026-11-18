@@ -1033,6 +1033,8 @@ def test_deleting_an_annotation_keeps_another_selected_annotation_id() -> None:
 
 
 def test_dragging_on_empty_timeline_scrubs_the_playhead() -> None:
+    from PySide6.QtTest import QTest
+
     project = _project(clips=[_clip(duration=10)])
     canvas = TimelineCanvas(project)
     counts = _signal_counts(canvas)
@@ -1043,12 +1045,41 @@ def test_dragging_on_empty_timeline_scrubs_the_playhead() -> None:
     _press(canvas, canvas.LABEL_W + 100, y)
     _move(canvas, canvas.LABEL_W + 200, y)
     _move(canvas, canvas.LABEL_W + 350, y)
-    _release(canvas, canvas.LABEL_W + 350, y)
-    _move(canvas, canvas.LABEL_W + 450, y)   # button released: no more seeks
+    assert seeks == [1.0]  # only the immediate press so far
+    QTest.qWait(70)
+    assert seeks == pytest.approx([1.0, 3.5])
+    _move(canvas, canvas.LABEL_W + 360, y)
+    _release(canvas, canvas.LABEL_W + 420, y)  # no final mouse-move event
+    QTest.qWait(70)  # no stale queued seek after release
 
-    assert seeks == pytest.approx([1.0, 2.0, 3.5])
+    assert seeks == pytest.approx([1.0, 3.5, 4.2])
     assert counts == {"edit": 0, "view": 0}
     assert canvas._drag is None
+
+
+def test_pending_scrub_is_cancelled_when_opening_another_project() -> None:
+    from PySide6.QtTest import QTest
+
+    canvas = TimelineCanvas(_project(clips=[_clip(duration=10)]))
+    seeks = []
+    canvas.seek_requested.connect(seeks.append)
+    y = canvas.RULER_H // 2
+    _press(canvas, canvas.LABEL_W + 100, y)
+    _move(canvas, canvas.LABEL_W + 200, y)
+    canvas.set_project(_project(clips=[_clip(duration=10)]))
+    QTest.qWait(70)
+    assert seeks == [1.0]
+
+
+def test_scrub_release_seeks_again_if_playback_advanced() -> None:
+    canvas = TimelineCanvas(_project(clips=[_clip(duration=10)]))
+    canvas.seek_requested.connect(lambda time_s: setattr(canvas.project, "current_time", time_s))
+    y = canvas.RULER_H // 2
+    _press(canvas, canvas.LABEL_W + 100, y)
+    assert canvas.project.current_time == 1.0
+    canvas.project.current_time = 1.15
+    _release(canvas, canvas.LABEL_W + 100, y)
+    assert canvas.project.current_time == 1.0
 
 
 def test_scrub_is_clamped_to_the_project_end() -> None:

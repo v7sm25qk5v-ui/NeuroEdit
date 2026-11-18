@@ -247,7 +247,7 @@ def test_project_dirty_clamps_playhead_to_new_total(window, monkeypatch):
         )
     )
     window.timeline.set_project(window.project)
-    monkeypatch.setattr(window, "_sync_player_to_timeline", lambda *, play: None)
+    monkeypatch.setattr(window, "_sync_player_to_timeline", lambda **kwargs: None)
 
     window._mark_project_dirty()
 
@@ -687,6 +687,25 @@ def test_same_source_cut_does_not_reload_player(window, monkeypatch, trim_start,
     assert seeks == expected_seek
     assert window.project.active_clip_id == 'b'
     assert window._pending_seek_ms is None
+
+
+def test_small_user_seek_reaches_the_exact_source_time(window, monkeypatch):
+    window.project.clips = [
+        VideoClip(id="trimmed", path="/tmp/source.mp4", name="Source", duration=30,
+                  start_time=0, trim_start=5, trim_end=10),
+    ]
+    window.project.active_clip_id = "trimmed"
+    window.project.current_time = 1.0
+    seeks = []
+    monkeypatch.setattr(window, "_cached_clip_media_problem", lambda _clip: None)
+    monkeypatch.setattr(window.player, "source", lambda: QUrl.fromLocalFile("/tmp/source.mp4"))
+    monkeypatch.setattr(window.player, "position", lambda: 6000)
+    monkeypatch.setattr(window.player, "setPosition", seeks.append)
+
+    window._step_frame(1)
+
+    assert seeks == [6033]
+    assert window.project.current_time == pytest.approx(1.0 + 1 / 30)
 
 
 def test_video_transition_holds_frame_until_target_and_clears_in_gap(window):
@@ -1776,9 +1795,33 @@ def test_sam_probe_references_survive_result_until_thread_has_stopped(window, mo
     assert window._sam_probe_worker is None
 
 
-def test_close_before_startup_cancels_deferred_sam_probe(window, monkeypatch):
+def test_sam_backend_is_probed_only_when_first_opened(window, monkeypatch):
+    calls = []
+
+    def probe(_backend):
+        calls.append(True)
+        return SamBackendInfo("missing", "none", "stub")
+
+    monkeypatch.setattr(SamBackend, "probe", probe)
+    QApplication.processEvents()
+    assert not calls
+    window._set_panel("sam")
+    for _ in range(100):
+        QTest.qWait(10)
+        if calls and window._sam_probe_thread is None:
+            break
+    assert len(calls) == 1
+    assert window._sam_probe_thread is None
+    window._set_panel("tips")
+    window._set_panel("sam")
+    assert not window._startup_sam_timer.isActive()
+
+
+def test_close_before_deferred_sam_probe_cancels_it(window, monkeypatch):
     calls = []
     monkeypatch.setattr(SamBackend, "probe", lambda self: calls.append(True))
+    window._set_panel("sam")
+    assert window._startup_sam_timer.isActive()
     window.close()
     QApplication.processEvents()
     assert not calls
