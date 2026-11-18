@@ -1,9 +1,29 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-18 — Timeline filmstrips published in v0.5.23-alpha.1
+
+- Published [v0.5.23-alpha.1](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.23-alpha.1)
+  from commit `27f71fb00ebac867f11db757c6091e166a3a33dd`. GitHub Latest and the
+  checked-in release notes agree. The app's updater accepted the macOS ZIP and
+  Windows EXE as upgrades from v0.5.22-alpha.1. All three public installer
+  URLs returned HTTP 200 and GitHub provides SHA-256 digests for the assets.
+- The first tag remains intact and unpublished. The released tag replaces the
+  thumbnail QRunnable with a single Python executor, removes modal event
+  reentrancy from video-import progress, and tests real cue swaps after the
+  decoder reports readiness.
+- Ruff passed. Local macOS pytest passed **841 tests** (51.57 s).
+  [Tagged CI](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44296005750)
+  passed **841 macOS tests** (109.45 s), built all three installers and published
+  them. [Main CI](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44296006124)
+  passed. Informational Windows had 818 passes, 16 failures and 7 skips.
+  All 16 failures had also appeared in v0.5.22-alpha.1.
+- The daily automation documentation remains local. Native installed-app
+  playback and Windows runtime smoke checks remain open.
+
 ## 2026-11-17 — Editor responsiveness and timeline filmstrips
 
 - The Video row shows stills sampled from each clip's trimmed source range.
-  Visible tiles decode in one low priority worker, with a small memory cache
+  Visible tiles decode on one background worker, with a small memory cache
   and no thumbnail files written to disk. Labels and trim handles remain above
   and beside the filmstrip. Cover slides hide their underlying tiles. A source
   with a timeline redaction uses plain clip bars across its split clips.
