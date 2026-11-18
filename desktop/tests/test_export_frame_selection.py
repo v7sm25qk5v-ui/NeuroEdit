@@ -92,6 +92,23 @@ def test_frames_match_seek_per_frame(qt_app, tmp_path, media, name, fps, trim_st
         exporter._release_captures()
 
 
+@pytest.mark.parametrize(("name", "speed"), [("cfr_2997", 4.0), ("vfr", 0.25)])
+def test_retimed_frames_match_source_timestamp_seeks(qt_app, tmp_path, media, name, speed):
+    project = ProjectState()
+    clip = _clip(project, media[name], trim_start=0.37, start_time=1.85)
+    clip.speed = speed
+    exporter = _exporter(project, tmp_path, fps=24)
+    ref, cap = _reference(clip.path)
+    try:
+        for i in range(24):
+            time_s = clip.start_time + i / 24
+            source_time = clip.trim_start + (time_s - clip.start_time) * speed
+            assert np.array_equal(exporter._frame_for_clip(clip, time_s), ref(source_time)), i
+    finally:
+        cap.release()
+        exporter._release_captures()
+
+
 @pytest.mark.parametrize("name", ["cfr_long", "vfr"])
 def test_two_clips_alternating_from_one_file(qt_app, tmp_path, media, name):
     project = ProjectState()

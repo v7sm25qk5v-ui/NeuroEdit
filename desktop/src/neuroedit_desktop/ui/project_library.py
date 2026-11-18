@@ -21,10 +21,11 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from neuroedit_desktop.models import effective_clip_speed
 from neuroedit_desktop.ui.styles import DANGER, SUCCESS, TEXT_MUTED, TEXT_PRIMARY
 
 
-def _clip_display_duration(clip: dict) -> float:
+def _clip_source_duration(clip: dict) -> float:
     if "trim_start" not in clip and "trim_end" not in clip:
         return max(0.0, float(clip.get("duration") or 0.0))
     return max(0.0, float(clip.get("trim_end") or 0.0) - float(clip.get("trim_start") or 0.0))
@@ -72,15 +73,16 @@ def _read_project_meta(path: Path) -> dict:
         audio = data.get("audio_tracks") or data.get("audio") or []
         slides = data.get("slides") or []
         for clip in clips:
-            display_dur = _clip_display_duration(clip)
+            source_dur = _clip_source_duration(clip)
+            speed = effective_clip_speed(clip.get("speed", 1.0), clip.get("media_type", "video"))
             start = float(clip.get("start_time") or 0.0)
-            result["total_duration"] = max(result["total_duration"], start + display_dur)
+            result["total_duration"] = max(result["total_duration"], start + source_dur / speed)
             src = clip.get("path") or clip.get("source_path")
             if src and result["first_source_path"] is None:
                 result["first_source_path"] = src
                 trim_start = float(clip.get("trim_start") or 0.0)
                 result["first_clip_duration"] = trim_start + (
-                    display_dur * 0.15 if display_dur > 0 else 5.0
+                    source_dur * 0.15 if source_dur > 0 else 5.0
                 )
             if src and not Path(src).exists():
                 result["missing_count"] += 1

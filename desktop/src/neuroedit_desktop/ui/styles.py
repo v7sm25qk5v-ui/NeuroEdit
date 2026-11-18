@@ -230,10 +230,25 @@ QPushButton,
 QToolButton {{
     background: {t.bg_card};
     border: 1px solid {t.border};
-    border-radius: 7px;
-    color: {t.text_secondary};
+    border-radius: 10px;
+    color: {t.text_primary};
     padding: 7px 11px;
     font-weight: 600;
+}}
+
+QPushButton[role="iconButton"] {{
+    background: transparent;
+    border-color: transparent;
+    color: {t.text_muted};
+    font-size: 15px;
+    padding: 0;
+}}
+
+QPushButton[role="rateButton"] {{
+    background: {t.bg_tertiary};
+    color: {t.text_secondary};
+    font-size: 11px;
+    padding: 0;
 }}
 
 QPushButton[role="panelTab"] {{
@@ -256,7 +271,9 @@ QPushButton[role="panelTab"]:checked {{
 }}
 
 QPushButton:hover,
-QToolButton:hover {{
+QToolButton:hover,
+QPushButton[role="iconButton"]:hover,
+QPushButton[role="rateButton"]:hover {{
     background: {t.bg_hover};
     border-color: {t.border_bright};
     color: {t.text_primary};
@@ -264,6 +281,7 @@ QToolButton:hover {{
 
 QPushButton:checked,
 QToolButton:checked,
+QPushButton[role="iconButton"]:checked,
 QPushButton[variant="primary"] {{
     background: {t.primary};
     border-color: {t.primary};
@@ -271,30 +289,24 @@ QPushButton[variant="primary"] {{
 }}
 
 QPushButton:pressed,
-QToolButton:pressed {{
+QToolButton:pressed,
+QPushButton[role="iconButton"]:pressed,
+QPushButton[role="rateButton"]:pressed {{
     background: {t.bg_tertiary};
     border-color: {t.border_bright};
 }}
 
+QPushButton:checked:hover,
+QToolButton:checked:hover,
+QPushButton[role="iconButton"]:checked:hover,
+QPushButton[variant="primary"]:hover,
 QPushButton:checked:pressed,
 QToolButton:checked:pressed,
+QPushButton[role="iconButton"]:checked:pressed,
 QPushButton[variant="primary"]:pressed {{
     background: {t.primary_hover};
     border-color: {t.primary_hover};
     color: {t.on_primary_hover};
-}}
-
-QPushButton:focus,
-QToolButton:focus {{
-    border-color: {t.primary};
-    outline: none;
-}}
-
-QPushButton:disabled,
-QToolButton:disabled {{
-    color: {t.text_dim};
-    background: {t.bg_secondary};
-    border-color: {t.border};
 }}
 
 QCheckBox:hover,
@@ -330,6 +342,27 @@ QPushButton[variant="danger"] {{
     background: {_rgba(t.accent_red, 0.10)};
     border-color: {_rgba(t.accent_red, 0.28)};
     color: {t.accent_red};
+}}
+
+QPushButton:enabled:focus,
+QToolButton:enabled:focus,
+QPushButton[role="iconButton"]:enabled:focus {{
+    border-color: {t.selection_outline};
+    outline: none;
+}}
+
+QPushButton:disabled,
+QToolButton:disabled,
+QPushButton[role]:disabled,
+QPushButton[variant]:disabled {{
+    color: {t.text_dim};
+    background: {t.bg_secondary};
+    border-color: {t.border};
+}}
+
+QPushButton[role="iconButton"]:disabled {{
+    background: transparent;
+    border-color: transparent;
 }}
 
 QLineEdit,
@@ -420,20 +453,41 @@ QSplitter::handle:horizontal {{
     width: 1px;
 }}
 
-QScrollBar:vertical,
-QScrollBar:horizontal {{
-    background: {t.bg_secondary};
-    width: 8px;
-    height: 8px;
+QScrollBar {{
+    background: {t.bg_tertiary};
+    border: none;
+    border-radius: 6px;
     margin: 0;
 }}
 
-QScrollBar::handle:vertical,
-QScrollBar::handle:horizontal {{
-    background: {t.border_bright};
-    border-radius: 4px;
-    min-height: 28px;
-    min-width: 28px;
+QScrollBar:vertical {{ width: 12px; }}
+QScrollBar:horizontal {{ height: 12px; }}
+
+QScrollBar::handle {{
+    background: {t.text_dim};
+    border: 2px solid {t.bg_tertiary};
+    border-radius: 6px;
+}}
+
+QScrollBar::handle:vertical {{ min-height: 28px; }}
+QScrollBar::handle:horizontal {{ min-width: 28px; }}
+QScrollBar::handle:hover {{ background: {t.text_muted}; }}
+QScrollBar::handle:pressed {{ background: {t.text_secondary}; }}
+QScrollBar::handle:focus {{ background: {t.primary}; }}
+QScrollBar::handle:disabled {{ background: {t.border_bright}; }}
+
+QScrollBar::add-line,
+QScrollBar::sub-line {{
+    border: none;
+    width: 0;
+    height: 0;
+    background: transparent;
+}}
+
+QScrollBar::add-page,
+QScrollBar::sub-page,
+QAbstractScrollArea::corner {{
+    background: transparent;
 }}
 
 QMenu {{

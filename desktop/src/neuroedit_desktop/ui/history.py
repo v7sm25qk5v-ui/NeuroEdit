@@ -258,6 +258,7 @@ class HistoryMixin:
             clip.start_time,
             clip.trim_start,
             clip.trim_end,
+            clip.effective_speed,
             clip.source_in_limit,
             clip.source_out_limit,
         )

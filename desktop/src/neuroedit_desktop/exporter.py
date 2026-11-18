@@ -159,6 +159,7 @@ class AudioSource:
     source_start: float
     duration: float
     volume: float
+    speed: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -417,6 +418,10 @@ class ProjectExporter:
     ) -> bool:
         mid = (start + end) / 2
         if clip is None or clip.media_type != "video" or not Path(clip.path).exists():
+            return True
+        # Sample retimed clips on the same output clock as annotations and
+        # redactions, using the source-time map shared with the preview.
+        if clip.effective_speed != 1.0:
             return True
         if self._slide_at_time(mid) is not None:
             return True
@@ -744,6 +749,7 @@ class ProjectExporter:
         clip = self._clip_at_time(time_s)
         source_rect = None
         source_size = None
+        redaction_time_s = None
         if clip is not None:
             clip_frame = self._frame_for_clip(clip, time_s)
             if clip_frame is None:
@@ -751,6 +757,13 @@ class ProjectExporter:
             source_size = (clip_frame.shape[1], clip_frame.shape[0])
             source_rect = self._fitted_source_rect(*source_size)
             frame = self._fit_frame(clip_frame)
+            if clip.effective_speed != 1.0:
+                source_time = self._video_states[clip.path]["last_source_time"]
+                if (isinstance(source_time, (float, int)) and math.isfinite(source_time)
+                        and clip.trim_start <= source_time < clip.trim_end):
+                    # A slow clip can repeat a protected source frame just
+                    # before its nominal redaction start on the output clock.
+                    redaction_time_s = clip.timeline_time_at(source_time)
 
         return self._paint_qt(
             frame,
@@ -760,6 +773,7 @@ class ProjectExporter:
             include_fade=True,
             source_rect=source_rect,
             source_size=source_size,
+            redaction_time_s=redaction_time_s,
         )
 
     def _frame_for_clip(self, clip: VideoClip, time_s: float) -> np.ndarray | None:
@@ -790,6 +804,7 @@ class ProjectExporter:
             self._video_states[clip.path] = {
                 "last_time_s": None,
                 "last_frame": None,
+                "last_source_time": None,
                 "cfr": None,
                 "fps": float(cap.get(cv2.CAP_PROP_FPS) or 0.0),
                 "last_index": None,
@@ -797,7 +812,7 @@ class ProjectExporter:
             }
 
         state = self._video_states[clip.path]
-        local_s = max(0.0, clip.trim_start + max(0.0, time_s - clip.start_time))
+        local_s = max(0.0, clip.source_time_at(max(time_s, clip.start_time)))
         if state["last_time_s"] == local_s and state["last_frame"] is not None:
             return state["last_frame"]  # type: ignore[return-value]
         # OpenCV's timestamp seek lands on frame index round(t * average_fps) for
@@ -815,7 +830,12 @@ class ProjectExporter:
             state["last_time_s"] = local_s
             return state["last_frame"]  # type: ignore[return-value]
         ahead = None if index is None or state["next_index"] is None else index - state["next_index"]  # type: ignore[operator]
-        read_forward = ahead is not None and 0 <= ahead <= 2
+        max_grabs = 2
+        if ahead is not None and clip.effective_speed > 1.0:
+            # A fast clip can advance several source frames per output frame.
+            # Skip that short step without seeking back to a GOP start.
+            max_grabs = max(2, min(12, math.ceil(fps * clip.effective_speed / self.settings.fps)))
+        read_forward = ahead is not None and 0 <= ahead <= max_grabs
         if read_forward:
             for _ in range(ahead):  # type: ignore[arg-type]
                 cap.grab()
@@ -824,14 +844,14 @@ class ProjectExporter:
             # for VFR recordings. Seek by the media timestamp for every rendered frame.
             cap.set(cv2.CAP_PROP_POS_MSEC, local_s * 1000.0)
         ok, frame_bgr = cap.read()
-        if ok and index is not None and abs(
-            cap.get(cv2.CAP_PROP_POS_MSEC) - index * 1000.0 / fps
-        ) > 1.0:
+        source_ms = cap.get(cv2.CAP_PROP_POS_MSEC) if ok else None
+        if source_ms is not None and index is not None and abs(source_ms - index * 1000.0 / fps) > 1.0:
             state["cfr"] = False
             index = None
             if read_forward:
                 cap.set(cv2.CAP_PROP_POS_MSEC, local_s * 1000.0)
                 ok, frame_bgr = cap.read()
+                source_ms = cap.get(cv2.CAP_PROP_POS_MSEC) if ok else None
         if not ok or frame_bgr is None:
             state["next_index"] = None
             state["last_index"] = None
@@ -840,6 +860,7 @@ class ProjectExporter:
         rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
         state["last_time_s"] = local_s
         state["last_frame"] = rgb
+        state["last_source_time"] = source_ms / 1000.0 if source_ms is not None else None
         state["last_index"] = index
         state["next_index"] = None if index is None else index + 1
         return rgb
@@ -874,6 +895,7 @@ class ProjectExporter:
         include_fade: bool,
         source_rect: QRectF | None = None,
         source_size: tuple[int, int] | None = None,
+        redaction_time_s: float | None = None,
     ) -> np.ndarray:
         height, width = frame.shape[:2]
         qimage = QImage(
@@ -908,7 +930,7 @@ class ProjectExporter:
         self._paint_captions(painter, time_s, width, height)
         # Redactions burn last and unconditionally — even behind a full-frame slide —
         # so a redaction placed over slide/still content is never skipped.
-        self._paint_redactions(painter, time_s, width, height, source_rect)
+        self._paint_redactions(painter, time_s, width, height, source_rect, redaction_time_s)
 
         painter.end()
         bits = qimage.bits()
@@ -1098,6 +1120,7 @@ class ProjectExporter:
 
     def _paint_redactions(
         self, painter: QPainter, time_s: float, w: int, h: int, source_rect: QRectF | None,
+        source_time_s: float | None = None,
     ) -> None:
         """Burn every visible redaction as a fully opaque black box, last and on
         top, so the underlying PHI is irrecoverable in the exported file."""
@@ -1107,7 +1130,9 @@ class ProjectExporter:
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(QColor("#000000")))
         for ann in self.project.annotations:
-            if ann.type != "redact" or not ann.is_visible_at(time_s):
+            if ann.type != "redact" or not (
+                ann.is_visible_at(time_s) or (source_time_s is not None and ann.is_visible_at(source_time_s))
+            ):
                 continue
             bounds = source_rect if source_rect is not None else QRectF(0, 0, w, h)
             rect = self._annotation_rect(ann, bounds.width(), bounds.height())
@@ -1169,6 +1194,7 @@ class ProjectExporter:
                             source_start=clip.trim_start,
                             duration=clip.display_duration,
                             volume=source_volume,
+                            speed=clip.effective_speed,
                         )
                     )
         for track in self.project.audio_tracks:
@@ -1229,10 +1255,20 @@ class ProjectExporter:
             label = f"a{idx}"
             delay_ms = max(0, int(round(source.timeline_start * 1000)))
             source_start = max(0.0, source.source_start)
-            source_duration = max(0.01, min(source.duration, max(0.01, duration - source.timeline_start)))
+            timeline_duration = min(source.duration, max(0.0, duration - source.timeline_start))
+            source_duration = timeline_duration * source.speed
+            retime = ""
+            if source.speed != 1.0:
+                # Atempo preserves pitch. Keep each pass in the 0.5–2 range
+                # to avoid the high-tempo shortcut that drops samples.
+                first = max(0.5, min(2.0, source.speed))
+                retime = f"atempo={first:.9f},"
+                if first != source.speed:
+                    retime += f"atempo={source.speed / first:.9f},"
+                retime += f"apad=whole_dur={timeline_duration:.9f},atrim=duration={timeline_duration:.9f},"
             chains.append(
-                f"[{idx + 1}:a:0]atrim=start={source_start:.3f}:duration={source_duration:.3f},"
-                f"asetpts=PTS-STARTPTS,volume={source.volume:.3f},"
+                f"[{idx + 1}:a:0]atrim=start={source_start:.9f}:duration={source_duration:.9f},"
+                f"asetpts=PTS-STARTPTS,{retime}volume={source.volume:.3f},"
                 f"adelay={delay_ms}:all=1[{label}]"
             )
             labels.append(f"[{label}]")

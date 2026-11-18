@@ -339,7 +339,7 @@ class SamWorkflowMixin:
         self._sam_segment_worker = SamSegmentWorker(
             self.sam_backend,
             Path(clip.path),
-            clip.trim_start + self.project.current_time - clip.start_time,
+            clip.source_time_at(self.project.current_time),
             list(self.project.sam_points),
             mask_dir,
             mask_color=hex_to_rgb(self._pending_mask_color),
@@ -463,11 +463,12 @@ class SamWorkflowMixin:
         self._pending_prompt_points = self._current_prompt_points()
         self._start_propagation(
             Path(clip.path),
-            clip.trim_start + self.project.current_time - clip.start_time,
+            clip.source_time_at(self.project.current_time),
             duration_s,
             list(self.project.sam_points),
             self._next_mask_color(),
             timeline_start_s=self.project.current_time,
+            source_speed=clip.effective_speed,
         )
 
     def _retrack_mask(self, annotation_id: str) -> None:
@@ -502,12 +503,13 @@ class SamWorkflowMixin:
         self._pending_prompt_points = list(ann.prompt_points)
         self._start_propagation(
             Path(clip.path),
-            clip.trim_start + ann.frame_time - clip.start_time,
+            clip.source_time_at(ann.frame_time),
             min(clip.start_time + clip.display_duration - ann.frame_time,
                 ann.ann_duration or 5.0),
             points,
             ann.color,
             timeline_start_s=ann.frame_time,
+            source_speed=clip.effective_speed,
         )
 
     def _start_propagation(
@@ -519,6 +521,7 @@ class SamWorkflowMixin:
         mask_color_hex: str,
         *,
         timeline_start_s: float,
+        source_speed: float = 1.0,
     ) -> None:
         self._pending_mask_color = mask_color_hex
         self._sam_job_context = {
@@ -527,7 +530,8 @@ class SamWorkflowMixin:
             "retrack_id": getattr(self, "_retrack_target_id", None),
             "prompt_points": list(getattr(self, "_pending_prompt_points", [])),
             "mask_color": mask_color_hex,
-            "time_offset_s": timeline_start_s - start_time_s,
+            "source_speed": source_speed,
+            "time_offset_s": timeline_start_s - start_time_s / source_speed,
             "start_time_s": timeline_start_s,
             "end_time_s": timeline_start_s + duration_s,
         }
@@ -549,10 +553,10 @@ class SamWorkflowMixin:
             self.sam_backend,
             video_path,
             start_time_s,
-            duration_s=duration_s,
+            duration_s=duration_s * source_speed,
             points=points,
             mask_dir=mask_dir,
-            sample_rate=2.0,
+            sample_rate=2.0 / source_speed,
             mask_color=hex_to_rgb(mask_color_hex),
         )
         self._sam_propagation_worker.moveToThread(self._sam_propagation_thread)
@@ -611,11 +615,12 @@ class SamWorkflowMixin:
 
         # Backends operate on source timestamps; persisted masks use timeline time.
         offset = float(context.get("time_offset_s", 0.0))
+        source_speed = float(context.get("source_speed", 1.0))
         start_time = float(context.get("start_time_s", "-inf"))
         end_time = float(context.get("end_time_s", "inf"))
         mask_frames = []
         for index, frame in enumerate(result.mask_frames):
-            frame_time = float(frame["time"]) + offset
+            frame_time = float(frame["time"]) / source_speed + offset
             if index == 0:
                 # A VFR seek can return the frame already visible at the seed
                 # time. Keep that mask, but do not extend it before the request.
@@ -631,7 +636,8 @@ class SamWorkflowMixin:
             return
         first_time = float(mask_frames[0]["time"])
         last_time = float(mask_frames[-1]["time"])
-        frame_step = 1.0 / result.sample_rate
+        timeline_sample_rate = result.sample_rate * source_speed
+        frame_step = 1.0 / timeline_sample_rate
         ann_duration = max(frame_step, last_time - first_time + frame_step)
         ann_duration = min(ann_duration, end_time - first_time)
         target = self._find_annotation(retrack_id) if retrack_id else None
@@ -643,7 +649,7 @@ class SamWorkflowMixin:
             target.mask_path = str(mask_frames[0]["mask_path"])
             target.mask_frames = mask_frames
             target.score = float(result.score)
-            target.sample_rate = float(result.sample_rate)
+            target.sample_rate = float(timeline_sample_rate)
         else:
             annotation = Annotation(
                 id=new_id(),
@@ -658,7 +664,7 @@ class SamWorkflowMixin:
                 mask_path=str(mask_frames[0]["mask_path"]),
                 mask_frames=mask_frames,
                 score=float(result.score),
-                sample_rate=float(result.sample_rate),
+                sample_rate=float(timeline_sample_rate),
                 prompt_points=list(context.get("prompt_points", [])),
             )
             self.project.annotations.append(annotation)

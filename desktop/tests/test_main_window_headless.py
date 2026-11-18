@@ -665,16 +665,19 @@ def test_export_settings_defaults_have_no_audio(tmp_path):
     assert exporter._audio_sources("ffmpeg") == []
 
 
-@pytest.mark.parametrize('trim_start, position, expected_seek', [(5, 5010, []), (20, 5000, [20010])])
-def test_same_source_cut_does_not_reload_player(window, monkeypatch, trim_start, position, expected_seek):
+@pytest.mark.parametrize('trim_start, speed, position, expected_seek', [
+    (5, 1.0, 5010, []), (20, 1.0, 5000, [20010]), (20, 2.0, 5000, [20020]),
+])
+def test_same_source_cut_does_not_reload_player(window, monkeypatch, trim_start, speed, position, expected_seek):
     window.project.clips = [
         VideoClip(id='a', path='/tmp/source.mp4', name='Source', duration=30,
                   start_time=0, trim_start=0, trim_end=5),
         VideoClip(id='b', path='/tmp/source.mp4', name='Source', duration=30,
-                  start_time=5, trim_start=trim_start, trim_end=trim_start + 5),
+                  start_time=5, trim_start=trim_start, trim_end=trim_start + 5, speed=speed),
     ]
     window.project.active_clip_id = 'a'
     window.project.current_time = 5.01
+    window.project.playback_rate = 1.5
     monkeypatch.setattr(window, '_cached_clip_media_problem', lambda c: None)
     monkeypatch.setattr(window.player, 'source', lambda: QUrl.fromLocalFile('/tmp/source.mp4'))
     monkeypatch.setattr(window.player, 'position', lambda: position)
@@ -685,6 +688,7 @@ def test_same_source_cut_does_not_reload_player(window, monkeypatch, trim_start,
     window._sync_player_to_timeline(play=True)
     assert loads == []
     assert seeks == expected_seek
+    assert window.player.playbackRate() == pytest.approx(speed * window.project.playback_rate)
     assert window.project.active_clip_id == 'b'
     assert window._pending_seek_ms is None
 
@@ -706,6 +710,36 @@ def test_small_user_seek_reaches_the_exact_source_time(window, monkeypatch):
 
     assert seeks == [6033]
     assert window.project.current_time == pytest.approx(1.0 + 1 / 30)
+
+
+def test_retimed_viewer_protects_decoded_frame_before_redaction_boundary(window):
+    from PySide6.QtCore import QSizeF
+    from PySide6.QtGui import QColor, QPainter
+    from PySide6.QtMultimedia import QVideoFrame
+
+    window.project.clips = [VideoClip(id="slow", path="source.mp4", name="Slow",
+                                      trim_end=2, speed=0.5)]
+    window.project.active_clip_id = "slow"
+    window.project.current_time = 1.99
+    window.project.annotations = [Annotation(
+        id="redact", type="redact", label="", color="#000000", frame_time=2, ann_duration=1,
+        geometry={"x": 0.25, "y": 0.25, "width": 0.5, "height": 0.5},
+    )]
+    view = window.video_view
+    view.set_project(window.project)
+    view.annotation_item.set_size(QSizeF(64, 36))
+    image = QImage(64, 36, QImage.Format.Format_RGB32)
+    image.fill(QColor("white"))
+    frame = QVideoFrame(image)
+    frame.setStartTime(1_000_000)
+    view.video_item.videoSink().setVideoFrame(frame)
+
+    painter = QPainter(image)
+    view.annotation_item._paint_impl(painter)
+    painter.end()
+
+    assert image.pixelColor(32, 18) == QColor("black")
+    assert image.pixelColor(4, 4) == QColor("white")
 
 
 def test_video_transition_holds_frame_until_target_and_clears_in_gap(window):

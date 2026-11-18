@@ -25,7 +25,7 @@ SamPointType = Literal["positive", "negative"]
 
 # Version of the project.json layout this build reads and writes. Bump it only
 # when a change would make older builds lose or misread data.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # An inserted slide lands on the nearest clip edge when it is this close
 # (seconds, or pixels at the current zoom, whichever is wider), so a slide
@@ -35,6 +35,14 @@ INSERT_SNAP_PX = 16.0
 # Inserting room this close to a clip edge goes to the edge instead of
 # splitting off a piece of clip too short to matter.
 MIN_SPLIT = 0.05
+CLIP_SPEEDS = (0.25, 0.5, 1.0, 1.5, 2.0, 4.0)
+
+
+def effective_clip_speed(speed: float, media_type: str) -> float:
+    if (media_type == "video" and isinstance(speed, (int, float))
+            and CLIP_SPEEDS[0] <= speed <= CLIP_SPEEDS[-1]):
+        return float(speed)
+    return 1.0
 
 
 def new_id() -> str:
@@ -74,10 +82,21 @@ class VideoClip:
     fade_in: float = 0.0   # seconds; 0 disables
     fade_out: float = 0.0
     fade_color: str = "#000000"  # color to fade to/from
+    speed: float = 1.0  # source seconds per timeline second
+
+    @property
+    def effective_speed(self) -> float:
+        return effective_clip_speed(self.speed, self.media_type)
 
     @property
     def display_duration(self) -> float:
-        return max(0.0, self.trim_end - self.trim_start)
+        return max(0.0, self.trim_end - self.trim_start) / self.effective_speed
+
+    def source_time_at(self, timeline_time: float) -> float:
+        return self.trim_start + (timeline_time - self.start_time) * self.effective_speed
+
+    def timeline_time_at(self, source_time: float) -> float:
+        return self.start_time + (source_time - self.trim_start) / self.effective_speed
 
     @property
     def effective_source_in_limit(self) -> float:
@@ -255,7 +274,6 @@ def _ripple_redaction(annotation: Annotation, anchor: float, delta: float) -> No
 
 @dataclass
 class ProjectState:
-    schema_version: int = SCHEMA_VERSION
     project_name: str = "Untitled Case"
     video_type: VideoType = "educational"
     video_goal: str = "talk-adjunct"
@@ -317,6 +335,12 @@ class ProjectState:
     # this state was loaded from. Greater than SCHEMA_VERSION means a newer
     # build wrote it and saving here would drop fields this build does not know.
     loaded_schema_version = SCHEMA_VERSION
+
+    @property
+    def schema_version(self) -> int:
+        # Older builds misread retimed footage and its redactions. Version 2
+        # lets them warn while ordinary projects remain compatible with v1.
+        return 2 if any(clip.effective_speed != 1.0 for clip in self.clips) else 1
 
     @property
     def has_case_notes(self) -> bool:
@@ -449,6 +473,59 @@ class ProjectState:
             elif annotation.frame_time >= threshold:
                 annotation.frame_time = max(0.0, annotation.frame_time + delta)
             _shift_mask_frames(annotation, annotation.frame_time - old_start)
+
+    def set_clip_speed(self, clip: VideoClip, speed: float) -> bool:
+        """Change the clip's duration while keeping timed edits on their footage."""
+        if (clip.media_type != "video" or not isinstance(speed, (int, float))
+                or not CLIP_SPEEDS[0] <= speed <= CLIP_SPEEDS[-1]
+                or speed == clip.effective_speed):
+            return False
+
+        start = clip.start_time
+        old_duration = clip.display_duration
+        old_end = start + old_duration
+        clip.speed = speed
+        new_duration = clip.display_duration
+        new_end = start + new_duration
+
+        def retime(time_s: float) -> float:
+            if time_s <= start:
+                return time_s
+            if time_s >= old_end:
+                return new_end + (time_s - old_end)
+            return start + (time_s - start) / old_duration * new_duration
+
+        for other in self.clips:
+            if other is not clip and other.start_time >= old_end - 1e-9:
+                other.start_time = new_end + max(0.0, other.start_time - old_end)
+        for slide in self.slides:
+            if not slide_is_inserted(slide):
+                slide.duration = retime(slide.start_time + slide.duration) - retime(slide.start_time)
+            slide.start_time = retime(slide.start_time)
+        audio_shifts = {}
+        for track in self.audio_tracks:
+            new_start = retime(track.start_time)
+            audio_shifts[track.id] = new_start - track.start_time
+            track.start_time = new_start
+        for segment in self.transcript_segments:
+            if segment.audio_track_id in audio_shifts:
+                shift = audio_shifts[segment.audio_track_id]
+                segment.start_time += shift
+                segment.end_time += shift
+            else:
+                segment.start_time, segment.end_time = retime(segment.start_time), retime(segment.end_time)
+        for marker in self.markers:
+            marker.time = retime(marker.time)
+        for annotation in self.annotations:
+            new_start = retime(annotation.frame_time)
+            if annotation.ann_duration > 0:
+                new_end_time = retime(annotation.frame_time + annotation.ann_duration)
+                annotation.ann_duration = max(math.ulp(new_end_time), new_end_time - new_start)
+            annotation.frame_time = new_start
+            for frame in annotation.mask_frames:
+                frame["time"] = retime(float(frame["time"]))
+        self.current_time = retime(self.current_time)
+        return True
 
     def move_redactions_with_clips(self, old_spans: dict[str, tuple[float, float]]) -> None:
         """Re-place redactions after clips were reordered.
@@ -591,8 +668,8 @@ class ProjectState:
         self, clip: VideoClip, time_s: float, gap_duration: float, *, suffix: str = "(after still)",
     ) -> None:
         left_duration = time_s - clip.start_time
-        split_trim = clip.trim_start + left_duration
-        right_duration = clip.trim_end - split_trim
+        split_trim = clip.source_time_at(time_s)
+        right_duration = (clip.trim_end - split_trim) / clip.effective_speed
         if left_duration < MIN_SPLIT:
             clip.start_time += gap_duration
             return
@@ -620,6 +697,7 @@ class ProjectState:
             fade_in=clip.fade_in,
             fade_out=clip.fade_out,
             fade_color=clip.fade_color,
+            speed=clip.speed,
         )
         idx = self.clips.index(clip)
         self.clips.insert(idx + 1, right)
@@ -851,7 +929,7 @@ class ProjectState:
         return clip
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return {"schema_version": self.schema_version, **asdict(self)}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ProjectState:
@@ -926,6 +1004,9 @@ class ProjectState:
         # their timing and potentially detaching privacy coverage.
         values = [project.duration, project.current_time, project.zoom, project.scroll_left]
         for clip in project.clips:
+            if (not isinstance(clip.speed, (int, float))
+                    or not CLIP_SPEEDS[0] <= clip.speed <= CLIP_SPEEDS[-1]):
+                raise ValueError("Clip speeds must be between 0.25× and 4×.")
             values.extend((clip.duration, clip.start_time, clip.trim_start, clip.trim_end,
                            clip.start_time + clip.display_duration))
         for track in project.audio_tracks:

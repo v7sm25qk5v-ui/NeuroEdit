@@ -41,7 +41,8 @@ def _color(item):
     return image.pixelColor(image.width() // 2, image.height() // 2)
 
 
-def test_real_drag_shows_new_long_gop_frames_before_release(window, tmp_path):  # noqa: F811
+@pytest.mark.parametrize("speed", [1.0, 2.0])
+def test_real_drag_shows_new_long_gop_frames_before_release(window, tmp_path, speed):  # noqa: F811
     ffmpeg = resolve_ffmpeg()
     if not ffmpeg:
         pytest.skip("Real video preview test requires FFmpeg")
@@ -55,7 +56,7 @@ def test_real_drag_shows_new_long_gop_frames_before_release(window, tmp_path):  
     ], check=True, timeout=30)
     window.project.clips = [VideoClip(
         id="a", path=str(path), name="Trimmed", trim_start=1, trim_end=6,
-        duration=6, width=320, height=180,
+        duration=6, width=320, height=180, speed=speed,
     )]
     window.project.active_clip_id = "a"
     window.project.zoom = 100
@@ -66,16 +67,16 @@ def test_real_drag_shows_new_long_gop_frames_before_release(window, tmp_path):  
     left = Qt.MouseButton.LeftButton
     none = Qt.MouseButton.NoButton
 
-    _send(canvas, QEvent.Type.MouseButtonPress, 0.4, left, left)
+    _send(canvas, QEvent.Type.MouseButtonPress, 0.4 / speed, left, left)
     assert _wait(lambda: _color(window.video_view.scrub_item).red() > 180)
-    _send(canvas, QEvent.Type.MouseMove, 2.2, none, left)
+    _send(canvas, QEvent.Type.MouseMove, 2.2 / speed, none, left)
     assert _wait(lambda: _color(window.video_view.scrub_item).blue() > 180)
-    assert window.project.current_time == pytest.approx(2.2)
+    assert window.project.current_time == pytest.approx(2.2 / speed)
     assert window.video_view.showing_scrub_frame
 
     # Commit a position which had no preceding mouse move.
-    _send(canvas, QEvent.Type.MouseButtonRelease, 2.5, left, none)
-    assert window.project.current_time == pytest.approx(2.5)
+    _send(canvas, QEvent.Type.MouseButtonRelease, 2.5 / speed, left, none)
+    assert window.project.current_time == pytest.approx(2.5 / speed)
     assert _wait(lambda: window.player.position() == 3500 and not window.video_view.showing_scrub_frame)
     assert window.video_view.video_item.isVisible()
     assert window._scrub_decoder is None

@@ -95,8 +95,9 @@ def test_sort_missing_media_first(library):
     assert _row_names(library)[0] == "Beta Case"  # has 1 missing source file
 
 
+@pytest.mark.parametrize("speed, expected_duration", [(1.0, 20), (2.0, 15), (0.5, 30)])
 def test_project_meta_uses_timeline_duration_and_trimmed_thumbnail_offset(
-    app, tmp_path, monkeypatch
+    app, tmp_path, speed, expected_duration,
 ):
     source = tmp_path / "source.mp4"
     source.write_bytes(b"video")
@@ -114,6 +115,7 @@ def test_project_meta_uses_timeline_duration_and_trimmed_thumbnail_offset(
                         "start_time": 10.0,
                         "trim_start": 40.0,
                         "trim_end": 50.0,
+                        "speed": speed,
                     }
                 ],
             }
@@ -121,7 +123,7 @@ def test_project_meta_uses_timeline_duration_and_trimmed_thumbnail_offset(
         encoding="utf-8",
     )
     meta = _read_project_meta(project)
-    assert meta["total_duration"] == pytest.approx(20.0)
+    assert meta["total_duration"] == pytest.approx(expected_duration)
     assert meta["first_clip_duration"] == pytest.approx(41.5)
 
     settings = QSettings("NeuroEdit", "Desktop")
@@ -130,7 +132,7 @@ def test_project_meta_uses_timeline_duration_and_trimmed_thumbnail_offset(
     dialog = ProjectLibraryDialog()
     try:
         row_text = dialog.list_widget.item(0).text()
-        assert "0:20" in row_text
+        assert f"0:{expected_duration}" in row_text
         assert meta["thumbnail_allowed"] is False
     finally:
         dialog.close()

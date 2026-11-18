@@ -8,8 +8,8 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import QEvent, QPointF, Qt  # noqa: E402
-from PySide6.QtGui import QKeyEvent, QMouseEvent  # noqa: E402
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt  # noqa: E402
+from PySide6.QtGui import QContextMenuEvent, QKeyEvent, QMouseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from neuroedit_desktop.models import (  # noqa: E402
@@ -989,6 +989,106 @@ def test_rename_clip_with_unchanged_name_is_not_an_edit(monkeypatch) -> None:
     canvas._rename_clip(clip)
 
     assert counts["edit"] == 0
+
+
+def test_clip_speed_retimes_overlays_and_keeps_the_source_trim():
+    clip = _clip(start=2.0)
+    clip.trim_start, clip.trim_end = 3.0, 7.0
+    following = _clip("next", start=8.0)
+    gap = Slide("gap", "Inserted", duration=2.0, start_time=6.0, insert=True)
+    track = AudioTrack("voice", "voice.wav", "Narration", start_time=3.0, duration=2.0)
+    redaction = Annotation("r", 3.0, 3.5, "redact", "Redaction", "#000")
+    mask = Annotation("m", 3.5, 1.5, "tracked-mask", "Mask", "#fff", mask_frames=[
+        {"time": 3.5, "mask_path": "one.png"}, {"time": 5.0, "mask_path": "two.png"},
+    ])
+    marker = TimelineMarker("marker", 4.0, "Moment")
+    narration_caption = TranscriptSegment("linked", "voice", 3.5, 4.5, "Narration")
+    time_caption = TranscriptSegment("unlinked", None, 3.5, 4.5, "Frame")
+    project = _project(clips=[clip, following], slides=[gap], audio_tracks=[track],
+                       annotations=[redaction, mask], markers=[marker],
+                       transcript_segments=[narration_caption, time_caption], current_time=4.0)
+    assert project.set_clip_speed(clip, 2.0)
+    assert (clip.trim_start, clip.trim_end, clip.display_duration) == (3.0, 7.0, 2.0)
+    assert clip.source_time_at(3.0) == 5.0
+    assert clip.timeline_time_at(5.0) == 3.0
+    assert (gap.start_time, gap.duration, following.start_time) == (4.0, 2.0, 6.0)
+    assert [project.current_time, marker.time] == [3.0, 3.0]
+    assert (redaction.frame_time, redaction.ann_duration) == (2.5, 2.0)
+    assert (mask.frame_time, mask.ann_duration) == (2.75, 0.75)
+    assert [frame["time"] for frame in mask.mask_frames] == [2.75, 3.5]
+    assert (track.start_time, track.duration) == (2.5, 2.0)
+    assert (narration_caption.start_time, narration_caption.end_time) == (3.0, 4.0)
+    assert (time_caption.start_time, time_caption.end_time) == (2.75, 3.25)
+
+    data = project.to_dict()
+    restored = ProjectState.from_dict(data)
+    assert data["schema_version"] == restored.loaded_schema_version == 2
+    assert restored.clips[0].speed == 2.0
+    assert restored.to_dict() == data
+    assert project.set_clip_speed(clip, 1.0)
+    assert project.to_dict()["schema_version"] == 1
+    assert (redaction.frame_time, redaction.ann_duration, following.start_time) == (3.0, 3.5, 8.0)
+    for saved_clip in data["clips"]:
+        del saved_clip["speed"]
+    data["schema_version"] = 1
+    assert ProjectState.from_dict(data).clips[0].effective_speed == 1.0
+
+
+def test_clip_speed_menu_applies_one_edit_and_disables_for_images(monkeypatch):
+    clip = _clip(duration=8.0)
+    project = _project(clips=[clip])
+    canvas = TimelineCanvas(project)
+    counts = _signal_counts(canvas)
+    chosen_text = "0.5×"
+
+    class SpeedMenu(editor_panels.QMenu):
+        submenu = None
+
+        def addMenu(self, title):  # noqa: N802
+            self.submenu = super().addMenu(title)
+            return self.submenu
+
+        def exec(self, _pos):
+            if clip.media_type == "image":
+                assert self.submenu is None
+                return None
+            assert self.submenu.title() == "Clip Speed"
+            actions = self.submenu.actions()
+            checked, = [action for action in actions if action.isChecked()]
+            assert checked.text().split()[0] == f"{clip.effective_speed:g}×"
+            return next(action for action in actions if action.text() == chosen_text)
+
+    monkeypatch.setattr(editor_panels, "QMenu", SpeedMenu)
+    pos = QPoint(canvas.LABEL_W + 40, canvas.RULER_H + 20)
+    event = QContextMenuEvent(QContextMenuEvent.Reason.Mouse, pos, pos)
+    canvas.contextMenuEvent(event)
+    assert clip.display_duration == 16.0 and counts["edit"] == 1
+    canvas.contextMenuEvent(event)
+    assert counts["edit"] == 1  # Re-selecting speed does not add an undo entry.
+    chosen_text = "1× (Normal)"
+    canvas.contextMenuEvent(event)
+    assert clip.display_duration == 8.0 and counts["edit"] == 2
+    clip.media_type = "image"
+    canvas.contextMenuEvent(event)
+    assert counts["edit"] == 2
+
+
+def test_trim_and_splits_map_retimed_timeline_seconds_to_source_seconds():
+    clip = _clip(duration=10.0)
+    clip.speed = 2.0
+    project = _project(clips=[clip])
+    timeline = RichTimelineWidget(project)
+    timeline.canvas._apply_trim_start(clip, 1.0)
+    assert clip.trim_start == 2.0
+    timeline.canvas._apply_trim_end(clip, 3.0)
+    assert clip.trim_end == 8.0
+    project.current_time = 1.5
+    timeline._cut_active_clip()
+    left, right = project.clips
+    assert (left.trim_end, right.trim_start, right.start_time, right.speed) == (5.0, 5.0, 1.5, 2.0)
+    project.split_clip_for_gap(right, 2.0, 3.0)
+    assert project.clips[2].start_time == 5.0
+    assert project.clips[2].trim_start == 6.0 and project.clips[2].speed == 2.0
 
 
 def _label(ann_id: str = "ann-1", at: float = 1.0, duration: float = 2.0) -> Annotation:

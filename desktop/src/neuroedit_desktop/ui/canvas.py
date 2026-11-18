@@ -181,12 +181,27 @@ class AnnotationGraphicsItem(QGraphicsObject):
     def _paint_redactions(self, painter: QPainter, w: float, h: float) -> None:
         """Burn opaque black over every visible redaction, last and on top, so no
         PHI (and no other annotation) can show through. Mirrors the exporter."""
+        redactions = [ann for ann in self.project.annotations if ann.type == "redact"]
+        if not redactions:
+            return
+        time_s = self.project.current_time
+        decoded_time = time_s
+        clip = self.project.active_clip
+        if (clip is not None and clip.effective_speed != 1.0 and self.video_item.isVisible()
+                and clip.start_time <= time_s < clip.start_time + clip.display_duration):
+            frame = self.video_item.videoSink().videoFrame()
+            if frame.isValid() and frame.startTime() >= 0:
+                source_time = frame.startTime() / 1_000_000
+                if clip.trim_start <= source_time < clip.trim_end:
+                    # A slow clip can display the same source frame over several
+                    # timeline ticks. Protect that frame as well as the playhead.
+                    decoded_time = clip.timeline_time_at(source_time)
         painter.setOpacity(1.0)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(QColor("#000000")))
         selected_redaction = None
-        for ann in self.project.annotations:
-            if ann.type != "redact" or not ann.is_visible_at(self.project.current_time):
+        for ann in redactions:
+            if not (ann.is_visible_at(time_s) or ann.is_visible_at(decoded_time)):
                 continue
             painter.drawRect(self._rect_from_geometry(ann, w, h))
             if self.project.selected_annotation_id == ann.id:
@@ -825,6 +840,10 @@ class VideoGraphicsView(QGraphicsView):
                 return
             self.clear_video_transition()
         self._last_video_frame = QVideoFrame(frame)
+        clip = self.annotation_item.project.active_clip
+        if (clip is not None and clip.effective_speed != 1.0
+                and any(ann.type == "redact" for ann in self.annotation_item.project.annotations)):
+            self.annotation_item.update()
 
     def show_scrub_frame(self, image: QImage | None, size: tuple[int, int] | None = None) -> None:
         self.clear_video_transition()

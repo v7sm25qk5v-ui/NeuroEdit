@@ -9,11 +9,13 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtWidgets import QWidget  # noqa: E402
+from PySide6.QtCore import QPoint, QRect, Qt  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
+from PySide6.QtWidgets import QStyle, QStyleOptionSlider, QWidget  # noqa: E402
 
 from neuroedit_desktop.models import Annotation, ProjectState, VideoClip  # noqa: E402
 from neuroedit_desktop.ui import editor_panels, styles  # noqa: E402
-from neuroedit_desktop.ui.editor_panels import TimelineCanvas  # noqa: E402
+from neuroedit_desktop.ui.editor_panels import RichTimelineWidget, TimelineCanvas  # noqa: E402
 from neuroedit_desktop.ui.labels_panel import LabelsPanel  # noqa: E402
 from neuroedit_desktop.ui.tutorial import TutorialCard  # noqa: E402
 from test_main_window_headless import _review_state, app, reviewed, window  # noqa: E402, F401
@@ -87,3 +89,41 @@ def test_label_presets_follow_a_theme_switch(app, dark_then_light):  # noqa: F81
     assert styles.DARK_THEME.bg_card in button.styleSheet()
     assert styles.LIGHT_THEME.bg_card not in button.styleSheet()
     assert styles.DARK_THEME.text_muted in panel._presets_toggle.styleSheet()
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_arrowless_timeline_scrollbar_can_drag_and_hides_when_content_fits(app, dark_then_light, theme):  # noqa: F811
+    styles.apply_app_style(app, theme)
+    project = ProjectState(
+        zoom=100,
+        clips=[VideoClip(id="clip", path="/tmp/clip.mp4", name="Clip", duration=40, trim_end=40)],
+    )
+    timeline = RichTimelineWidget(project)
+    timeline.setMinimumHeight(340)
+    timeline.resize(520, 340)
+    timeline.show()
+    app.processEvents()
+    try:
+        bar = timeline.scroll.horizontalScrollBar()
+        assert bar.isVisible() and bar.maximum() > 0
+        assert timeline.rect().contains(QRect(bar.mapTo(timeline, QPoint()), bar.size()))
+        opts = QStyleOptionSlider()
+        bar.initStyleOption(opts)
+        style = bar.style()
+        control = QStyle.ComplexControl.CC_ScrollBar
+        assert style.subControlRect(control, opts, QStyle.SubControl.SC_ScrollBarAddLine, bar).isEmpty()
+        assert style.subControlRect(control, opts, QStyle.SubControl.SC_ScrollBarSubLine, bar).isEmpty()
+        thumb = style.subControlRect(control, opts, QStyle.SubControl.SC_ScrollBarSlider, bar)
+        # The thin visible pill leaves a small margin for the pointer.
+        assert thumb.height() >= 12
+        QTest.mousePress(bar, Qt.MouseButton.LeftButton, pos=thumb.center())
+        QTest.mouseMove(bar, thumb.center() + QPoint(46, 0))
+        QTest.mouseRelease(bar, Qt.MouseButton.LeftButton, pos=thumb.center() + QPoint(46, 0))
+        assert bar.value() > 0
+
+        project.zoom = 1
+        timeline.refresh()
+        app.processEvents()
+        assert bar.maximum() == 0 and not bar.isVisible()
+    finally:
+        timeline.close()

@@ -410,6 +410,26 @@ def test_propagation_discards_result_after_same_project_edit(workflow):
     )
 
 
+def test_propagation_keeps_masks_aligned_on_a_retimed_clip(workflow):
+    from neuroedit_desktop.sam_backend import SamPropagationResult
+
+    workflow.project.clips[0].speed = 2.0
+    workflow.project.current_time = 10.5
+    workflow._run_propagation()
+    worker = workflow._sam_propagation_worker
+    assert worker.start_time_s == pytest.approx(5.0)
+    assert worker.duration_s == pytest.approx(3.0)
+    assert worker.sample_rate == pytest.approx(1.0)
+    workflow._on_propagation_finished(SamPropagationResult(
+        mask_frames=[{"time": time_s, "mask_path": f"/tmp/frame-{time_s}.png"}
+                     for time_s in (5.0, 6.0, 7.0, 8.0)],
+        score=0.9, sample_rate=1.0, backend="test",
+    ), None)
+    annotation = workflow.project.annotations[0]
+    assert [frame["time"] for frame in annotation.mask_frames] == pytest.approx([10.5, 11.0, 11.5])
+    assert annotation.ann_duration == pytest.approx(1.5)
+
+
 def test_retrack_uses_annotation_clip_and_clamps_window(workflow):
     from neuroedit_desktop.models import VideoClip
 

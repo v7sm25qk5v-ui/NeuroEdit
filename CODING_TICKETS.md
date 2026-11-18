@@ -1047,3 +1047,29 @@ redacted sources.
 changes while dragging, exact release, source and aspect changes, timed
 redaction boundaries, and progressive visible filmstrip loading. Installed-app
 playback with the user's footage and native Windows remain open.
+
+## NE-035 — Per-clip speed effects
+
+**Reported 2026-11-18.** The transport speed button changes how fast the editor
+plays the timeline. Users also need a speed edit for an individual clip.
+
+**Acceptance.** Right-click a video clip to choose a speed or reset it to 1×.
+Save the speed and support undo. Preview, scrubbing, split/trim and export use
+the same time mapping. Source audio follows the effect. Timeline redactions
+continue to cover the same footage and downstream items shift with clip length.
+
+**Evidence.** Menu, trim, split, ripple, and reopen checks passed. Real
+synthetic exports exercised both speed extremes, source audio, and timed
+redactions. Qt scrub and decoded-frame tests covered the preview mapping.
+
+## NE-036 — Refreshed scrollbars and buttons
+
+**Reported 2026-11-18.** Shared controls use blocky scrollbar chrome that
+does not fit the rest of the editor.
+
+**Acceptance.** Light and dark themes use rounded rails and thumbs plus
+consistent hover, pressed, checked, and focus states on buttons. Verify
+horizontal and vertical scrolling and timeline scrollbar visibility.
+
+**Evidence.** Offscreen screenshots checked both themes. Compact editor tests
+verify the timeline scrollbar stays visible and can be dragged.

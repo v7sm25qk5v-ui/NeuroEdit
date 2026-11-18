@@ -21,10 +21,14 @@ class ScrubTarget:
     trim_start: float
     trim_end: float
     source_ms: int
+    speed: float = 1.0
 
     @property
-    def clip_key(self) -> tuple[str, str, float, float, float]:
-        return self.clip_id, self.path, self.start, self.trim_start, self.trim_end
+    def clip_key(self) -> tuple[str, str, float, float, float, float]:
+        return self.clip_id, self.path, self.start, self.trim_start, self.trim_end, self.speed
+
+    def timeline_time_at(self, source_time: float) -> float:
+        return self.start + (source_time - self.trim_start) / self.speed
 
 
 @dataclass(frozen=True)

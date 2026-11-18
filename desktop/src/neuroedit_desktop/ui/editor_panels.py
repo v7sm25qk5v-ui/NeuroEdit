@@ -40,6 +40,8 @@ from PySide6.QtWidgets import (
 
 from neuroedit_desktop import diagnostics
 from neuroedit_desktop.models import (
+    CLIP_SPEEDS,
+    MIN_SPLIT,
     ProjectState,
     Slide,
     TimelineMarker,
@@ -438,7 +440,7 @@ class TimelineCanvas(QWidget):
             p.video_goal, round(p.target_presentation_minutes, 1),
             tuple(
                 (c.id, round(c.start_time, 3), round(c.trim_start, 3),
-                 round(c.trim_end, 3), c.name, c.media_type)
+                 round(c.trim_end, 3), c.name, c.media_type, c.effective_speed)
                 for c in p.clips
             ),
             tuple(
@@ -664,8 +666,10 @@ class TimelineCanvas(QWidget):
             label_rect.setHeight(19)
             if show_warning:
                 label_rect.setRight(label_rect.right() - warning_width - 8)
+        speed = clip.effective_speed
+        title = f"{clip.name} · {speed:g}×" if speed != 1.0 else clip.name
         self._paint_block(
-            painter, rect, clip.name, color, fill_alpha,
+            painter, rect, title, color, fill_alpha,
             selected=selected, hovered=hovered,
             label_rect=label_rect,
         )
@@ -723,7 +727,7 @@ class TimelineCanvas(QWidget):
             self._filmstrip_key = None
             return
         videos = tuple(
-            (clip.path, clip.start_time, clip.trim_start, clip.trim_end)
+            (clip.path, clip.start_time, clip.trim_start, clip.display_duration, clip.effective_speed)
             for clip in self.project.clips if clip.media_type == "video"
         )
         redactions = tuple(
@@ -760,14 +764,14 @@ class TimelineCanvas(QWidget):
             return os.path.normcase(os.path.abspath(path))
 
         protected = {
-            path_key(path) for path, start, trim_in, trim_out in videos
-            if any(lo <= start + trim_out - trim_in and hi >= start for lo, hi in redactions)
+            path_key(path) for path, start, _trim_in, duration, _speed in videos
+            if any(lo <= start + duration and hi >= start for lo, hi in redactions)
         }
         band = self._filmstrip_band()
         tiles = []
         inset = self.HANDLE_PX + 2
-        for path, start, trim_in, trim_out in videos:
-            clip_width = (trim_out - trim_in) * zoom
+        for path, start, trim_in, duration, speed in videos:
+            clip_width = duration * zoom
             if not math.isfinite(clip_width) or clip_width < 30 or not path:
                 continue
             clip_left = self.LABEL_W + start * zoom
@@ -788,7 +792,7 @@ class TimelineCanvas(QWidget):
                 tile_end = tile_start + cell / zoom
                 if any(lo < tile_end and hi > tile_start for lo, hi in covers):
                     continue
-                source_ms = (trim_in + offset + cell / (2 * zoom)) * 1000
+                source_ms = (trim_in + (offset + cell / (2 * zoom)) * speed) * 1000
                 if not math.isfinite(source_ms):
                     continue
                 tiles.append(((path, math.floor(source_ms)), QRectF(x, band.top(), cell - 1, band.height())))
@@ -1424,12 +1428,20 @@ class TimelineCanvas(QWidget):
             item_id = hit[1]
             menu = QMenu(self)
             rename_action = None
+            speed_actions = {}
             clip = None
             if base_kind == "clip":
                 clip = next((c for c in self.project.clips if c.id == item_id), None)
                 if clip is None:
                     return
                 rename_action = menu.addAction("Rename Clip…")
+                if clip.media_type == "video":
+                    speed_menu = menu.addMenu("Clip Speed")
+                    for speed in CLIP_SPEEDS:
+                        action = speed_menu.addAction("1× (Normal)" if speed == 1.0 else f"{speed:g}×")
+                        action.setCheckable(True)
+                        action.setChecked(speed == clip.effective_speed)
+                        speed_actions[action] = speed
                 menu.addSeparator()
                 delete_action = menu.addAction("Delete Clip")
             elif base_kind == "audio":
@@ -1445,6 +1457,11 @@ class TimelineCanvas(QWidget):
             chosen = menu.exec(event.globalPos())
             if rename_action is not None and chosen == rename_action:
                 self._rename_clip(clip)
+            elif chosen in speed_actions and self.project.set_clip_speed(clip, speed_actions[chosen]):
+                self.project.duration = project_end_time(self.project)
+                self.refresh_geometry()
+                self.update()
+                self.project_changed.emit()
             elif chosen == delete_action:
                 self._delete_selected_item()
 
@@ -1545,6 +1562,8 @@ class TimelineCanvas(QWidget):
             if hover is not None and hover[0] == "clip":
                 clip = next(c for c in self.project.clips if c.id == hover[1])
                 tooltip = f"{clip.name} · {clip.display_duration:g}s"
+                if clip.effective_speed != 1.0:
+                    tooltip += f" · {clip.effective_speed:g}× speed"
             if hover is not None and hover[0] == "slide":
                 slide = self._slide_by_id(hover[1])
                 if slide is not None:
@@ -1635,12 +1654,11 @@ class TimelineCanvas(QWidget):
 
     def _apply_trim_start(self, clip, time_at: float) -> None:
         self._rewind_trim_drag(clip)
-        zoom_min_dur = 0.05
         old_duration = clip.display_duration
+        min_duration = min(MIN_SPLIT, old_duration)
         timeline_start, trim_start = clip.start_time, clip.trim_start
-        max_start = clip.trim_end - zoom_min_dur
-        source_delta = max(0.0, time_at) - timeline_start
-        new_trim_start = trim_start + source_delta
+        max_start = clip.trim_end - min_duration * clip.effective_speed
+        new_trim_start = clip.source_time_at(max(0.0, time_at))
         new_trim_start = max(
             clip.effective_source_in_limit,
             min(new_trim_start, max_start),
@@ -1649,21 +1667,17 @@ class TimelineCanvas(QWidget):
         clip.start_time = timeline_start
         duration_delta = clip.display_duration - old_duration
         if duration_delta < 0:
-            anchor = timeline_start + (new_trim_start - trim_start)
+            anchor = timeline_start + (new_trim_start - trim_start) / clip.effective_speed
         else:
             anchor = timeline_start
         self.project.ripple_after(anchor, duration_delta, excluded_clip_id=clip.id)
 
     def _apply_trim_end(self, clip, time_at: float) -> None:
         self._rewind_trim_drag(clip)
-        zoom_min_dur = 0.05
         old_duration = clip.display_duration
         old_end = clip.start_time + old_duration
-        time_at = max(clip.start_time + zoom_min_dur, time_at)
-        new_duration = time_at - clip.start_time
-        new_trim_end = clip.trim_start + new_duration
-        new_trim_end = min(clip.effective_source_out_limit, new_trim_end)
-        clip.trim_end = max(clip.trim_start + zoom_min_dur, new_trim_end)
+        time_at = max(clip.start_time + min(MIN_SPLIT, old_duration), time_at)
+        clip.trim_end = min(clip.effective_source_out_limit, clip.source_time_at(time_at))
         self.project.ripple_after(
             old_end,
             clip.display_duration - old_duration,
@@ -1893,7 +1907,7 @@ class RichTimelineWidget(QWidget):
         self.scroll.setToolTip("Scroll to move through time. Shift-scroll to reach stacked label rows.")
         self.scroll.setWidget(self.canvas)
         self.scroll.setWidgetResizable(False)
-        self.scroll.setFixedHeight(self._timeline_scroll_height())
+        self.scroll.setMaximumHeight(self._timeline_scroll_height())
         self.scroll.horizontalScrollBar().valueChanged.connect(self._scroll_changed)
         self.scroll.verticalScrollBar().valueChanged.connect(self.canvas._on_filmstrip_vertical_scroll)
 
@@ -1921,11 +1935,12 @@ class RichTimelineWidget(QWidget):
             self.trash.raise_()
 
     def _position_trash(self) -> None:
-        # Bottom-right of the timeline scroll area, clear of the 8px scrollbar.
+        # Bottom-right of the timeline scroll area, clear of the scrollbar.
         geo = self.scroll.geometry()
         margin = 14
         x = geo.right() - self.trash.width() - margin
-        y = geo.bottom() - self.trash.height() - margin - 8
+        scrollbar = self.scroll.horizontalScrollBar().sizeHint().height()
+        y = geo.bottom() - self.trash.height() - margin - scrollbar
         self.trash.move(max(geo.left(), x), max(geo.top(), y))
 
     def resizeEvent(self, event) -> None:  # noqa: N802
@@ -1946,7 +1961,7 @@ class RichTimelineWidget(QWidget):
         self._refresh_time_label()
         self.canvas.refresh_geometry()
         self.canvas.update()
-        self.scroll.setFixedHeight(self._timeline_scroll_height())
+        self.scroll.setMaximumHeight(self._timeline_scroll_height())
         if getattr(self, "trash", None) is not None and self.trash.isVisible():
             self._position_trash()
 
@@ -2070,15 +2085,14 @@ class RichTimelineWidget(QWidget):
         if target is None:
             return
 
-        cut_offset = playhead - target.start_time  # seconds into the timeline-visible portion
         original_trim_end = target.trim_end
         original_source_out_limit = target.source_out_limit
-        split_trim = target.trim_start + cut_offset
+        split_trim = target.source_time_at(playhead)
 
         # Need at least a tiny sliver on each side for a meaningful split.
-        if split_trim - target.trim_start < 0.05:
+        if playhead - target.start_time < MIN_SPLIT:
             return
-        if original_trim_end - split_trim < 0.05:
+        if target.start_time + target.display_duration - playhead < MIN_SPLIT:
             return
 
         # Trim the first piece. Its fade-out moves to the new right piece, since
@@ -2110,6 +2124,7 @@ class RichTimelineWidget(QWidget):
             fade_in=0.0,
             fade_out=right_fade_out,
             fade_color=target.fade_color,
+            speed=target.speed,
         )
         idx = self.project.clips.index(target)
         self.project.clips.insert(idx + 1, right)

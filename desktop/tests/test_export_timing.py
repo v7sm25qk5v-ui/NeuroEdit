@@ -139,6 +139,78 @@ def test_fractional_redaction_between_fast_video_segments(qt_app, tmp_path, monk
         capture.release()
 
 
+@pytest.mark.parametrize("speed", [0.25, 4.0])
+def test_clip_speed_retimes_trimmed_video_and_source_audio(qt_app, tmp_path, monkeypatch, ffmpeg, speed):
+    source = tmp_path / "source.mp4"
+    subprocess.run([
+        ffmpeg, "-v", "error", "-y",
+        "-f", "lavfi", "-i", "color=c=red:s=64x64:r=30:d=1",
+        "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+        "-f", "lavfi", "-i", "color=c=blue:s=64x64:r=30:d=1",
+        "-f", "lavfi", "-i", "sine=frequency=880:duration=1",
+        "-filter_complex", "[0:v][1:a][2:v][3:a]concat=n=2:v=1:a=1[v][a]",
+        "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-c:a", "aac", str(source),
+    ], check=True, timeout=30)
+    project = ProjectState()
+    clip = project.add_clip(source, 2, 64, 64)
+    clip.trim_start, clip.trim_end, clip.speed = 0.2, 1.8, speed
+    retimed_duration = 1.6 / speed
+    following = project.add_clip(source, 2, 64, 64)
+    following.trim_end = 0.2
+    project.annotations.append(Annotation(
+        id=new_id(), type="redact", label="Redacted", color="#000000",
+        frame_time=retimed_duration * 0.25, ann_duration=retimed_duration * 0.2,
+        geometry={"x": 0, "y": 0, "width": 1, "height": 1},
+    ))
+    if speed == 0.25:
+        project.annotations.append(Annotation(
+            id=new_id(), type="redact", label="Redacted", color="#000000",
+            frame_time=(1.0 - 0.2) / speed, ann_duration=0.1,
+            geometry={"x": 0, "y": 0, "width": 1, "height": 1},
+        ))
+    exporter = _exporter(project, tmp_path, monkeypatch)
+    assert [segment.kind for segment in exporter._build_segments(exporter._duration())] == [
+        "render", "video",
+    ]
+    exporter.export()
+
+    capture = cv2.VideoCapture(str(exporter.settings.output_path))
+    frames = []
+    try:
+        while (sample := capture.read())[0]:
+            frames.append(sample[1][32, 32].copy())
+    finally:
+        capture.release()
+    retimed_frames = round(retimed_duration * 30)
+    assert len(frames) == retimed_frames + 6
+    assert frames[0][2] > 220  # Source starts inside the red section.
+    assert frames[int(retimed_frames * 0.35)].max() < 10  # Redaction stays on the timeline.
+    if speed == 0.25:
+        # Frame 95 precedes the nominal redaction at 3.2s, but the nearest
+        # source frame carries PTS 1s and must already be protected.
+        assert frames[93][2] > 220
+        assert frames[95].max() < 10
+    assert frames[retimed_frames - 1][0] > 220  # Trimmed source ends in blue.
+    assert frames[retimed_frames][2] > 220  # The following unsped clip starts on time.
+
+    sample_rate = 8_000
+    decoded = subprocess.run([
+        ffmpeg, "-v", "error", "-i", str(exporter.settings.output_path),
+        "-map", "0:a:0", "-ac", "1", "-ar", str(sample_rate), "-f", "f32le", "-",
+    ], stdout=subprocess.PIPE, check=True, timeout=30).stdout
+    samples = np.frombuffer(decoded, dtype="<f4")
+    assert len(samples) / sample_rate == pytest.approx(retimed_duration + 0.2, abs=0.04)
+
+    def pitch(start_s, end_s):
+        window = samples[round(start_s * sample_rate):round(end_s * sample_rate)]
+        spectrum = np.abs(np.fft.rfft(window * np.hanning(len(window))))
+        return int(np.argmax(spectrum)) * sample_rate / len(window)
+
+    assert pitch(retimed_duration * 0.12, retimed_duration * 0.35) == pytest.approx(440, abs=15)
+    assert pitch(retimed_duration * 0.65, retimed_duration * 0.88) == pytest.approx(880, abs=15)
+    assert pitch(retimed_duration + 0.05, retimed_duration + 0.15) == pytest.approx(440, abs=15)
+
+
 @pytest.mark.parametrize("failure", [RuntimeError("Source decoding failed"), ExportCancelled(), None])
 def test_render_encoder_reaped_and_pipes_closed(qt_app, tmp_path, monkeypatch, ffmpeg, failure):
     exporter = _exporter(ProjectState(), tmp_path, monkeypatch)

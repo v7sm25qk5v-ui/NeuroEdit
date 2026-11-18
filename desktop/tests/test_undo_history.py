@@ -73,6 +73,9 @@ class _StubPlayer:
     def play(self) -> None:
         self.play_count += 1
 
+    def setPlaybackRate(self, _rate: float) -> None:  # noqa: N802
+        pass
+
     def position(self) -> int:
         return 2_000
 

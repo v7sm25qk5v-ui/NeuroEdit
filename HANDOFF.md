@@ -1,5 +1,27 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-18 — Clip speed effects and refreshed controls
+
+- Added NE-035 and NE-036 in `CODING_TICKETS.md`. A video clip's right-click
+  **Clip Speed** submenu offers 0.25× through 4× and a 1× reset. The speed is
+  an undoable project edit. Preview speed combines with clip speed, while
+  export renders the edited rate regardless of the transport setting.
+- Source trims and split bounds stay in source seconds. Preview, scrub,
+  filmstrip, library, SAM, and exporter map through the clip rate. Timeline
+  positions and timed redactions follow the retimed footage, and decoded
+  source frames receive their redactions even when a slow clip repeats them.
+  Source audio uses pitch-preserving tempo filters. Linked captions follow
+  narration, whose own recording speed and duration remain intact.
+- Projects with a speed effect write schema 2. Projects at normal clip speeds
+  retain schema 1. Use the new release to open retimed projects.
+- Shared Qt scrollbars use rounded rails and thumbs with no arrow buttons.
+  Playback, tools, and shared buttons use consistent states in both themes.
+  The header and timeline keep their scrollbars visible at compact sizes.
+  Both themes were visually checked with a synthetic editor window.
+- Prepared as `v0.5.25-alpha`. Real synthetic export tests cover 0.25× and 4×,
+  video timing, redaction coverage, source-audio pitch and duration. Native
+  Windows UI and playback with the user's footage remain untested.
+
 ## 2026-11-18 — Label fitting and live scrub previews released
 
 - Published [v0.5.24-alpha.1](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v0.5.24-alpha.1)

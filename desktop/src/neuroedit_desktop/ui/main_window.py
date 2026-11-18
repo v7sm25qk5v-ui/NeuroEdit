@@ -53,6 +53,7 @@ from PySide6.QtCore import QSettings
 
 from neuroedit_desktop import __version__, diagnostics
 from neuroedit_desktop.models import (
+    CLIP_SPEEDS,
     SCHEMA_VERSION,
     Annotation,
     PanelType,
@@ -587,8 +588,6 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         ]
 
     def _restyle_theme_widgets(self) -> None:
-        for button in getattr(self, "tool_buttons", {}).values():
-            button.setStyleSheet(self._tool_btn_css())
         if hasattr(self, "labels_panel"):
             self.labels_panel.restyle_presets()
         if hasattr(self, "color_picker_btn"):
@@ -600,12 +599,6 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             self.width_label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px;")
         if hasattr(self, "video_view"):
             self.video_view.setStyleSheet(f"background: {VIDEO_CANVAS};")
-        if hasattr(self, "speed_btn"):
-            self.speed_btn.setStyleSheet(
-                f"QPushButton {{ border-radius: 6px; border: 1px solid {BORDER}; background: {BG_HOVER};"
-                f"  color: {TEXT_SECONDARY}; font-size: 11px; font-family: monospace; }}"
-                f"QPushButton:hover {{ border-color: {BORDER_BRIGHT}; color: {TEXT_PRIMARY}; }}"
-            )
         if hasattr(self, "timeline"):
             self.timeline.canvas._static_cache = None
             self.timeline.canvas._static_cache_key = None
@@ -676,7 +669,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             btn = QPushButton(glyph)
             btn.setToolTip(tip)
             btn.setFixedSize(32, 32)
-            btn.setStyleSheet(self._tool_btn_css())
+            btn.setProperty("role", "iconButton")
             btn.clicked.connect(action.trigger)
             action.changed.connect(lambda b=btn, a=action: b.setEnabled(a.isEnabled()))
             btn.setEnabled(action.isEnabled())
@@ -739,7 +732,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             btn.setToolTip(tip)
             btn.setFixedSize(30, 30)
             btn.setCheckable(True)
-            btn.setStyleSheet(self._tool_btn_css())
+            btn.setProperty("role", "iconButton")
             btn.clicked.connect(lambda _=False, t=tool: self._set_tool(t))
             self.tool_group.addButton(btn)
             self.tool_buttons[tool] = btn
@@ -813,10 +806,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         row2.addStretch(1)
 
         # Install as top widget (no native toolbar). Wrap the two-row header in a
-        # horizontal scroll area so a narrow window scrolls the toolbar instead of
-        # clipping its right-hand controls (panel tabs / Export). The 8px scrollbar
-        # (global QSS) only appears below the header's natural width and overlays
-        # the header's bottom margin, so the visible height is unchanged.
+        # horizontal scroll area so a narrow window scrolls the toolbar instead
+        # of clipping its right-hand controls (panel tabs / Export).
         container = QWidget()
         container.setObjectName("appRoot")
         vbox = QVBoxLayout(container)
@@ -830,7 +821,13 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         header_scroll.setFrameShape(QFrame.Shape.NoFrame)
         header_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         header_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        header_scroll.setFixedHeight(header.maximumHeight())
+        scroll_bar = header_scroll.horizontalScrollBar()
+        header_scroll.setFixedHeight(header.height())
+        scroll_bar.rangeChanged.connect(
+            lambda low, high: header_scroll.setFixedHeight(
+                header.height() + (scroll_bar.sizeHint().height() if high > low else 0)
+            )
+        )
         vbox.addWidget(header_scroll)
         self._header_widget = header
         self._main_container = container
@@ -843,14 +840,6 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         d.setFixedHeight(24)
         d.setStyleSheet(f"color: {BORDER}; background: {BORDER};")
         return d
-
-    def _tool_btn_css(self) -> str:
-        return (
-            f"QPushButton {{ border-radius: 8px; border: none; background: transparent;"
-            f"  color: {TEXT_MUTED}; font-size: 15px; }}"
-            f"QPushButton:hover {{ background: {BG_HOVER}; color: {TEXT_PRIMARY}; }}"
-            f"QPushButton:checked {{ background: {PRIMARY}; color: white; }}"
-        )
 
     def _swatch_css(self, color: str, checked: bool = False) -> str:
         border = "white" if checked else "transparent"
@@ -925,12 +914,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         fwd_btn.setToolTip("Next frame (Right Arrow)")
         fwd_btn.clicked.connect(lambda: self._step_frame(1))
 
-        for b in (skip_back_btn, back_btn, fwd_btn):
-            b.setStyleSheet(
-                f"QPushButton {{ border-radius: 8px; border: none; background: transparent;"
-                f"  color: {TEXT_MUTED}; font-size: 14px; }}"
-                f"QPushButton:hover {{ background: {BG_HOVER}; color: {TEXT_PRIMARY}; }}"
-            )
+        for b in (skip_back_btn, back_btn, self.play_button, fwd_btn):
+            b.setProperty("role", "iconButton")
 
         controls.addWidget(skip_back_btn)
         controls.addWidget(back_btn)
@@ -952,11 +937,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self.speed_btn = QPushButton("1×")
         self.speed_btn.setFixedSize(42, 28)
         self.speed_btn.setToolTip("Cycle playback speed")
-        self.speed_btn.setStyleSheet(
-            f"QPushButton {{ border-radius: 6px; border: 1px solid {BORDER}; background: {BG_HOVER};"
-            f"  color: {TEXT_SECONDARY}; font-size: 11px; font-family: monospace; }}"
-            f"QPushButton:hover {{ border-color: {BORDER_BRIGHT}; color: {TEXT_PRIMARY}; }}"
-        )
+        self.speed_btn.setProperty("role", "rateButton")
         self.speed_btn.clicked.connect(self._cycle_speed)
         controls.addWidget(self.speed_btn)
 
@@ -1189,9 +1170,10 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             style = (
                 f"QPushButton {{ background: {bg}; border: 1px solid {border};"
                 f"  color: {TEXT_PRIMARY if active else TEXT_SECONDARY};"
-                f"  border-radius: 7px; font-weight: {weight}; padding: 5px 9px; }}"
+                f"  font-weight: {weight}; }}"
                 f"QPushButton:hover {{ background: {BG_HOVER}; color: {TEXT_PRIMARY};"
                 f" border-color: {BORDER_BRIGHT}; }}"
+                f"QPushButton:focus {{ border-color: {ui_styles.SELECTION_OUTLINE}; }}"
             )
             if btn.styleSheet() != style:
                 btn.setStyleSheet(style)
@@ -2403,7 +2385,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             self.video_view.set_image(clip.path)
         else:
             self.video_view.set_image(None)
-            self.player.setPlaybackRate(self.project.playback_rate)
+            self.player.setPlaybackRate(self.project.playback_rate * clip.effective_speed)
             self.audio.setMuted(self.project.is_muted)
             self.audio.setVolume(self.project.volume)
         self._seek_global(self.project.current_time)
@@ -2490,8 +2472,6 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
 
     # ── Playback ──────────────────────────────────────────────────────────
 
-    _SPEEDS = [0.25, 0.5, 1.0, 1.5, 2.0, 4.0]
-
     def _toggle_play(self) -> None:
         if self._timeline_playing or self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self._timeline_playing = False
@@ -2508,13 +2488,14 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
 
     def _cycle_speed(self) -> None:
         current = self.project.playback_rate
-        speeds = self._SPEEDS
+        speeds = CLIP_SPEEDS
         try:
             idx = speeds.index(current)
         except ValueError:
             idx = 2
         self.project.playback_rate = speeds[(idx + 1) % len(speeds)]
-        self.player.setPlaybackRate(self.project.playback_rate)
+        clip = self._clip_at_time(self.project.current_time)
+        self.player.setPlaybackRate(self.project.playback_rate * (clip.effective_speed if clip else 1.0))
         self.audio_preview.sync(self.project, self._timeline_playing)
         self._mark_dirty()
 
@@ -2526,8 +2507,9 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         slide = self._slide_at_time(time_s)
         if clip is None or clip.media_type == "image" or (slide is not None and not slide.overlay):
             return None
-        source_ms = round((clip.trim_start + time_s - clip.start_time) * 1000)
-        return ScrubTarget(clip.id, clip.path, clip.start_time, clip.trim_start, clip.trim_end, source_ms)
+        source_ms = round(clip.source_time_at(time_s) * 1000)
+        return ScrubTarget(clip.id, clip.path, clip.start_time, clip.trim_start, clip.trim_end,
+                           source_ms, clip.effective_speed)
 
     def _can_show_scrub_frame(
         self, frame: ScrubFrame | None, target: ScrubTarget | None, requested_time: float,
@@ -2537,7 +2519,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         source_time = frame.source_ms / 1000
         if not target.trim_start <= source_time < target.trim_end:
             return False
-        frame_time = target.start + source_time - target.trim_start
+        frame_time = target.timeline_time_at(source_time)
         actual = self._scrub_target_at(frame_time)
         if actual is None or actual.clip_key != target.clip_key:
             return False
@@ -2693,7 +2675,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         clip = self.project.active_clip
         if not clip:
             return
-        self.project.current_time = clip.start_time + position_ms / 1000 - clip.trim_start
+        self.project.current_time = clip.timeline_time_at(position_ms / 1000)
         slide = self._slide_at_time(self.project.current_time)
         if slide is not None and not slide.overlay:
             self.player.pause()
@@ -2813,8 +2795,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             return
 
         source = QUrl.fromLocalFile(clip.path)
-        local_s = clip.trim_start + max(0.0, self.project.current_time - clip.start_time)
-        target_ms = round(local_s * 1000)
+        target_ms = round(clip.source_time_at(self.project.current_time) * 1000)
         if play and not exact_seek and self._take_cue(clip, target_ms):
             return
         new_source = self.player.source() != source
@@ -2829,7 +2810,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             self._pending_play = False
             self.player.pause()
             self.player.setSource(source)
-            self.player.setPlaybackRate(self.project.playback_rate)
+            self.player.setPlaybackRate(self.project.playback_rate * clip.effective_speed)
             self._pending_seek_ms = target_ms
             self._pending_play = play
             if getattr(self.video_view, "showing_scrub_frame", False):
@@ -2838,6 +2819,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
                 self.audio_preview.sync(self.project, False)
             self._media_status_changed(self.player.mediaStatus())
             return
+        self.player.setPlaybackRate(self.project.playback_rate * clip.effective_speed)
         showing_scrub = getattr(self.video_view, "showing_scrub_frame", False)
         if not self.video_view.video_item.isVisible() and not showing_scrub:
             self.video_view.set_image(None)
@@ -2892,7 +2874,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             def allowed(source_time: float) -> bool:
                 if target is None:
                     return False
-                frame_time = target.start + source_time - target.trim_start
+                frame_time = target.timeline_time_at(source_time)
                 actual = self._scrub_target_at(frame_time)
                 if actual is None or target.clip_key != actual.clip_key:
                     return False
@@ -3013,7 +2995,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self.video_view.swap_video_items()
         if not self.video_view.video_item.isVisible():
             self.video_view.set_image(None)
-        new.setPlaybackRate(self.project.playback_rate)
+        new.setPlaybackRate(self.project.playback_rate * clip.effective_speed)
         new.play()
         if new.duration() > 0:
             self._duration_changed(new.duration())

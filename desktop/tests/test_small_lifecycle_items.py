@@ -301,16 +301,15 @@ def test_save_as_keeps_history_migrates_snapshot_assets_and_reloads_frame(window
 def test_schema_version_written_and_old_files_load_as_v1(tmp_path):
     import json
 
-    from neuroedit_desktop.models import SCHEMA_VERSION
     from neuroedit_desktop.project_store import ProjectStore
 
     store = ProjectStore.create(tmp_path / "p")
     store.save(ProjectState(project_name="X"))
     data = json.loads(store.project_path.read_text())
-    assert data["schema_version"] == SCHEMA_VERSION == 1
+    assert data["schema_version"] == 1
     del data["schema_version"]  # a file from before the field existed
     loaded = ProjectState.from_dict(data)
-    assert loaded.loaded_schema_version == 1 and loaded.schema_version == SCHEMA_VERSION
+    assert loaded.loaded_schema_version == loaded.schema_version == 1
     assert ProjectState.from_dict(loaded.to_dict()).to_dict() == loaded.to_dict()
     assert ProjectState.from_dict({"schema_version": "junk"}).loaded_schema_version == 1
 

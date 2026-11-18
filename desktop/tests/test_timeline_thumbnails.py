@@ -22,14 +22,14 @@ def test_filmstrip_uses_trimmed_source_times_in_the_visible_viewport(app):
     canvas = TimelineCanvas(ProjectState())
     band = canvas._filmstrip_band()
     view = QRect(canvas.LABEL_W + 10_000, band.top(), 320, band.height())
-    videos = (("/tmp/long.mp4", 0, 100, 2000), ("/tmp/offscreen.mp4", 2200, 0, 10))
+    videos = (("/tmp/long.mp4", 0, 100, 1900, 2.0), ("/tmp/offscreen.mp4", 2200, 0, 10, 1.0))
     for zoom in (20.0, 80.0):
         tiles = canvas._layout_filmstrip(view, zoom, videos, (), ())
         assert 1 <= len(tiles) <= 10
         for (path, source_ms), tile in tiles:
             assert path == "/tmp/long.mp4"
             assert tile.intersects(view)
-            expected_ms = 100_000 + (tile.center().x() + 0.5 - canvas.LABEL_W) / zoom * 1000
+            expected_ms = 100_000 + (tile.center().x() + 0.5 - canvas.LABEL_W) / zoom * 2000
             assert expected_ms - 1 <= source_ms <= expected_ms
         covers = ((0.0, 2000.0),)
         assert canvas._layout_filmstrip(view, zoom, videos, (), covers) == []
