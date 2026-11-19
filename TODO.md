@@ -11,6 +11,36 @@ PHI story (P3) which is the trust-critical feature for clinical users. Captions
 and export polish (P4) widen the audience. Stryker/DICOM (P5) is the largest
 bet and stays parked until sample data and a design pass exist.
 
+## Dependency & Security Audit (2026-11-19)
+_(automation-maintained — checks `desktop/pyproject.toml` +
+`desktop/requirements-release.txt`)_
+
+Pinned/shipped versions carry **no known unpatched CVEs**. Items below are the
+actionable results, security first.
+
+- [ ] **Raise the Pillow floor to `pillow>=13` (security hardening).** The `sam`
+  extra declares `pillow>=10`, which permits installing releases with known
+  **critical** CVEs — notably CVE-2026-112900 (EPS→Ghostscript command
+  execution, CVSS up to 9.2) plus the JPEG/TIFF heap overflows CVE-2026-112403 /
+  CVE-2026-112393, all fixed in **13.0.0** (current latest). `pip install`
+  resolves to 13.0.0 in practice, so this is latent rather than an active
+  exposure, but the floor should not allow a vulnerable Pillow. (transformers is
+  already safe: the `>=5.6` floor sits above the CVE-2026-4372 fix in 5.3.0 and
+  CVE-2026-5241.)
+- [ ] **Decide `ruff` version policy.** `requirements-release.txt` pins
+  `ruff==0.15.22`, but `pyproject.toml` caps `ruff>=0.8,<0.16`. Latest is
+  **0.17.5**; adopting it needs the `<0.16` ceiling raised first. Low priority —
+  dev-only lint tool, no security impact.
+- [ ] **Plan the OpenCV 5 migration (major bump — validate before adopting).**
+  `opencv-python 4.13.0.92 → 5.1.0.95` is a major release; OpenCV sits on the
+  frame-extraction/export hot path (`sam_backend.py`, `exporter.py`), so expect
+  API/behaviour changes. Hold the 4.13 pin until a build is validated on both
+  platforms. No CVE on 4.13 (the bundled-libwebp issue was fixed in 4.8.1.78).
+
+Routine (non-security) minors available, no action needed beyond the next
+deliberate refresh: imageio-ffmpeg 0.6.0→0.8.1, numpy 2.4.6→2.5.5,
+PySide6 6.11.1→6.12.0, pyinstaller 6.20.0→6.22.3. pytest is current (9.2.0).
+
 ## Optimization Backlog
 _(automation-maintained — new findings appended below, checked off when implemented)_
 
