@@ -6,6 +6,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import cv2
 import pytest
@@ -67,7 +68,7 @@ def _exporter(project, settings, monkeypatch) -> ProjectExporter:
 
 # ------------------------------------------------------------------ a
 
-def test_a_hardware_encoder_args_ignore_crf_and_dialog_says_so(qt_app, monkeypatch):
+def test_a_hardware_encoder_args_ignore_crf_and_sheet_has_no_crf_control(qt_app, monkeypatch):
     exp = ProjectExporter(ProjectState(), ExportSettings(Path("x.mp4"), 1920, 1080, 30, 20, "t"))
     monkeypatch.setattr(exp, "_has_encoder", lambda _f, name: name == "h264_videotoolbox")
     a = exp._encoder_args("ffmpeg")
@@ -79,9 +80,10 @@ def test_a_hardware_encoder_args_ignore_crf_and_dialog_says_so(qt_app, monkeypat
 
     from neuroedit_desktop.ui.dialogs import ExportDialog
 
+    # CRF only matters for the software encoder, so the sheet no longer offers it.
     dialog = ExportDialog(ProjectState())
-    text = dialog.crf_spin.toolTip().lower()
-    assert "hardware" in text and "fixed" in text
+    assert not hasattr(dialog, "crf_spin")
+    assert dialog.export_settings(Path("x.mp4")).crf == 20
 
 
 # ------------------------------------------------------------------ b
@@ -229,7 +231,10 @@ def test_g_report_warns_and_omits_free_text(tmp_path):
     project.consent_confirmed = True
     host = ExportWorkflowMixin()
     host._export_report_project = project
+    host.store = SimpleNamespace(project_path=tmp_path / "case" / "project.json")
     path = host._write_export_report(tmp_path / "o.mp4", ["note one"])
+    assert path == tmp_path / "case" / "Export Reports" / "o.export-report.txt"
+    assert not (tmp_path / "o.export-report.txt").exists()
     text = path.read_text(encoding="utf-8")
     first = text.splitlines()[0].lower()
     assert "case notes" in first and "not de-identified" in first

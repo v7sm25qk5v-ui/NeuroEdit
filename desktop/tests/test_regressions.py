@@ -494,15 +494,18 @@ def test_export_warning_ignores_inactive_audio_tracks(tmp_path, monkeypatch):
 
     monkeypatch.setattr(exporter, "_find_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr(exporter, "_has_audio_stream", has_audio_stream)
-
-    def write_video(path: Path, _ffmpeg: str, _tmp_dir: Path, _duration: float) -> None:
-        path.write_bytes(b"visual")
-
-    monkeypatch.setattr(exporter, "_encode_timeline_video", write_video)
+    monkeypatch.setattr(exporter, "_encode_timeline_segments", _write_final_video)
 
     assert exporter.export() == []
     assert (tmp_path / "export.mp4").read_bytes() == b"visual"
     assert probed_paths == [clip]
+
+
+def _write_final_video(_ffmpeg, _tmp_dir, _duration, final_path=None):
+    # Without audio the exporter encodes a single segment straight into the
+    # final (partial) file and skips the join/mix pass.
+    final_path.write_bytes(b"visual")
+    return [final_path]
 
 
 def test_export_warns_when_active_audio_has_no_readable_stream(tmp_path, monkeypatch):
@@ -527,11 +530,7 @@ def test_export_warns_when_active_audio_has_no_readable_stream(tmp_path, monkeyp
 
     monkeypatch.setattr(exporter, "_find_ffmpeg", lambda: "ffmpeg")
     monkeypatch.setattr(exporter, "_audio_sources", lambda _ffmpeg: [])
-
-    def write_video(path: Path, _ffmpeg: str, _tmp_dir: Path, _duration: float) -> None:
-        path.write_bytes(b"visual")
-
-    monkeypatch.setattr(exporter, "_encode_timeline_video", write_video)
+    monkeypatch.setattr(exporter, "_encode_timeline_segments", _write_final_video)
 
     assert exporter.export() == ["No readable audio streams were found, so the MP4 is silent."]
     assert (tmp_path / "export.mp4").read_bytes() == b"visual"
@@ -586,7 +585,7 @@ def test_audio_mux_replaces_output_only_after_success(tmp_path, monkeypatch):
     output.write_bytes(b"existing")
     source = AudioSource(tmp_path / "audio.m4a", 0.0, 0.0, 1.0, 1.0)
 
-    def write_staged(cmd: list[str], _message: str) -> None:
+    def write_staged(cmd: list[str], _message: str, **_kwargs) -> None:
         Path(cmd[-1]).write_bytes(b"muxed")
 
     monkeypatch.setattr(exporter, "_run_ffmpeg", write_staged)
@@ -610,7 +609,7 @@ def test_audio_mux_failure_preserves_existing_output(tmp_path, monkeypatch):
     output.write_bytes(b"existing")
     source = AudioSource(tmp_path / "audio.m4a", 0.0, 0.0, 1.0, 1.0)
 
-    def fail_mux(_cmd: list[str], _message: str) -> None:
+    def fail_mux(_cmd: list[str], _message: str, **_kwargs) -> None:
         raise RuntimeError("ffmpeg failed")
 
     monkeypatch.setattr(exporter, "_run_ffmpeg", fail_mux)

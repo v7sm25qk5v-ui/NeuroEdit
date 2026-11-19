@@ -252,7 +252,36 @@ Save As (`_save_project_as`) uses one standard Save dialog
   Close-time cleanup deletes only files with that name pattern (and stale
   `.neuroedit-convert-*` temps); `ProjectStore.open` re-points clips at
   `<folder>/media/<same name>` when a project folder was moved or copied.
-- `exporter.py` — timeline → ffmpeg composition (export pipeline).
+- `exporter.py` — timeline → ffmpeg composition (export pipeline). Since
+  2026-11-18 (`docs/export-review-2026-11-18.md`):
+  - **Checks before encoding:**
+    - hydrates iCloud-evicted sources with a cancellable "Downloading … from iCloud…" step;
+    - verifies the destination folder is writable;
+    - checks free space (final + temp segments, plus `SPACE_MARGIN_BYTES`).
+  - **Progress:** ffmpeg runs with `-progress pipe:1`. `_run_ffmpeg` reads stdout on a thread and
+    sends stderr to a temp file. Progress is monotonic: video 1–95% (1–90% with audio), then the
+    final pass to 99%. The message is "Exporting… m:ss of m:ss".
+  - **Cancel:** `kill()`s ffmpeg (SIGTERM made it finish the faststart rewrite).
+  - **Final pass:**
+    - the join and the audio mix are ONE ffmpeg pass, written to a hidden
+      `.<name>.neuroedit-partial` in the destination folder and then `os.replace`d (atomic);
+    - `+faststart` is applied only to that final file;
+    - a single segment with no audio is encoded straight into it.
+  - **Errors:** failures raise `ExportError(message, details)`. `str()` is plain language naming
+    the clip; the raw ffmpeg text goes in `.details`.
+  - **Temp cleanup:** `sweep_stale_export_temp()` runs on a daemon thread at startup (`__main__.py`).
+  - **Speed:** the speed limit is the VideoToolbox encoder (~190 fps at 1080p on an M3 Pro, about
+    6× realtime). Parallel encodes give no gain. libx264 is *slower* on real (noisy) footage and
+    its files are much larger. Don't switch encoders or parallelise segments without
+    re-measuring on noisy footage.
+  - **Audio-mix input `-ss`** was tried and rejected: MPEG-TS sources with a non-zero start time
+    mixed differently.
+- `export_plan.py` — shared by the export sheet and the exporter:
+  - quality presets (`QUALITY_PRESETS`, keys `1080p`/`720p`/`4k`);
+  - `video_bitrate_bps`, which is the VideoToolbox bitrate and so also the file-size estimate;
+  - the encode-time estimate (learned pixel rate in QSettings `export/pixelRate`);
+  - `automatic_fps` (snaps probed source rates; never opens a dataless file);
+  - `readable_export_name` and `unique_export_path` (never overwrite by default).
 - Exporter loading is deferred until export, still capture, or export-settings
   creation; keep that on-demand boundary intact. Live captions stay eager because
   `ui/canvas.py` uses them during normal preview, and torch remains lazy.
@@ -276,6 +305,16 @@ Save As (`_save_project_as`) uses one standard Save dialog
 - `ui/export_workflow.py` — `ExportWorkflowMixin`, containing `MainWindow`'s MP4
   export, caption export, export history, reveal, progress, and report-writing
   controller methods.
+  - **Entry points:** ⌘E (File ▸ Export Movie…) and the Export button both open the one export
+    sheet (`ExportDialog`).
+  - **Background export:** nothing is modal while it runs. The user keeps editing, because the
+    worker exports a snapshot. The Export button doubles as the progress pill ("Exporting 42% ·
+    1 min left"); clicking it while exporting offers Cancel Export.
+  - **Success:** a status-bar `ExportToast` with Show in Finder, plus `QApplication.alert`.
+  - **Failure:** one box with Details and Try Again, which reruns the same snapshot.
+  - **Report:** written to `<project folder>/Export Reports/`, never beside the MP4 (it is not
+    de-identified).
+  - **Worker signal:** `ExportWorker.finished` carries 4 args, the last being `details`.
 - `ui/history.py` — `HistoryMixin`, containing `MainWindow`'s dirty-state,
   autosave, compact undo/redo snapshot, history-size bookkeeping, and snapshot
   restore controller methods.
@@ -285,9 +324,22 @@ Save As (`_save_project_as`) uses one standard Save dialog
   `main_window.py` re-exports `SamPanel` for compatibility.
 - `ui/labels_panel.py` — annotation list, selected-annotation inspector, and
   built-in/custom label presets. `main_window.py` re-exports `LabelsPanel`.
-- `ui/dialogs.py` — SAM setup, storage location, PHI review, export checklist,
-  export settings, and export history dialogs. `main_window.py` re-exports
+- `ui/dialogs.py` — SAM setup, storage location, PHI review, the export sheet
+  (`ExportDialog`), and export history dialogs. `main_window.py` re-exports
   these names for import stability.
+  - **The export sheet** holds quality (live size and time estimate), audio, captions, More
+    options (frame rate "Automatic", audio quality), name + folder (remembered in
+    `export/lastFolder`), the inline privacy gate, and a non-blocking suggestions list.
+  - **The gate** is the old `ExportChecklistDialog` folded in. PHI review, de-identification
+    and consent are required, and the caption-text check is required when burning captions.
+    The audio item warns but never blocks.
+  - **Collapsed state:** when the required items are already confirmed they collapse to one
+    "✓ … confirmed" line. Edits reset them via `_mark_dirty(review_relevant=True)`, so this is
+    as strong as the old pre-ticked boxes. An unticked required item can never be hidden.
+  - **Gotcha:** `export_suggestions` filters `project_preflight_warnings` by message prefix
+    (`_GATE_WARNING_PREFIXES`). If you reword those warnings, update the prefixes; a test
+    catches drift.
+  - **Per-project choices** live in `ProjectState.export_preferences`.
 - `ui/editor_panels.py` — `TimelineCanvas` + `RichTimelineWidget` (the actual
   scrollable timeline with trim handles, fade controls, cut), plus
   `SlideEditorPanel`, `SlidePreview`, `TipsPanel`, `AudioPanel`. Cut splits a
@@ -333,7 +385,8 @@ treated specially everywhere:
   (which `continue`s on `redact`). Don't move redaction painting earlier.
 - **Forces re-encode.** Because a redaction is a visible annotation,
   `_segment_needs_render` returns True for any segment it overlaps, so the fast
-  stream-copy path can't emit original PHI frames. `tests/test_redaction_export.py`
+  ffmpeg-only path (a scale/re-encode of the source with no painting; nothing is
+  stream-copied) can't emit original PHI frames. `tests/test_redaction_export.py`
   locks both properties (pixels blacked out + segments re-rendered).
 - **Take Still** reuses `_render_frame`, so captured stills inherit redactions.
 
@@ -341,8 +394,10 @@ Other PHI safeguards:
 - **Metadata is stripped** from every ffmpeg output (`-map_metadata -1
   -map_chapters -1`) so source creation time / device / GPS never reach the MP4.
 - **Source audio** can be dropped on export via
-  `ExportSettings.mute_source_audio` (Export dialog → Privacy checkbox); narration
-  added on the Audio panel is kept.
+  `ExportSettings.mute_source_audio` (export sheet → "Remove original clip audio",
+  on by default); narration added on the Audio panel is kept.
+- **Export report** (attestations, counts, preflight) is written to the project's
+  `Export Reports/` folder, never next to the shared MP4.
 - `project_preflight_warnings` nudges toward the Redact tool when reviewable
   media exists, PHI review isn't confirmed, and no redactions are present.
 

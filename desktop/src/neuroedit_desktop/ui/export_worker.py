@@ -12,7 +12,8 @@ if TYPE_CHECKING:
 
 class ExportWorker(QObject):
     progress = Signal(int, str)
-    finished = Signal(object, object, object)  # output_path_or_none, error_or_none, warnings
+    # output_path_or_none, error_or_none, warnings, details (raw technical text, may be empty)
+    finished = Signal(object, object, object, object)
 
     def __init__(self, project: ProjectState, settings: ExportSettings) -> None:
         super().__init__()
@@ -34,8 +35,8 @@ class ExportWorker(QObject):
                 cancelled=lambda: self._cancelled,
             )
             warnings = exporter.export()
-            self.finished.emit(str(self.settings.output_path), None, warnings)
+            self.finished.emit(str(self.settings.output_path), None, warnings, "")
         except ExportCancelled:
-            self.finished.emit(None, "Export canceled.", [])
+            self.finished.emit(None, "Export canceled.", [], "")
         except Exception as exc:  # noqa: BLE001
-            self.finished.emit(None, str(exc), [])
+            self.finished.emit(None, str(exc), [], str(getattr(exc, "details", "") or ""))

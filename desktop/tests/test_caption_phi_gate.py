@@ -8,7 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialogButtonBox, QFileDialog, QMessageBox
+from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from neuroedit_desktop.models import (
     AudioTrack,
@@ -17,8 +17,7 @@ from neuroedit_desktop.models import (
     VideoClip,
     new_id,
 )
-from neuroedit_desktop.ui.export_workflow import project_export_includes_audio
-from neuroedit_desktop.ui.main_window import ExportChecklistDialog, PhiReviewDialog
+from neuroedit_desktop.ui.main_window import ExportDialog, PhiReviewDialog
 from test_main_window_headless import app, window  # noqa: F401
 
 
@@ -36,16 +35,12 @@ def _project(text: str | None = "Patient John Smith, 4 May") -> ProjectState:
     return project
 
 
-def _checklist(project, *, burns_captions: bool) -> ExportChecklistDialog:
-    # Source audio muted and no audio tracks: the audio item is hidden.
-    includes_audio = project_export_includes_audio(project, keeps_source_audio=False)
-    assert includes_audio is False
-    return ExportChecklistDialog(
-        project,
-        export_includes_audio=includes_audio,
-        keeps_source_audio=False,
-        burns_captions=burns_captions,
-    )
+def _checklist(project, *, burns_captions: bool) -> ExportDialog:
+    # Source audio is removed by default and there are no audio tracks, so the
+    # audio item is hidden.
+    dialog = ExportDialog(project)
+    dialog.burn_captions_check.setChecked(burns_captions)
+    return dialog
 
 
 def _tick_required(dialog) -> None:
@@ -55,12 +50,12 @@ def _tick_required(dialog) -> None:
 
 
 def _ok(dialog):
-    return dialog.buttons.button(QDialogButtonBox.StandardButton.Ok)
+    return dialog.export_button
 
 
-# ── export checklist ─────────────────────────────────────────────────────────
+# ── export sheet privacy gate ────────────────────────────────────────────────
 
-def test_checklist_blocks_burned_captions_until_ticked_even_with_muted_audio(app):  # noqa: F811
+def test_sheet_blocks_burned_captions_until_ticked_even_with_muted_audio(app):  # noqa: F811
     project = _project()
     dialog = _checklist(project, burns_captions=True)
     assert not dialog.audio_check.isVisibleTo(dialog)
@@ -74,7 +69,7 @@ def test_checklist_blocks_burned_captions_until_ticked_even_with_muted_audio(app
     assert project.phi_review_progress.get("transcript") is True
 
 
-def test_checklist_has_no_caption_item_without_transcript_text(app):  # noqa: F811
+def test_sheet_has_no_caption_item_without_transcript_text(app):  # noqa: F811
     for project in (_project(None), _project("   ")):
         dialog = _checklist(project, burns_captions=True)
         assert not dialog.caption_check.isVisibleTo(dialog)
@@ -82,14 +77,14 @@ def test_checklist_has_no_caption_item_without_transcript_text(app):  # noqa: F8
         assert _ok(dialog).isEnabled()
 
 
-def test_checklist_has_no_caption_item_when_not_burned_in(app):  # noqa: F811
+def test_sheet_has_no_caption_item_when_not_burned_in(app):  # noqa: F811
     dialog = _checklist(_project(), burns_captions=False)
     assert not dialog.caption_check.isVisibleTo(dialog)
     _tick_required(dialog)
     assert _ok(dialog).isEnabled()
 
 
-def test_checklist_caption_item_prefilled_when_already_confirmed(app):  # noqa: F811
+def test_sheet_caption_item_prefilled_when_already_confirmed(app):  # noqa: F811
     project = _project()
     project.phi_review_progress = {"transcript": True}
     dialog = _checklist(project, burns_captions=True)

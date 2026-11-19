@@ -330,6 +330,8 @@ class ProjectState:
     # and audio tracks already marked reviewed. Lets a paused review resume
     # where it left off; phi_review_confirmed stays the single completion flag.
     phi_review_progress: dict = field(default_factory=dict)
+    # Last export-sheet choices: {quality, mute_source_audio, burn_captions, fps}.
+    export_preferences: dict = field(default_factory=dict)
 
     # Not a dataclass field (no annotation): the version recorded in the file
     # this state was loaded from. Greater than SCHEMA_VERSION means a newer
@@ -979,6 +981,7 @@ class ProjectState:
             caption_background=bool(data.get("caption_background", True)),
             sam_last_run=data.get("sam_last_run", {}) or {},
             phi_review_progress=data.get("phi_review_progress", {}) or {},
+            export_preferences=data.get("export_preferences", {}) or {},
         )
         project.loaded_schema_version = loaded_version
         project.clips = [_from_dict_tolerant(VideoClip, clip) for clip in data.get("clips", [])]

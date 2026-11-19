@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 import time
 import traceback
 from pathlib import Path
@@ -118,7 +119,22 @@ def main() -> int:
 
     resume_after_update(window)
     window.show()
+    _sweep_export_temp_in_background()
     return app.exec()
+
+
+def _sweep_export_temp_in_background() -> None:
+    """Remove export temp folders a crash left behind, off the UI thread."""
+
+    def sweep() -> None:
+        try:
+            from neuroedit_desktop.exporter import sweep_stale_export_temp
+
+            sweep_stale_export_temp()
+        except Exception:  # noqa: BLE001 - housekeeping must never disturb startup
+            pass
+
+    threading.Thread(target=sweep, name="export-temp-sweep", daemon=True).start()
 
 
 if __name__ == "__main__":

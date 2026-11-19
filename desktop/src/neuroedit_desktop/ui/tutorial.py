@@ -737,8 +737,9 @@ def build_default_steps(window) -> list[TutorialStep]:
         TutorialStep(
             title="Export When Ready",
             body=(
-                "Use Export when the sample edit looks right. The final MP4 includes "
-                "the clip, labels, masks, slides, stills, markers-driven edits, and audio."
+                "Use Export when the sample edit looks right. "
+                "The final MP4 includes the clip, labels, masks, slides, stills and any "
+                "narration or music you added. Original clip audio is removed by default."
             ),
             target_resolver=lambda: getattr(window, "export_btn", None),
             practice_mode=True,

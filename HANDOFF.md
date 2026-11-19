@@ -1,5 +1,103 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-18 — NeuroEdit 1.1 release preparation
+
+- Prepared `v1.1.0` for the export overhaul below. Updated the package version,
+  README, and checked-in notes for the existing GitHub installer workflow.
+  Skipped local test reruns at the user's request.
+
+## 2026-11-18 — Export rebuilt with one sheet and background progress
+
+- **Ask:** "build and implement" the export review below. Owner decisions taken as recommended:
+  the report moves into the project folder, and the frame rate matches the video automatically.
+- **Built** by two Sonnet subagents in parallel on separate files, then reviewed and integrated by the coordinator.
+- **Shared module** (`desktop/src/neuroedit_desktop/export_plan.py`, new):
+  - quality presets;
+  - the VideoToolbox bitrate, which also drives the size estimate;
+  - the encode-time estimate, using a learned pixel rate;
+  - `automatic_fps`, which never opens iCloud-evicted files;
+  - non-colliding readable names.
+
+  The exporter's `_hardware_bitrate` uses it.
+- **Engine** (`exporter.py`):
+  - `-progress pipe:1` streaming progress ("Exporting… 3:12 of 12:41"), monotonic;
+  - cancel kills ffmpeg (measured 6–21 ms, was 3.5–5 s);
+  - probes are cancel-aware, and the encoder probe is cached per session;
+  - checks before encoding: iCloud hydration, writable destination, free space;
+  - join + audio mix in one pass into a hidden partial in the destination, then an atomic rename,
+    with `+faststart` only on the final file;
+  - `ExportError(message, details)` with plain messages naming the clip;
+  - `sweep_stale_export_temp()`, wired at startup in `__main__.py` on a daemon thread.
+  - The audio-mix input `-ss` was tried and rejected: MPEG-TS sources with a non-zero start time mixed differently.
+- **Flow** (`ui/dialogs.py`, `ui/export_workflow.py`, `ui/export_worker.py`, `ui/main_window.py`,
+  `ui/tutorial.py`, `models.py`):
+  - **One export sheet** (`ExportDialog`; `ExportChecklistDialog` removed):
+    - quality radios with "About 1.1 GB · about 2 min on this Mac";
+    - remove-original-audio, on by default;
+    - captions;
+    - More options: frame rate "Automatic (matches your video: N fps)" and audio quality;
+    - name + remembered folder (`export/lastFolder`), with "Replaces the existing file" if the name exists;
+    - an inline privacy gate, collapsed to "✓ … confirmed" when still valid;
+    - non-blocking "N suggestions".
+  - The preflight modal, the separate checklist, the save panel, CRF/width/height and the File type combo are gone.
+  - ⌘E / File ▸ Export Movie… opens the sheet.
+  - **Background export:** the Export button becomes "Exporting 42% · 1 min left"; clicking it offers Cancel Export.
+  - **Success:** a status-bar toast with Show in Finder, plus a Dock bounce.
+  - **Failure:** one box with Details and Try Again.
+  - **Report:** written to `<project folder>/Export Reports/`.
+  - **Model:** new field `ProjectState.export_preferences`, round-trips, old projects load.
+- **Coordinator fixes:**
+  - four `test_regressions.py` stubs updated to the new engine entry points;
+  - `scripts/capture_baseline_screenshots.py` now captures the sheet unconfirmed and confirmed,
+    instead of the removed checklist;
+  - `desktop/CLAUDE.md` updated.
+- **Verified:**
+  - Full suite: **943 passed** (was 879; 64 new tests across `test_export_plan.py`,
+    `test_export_engine_pipeline.py` and `test_export_sheet.py`, plus updates). `ruff check src tests scripts` is clean.
+  - **GUI responsiveness during a background export**, measured headless: the 10 ms main-thread
+    timer had a p95 of 10.7 ms for an untouched clip and 11.2 ms when every frame went through
+    the Python label renderer. The worst single stall was 96 ms.
+  - Offscreen screenshots of both sheet states look right.
+- **Not verified:**
+  - not tried in the running app (no second instance);
+  - not tried with real surgical footage, or with multi-GB or iCloud-only media in the app;
+  - the Dock bounce and toast placement on a real Mac;
+  - Windows, where libx264 makes the size estimate approximate.
+- **Gotcha:** macOS evicted the venv again (35,840 dataless files, about 1 GB). The first
+  full-suite run hung on a cold import, and the capture test timed out until the files downloaded.
+  If tests hang, `sample <pid> 1` and `lsof -p <pid>` show the file being downloaded.
+- **Next:** try an export in the installed app with real footage.
+
+## 2026-11-18 — Export pathway review (no code changed)
+
+- **Ask:** review export and make it combine the best of iMovie, Final Cut Pro and
+  DaVinci Resolve: efficient, smooth, simple, "just works".
+- **Full write-up:** `desktop/docs/export-review-2026-11-18.md`. It covers the measurements,
+  17 ranked findings with file:line references, the reference-app patterns to borrow,
+  the proposed single export sheet, and the build order.
+- **Headline:**
+  - The engine is correct.
+  - The friction is the flow. Making one file takes five serial modal windows, and the whole app is
+    blocked (`ApplicationModal`) while exporting.
+  - Progress sits at 0% through untouched segments.
+  - Cancel takes 3.5–5 s.
+  - Export runs no free-space or iCloud check before it starts, so it can fail late with raw ffmpeg errors.
+  - There is no ⌘E and no menu item for exporting video.
+  - Output is always 30 fps.
+- **Measured** on an M3 Pro:
+  - Export runs at about 6× realtime at 1080p, limited by the VideoToolbox encoder (about 200 fps).
+  - Running 2–3 encodes in parallel gives no speed-up.
+  - On noisy footage, libx264 veryfast is 2.4× *slower* than VideoToolbox and its files are 10× larger.
+    Keep VideoToolbox; don't act on the claim that "libx264 is faster", which held only for a clean test pattern.
+- **Next:**
+  1. Engine work in `exporter.py`: progress with ETA through `-progress pipe:1`, kill-on-cancel,
+     checks before encoding for free space, iCloud and write access, a sweep of stale temp
+     folders, plain-language errors, and fewer full-file passes.
+  2. Flow work in `dialogs.py`, `export_workflow.py` and `main_window.py`: one sheet with the privacy gate
+     inline, ⌘E, a remembered location, background export with a toolbar progress pill, and a notification.
+  3. Owner decisions: where the export report goes (proposed: the project folder, not
+     beside the MP4), and automatic frame-rate matching.
+
 ## 2026-11-18 — NeuroEdit 1.0 published
 
 - Published [v1.0.0](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v1.0.0)

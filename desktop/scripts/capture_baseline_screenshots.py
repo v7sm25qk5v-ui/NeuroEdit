@@ -3,8 +3,8 @@
 
 Renders the app offscreen and grabs PNGs of: the full window, header, timeline,
 all five right panels, the SAM missing-backend explainer, and every dialog on
-the visual-QA checklist (project library, export, export checklist, export
-history, PHI review stepper, storage location, SAM setup).
+the visual-QA checklist (project library, the export sheet unconfirmed and
+confirmed, export history, PHI review stepper, storage location, SAM setup).
 
 Settings and project storage are isolated in a temporary directory.
 
@@ -58,6 +58,14 @@ def _demo_project() -> ProjectState:
     return project
 
 
+def _confirmed(project: ProjectState) -> ProjectState:
+    confirmed = ProjectState.from_dict(project.to_dict())
+    confirmed.phi_review_confirmed = True
+    confirmed.deidentified_confirmed = True
+    confirmed.consent_confirmed = True
+    return confirmed
+
+
 def _grab(widget: QWidget, output: Path, name: str) -> None:
     pixmap = widget.grab()
     target = output / f"{name}.png"
@@ -106,7 +114,6 @@ def capture(output: Path) -> None:
 
         apply_app_style(app)
         from neuroedit_desktop.ui.main_window import (
-            ExportChecklistDialog,
             ExportDialog,
             ExportHistoryDialog,
             MainWindow,
@@ -159,14 +166,10 @@ def capture(output: Path) -> None:
         demo = _demo_project()
         dialogs = [
             ("dialog_project_library", ProjectLibraryDialog(window)),
+            # The export sheet with its privacy checkboxes still to tick, then
+            # with them confirmed (collapsed to one line).
             ("dialog_export", ExportDialog(demo, window)),
-            (
-                "dialog_export_checklist",
-                ExportChecklistDialog(
-                    demo, export_includes_audio=True,
-                    keeps_source_audio=True, parent=window,
-                ),
-            ),
+            ("dialog_export_confirmed", ExportDialog(_confirmed(demo), window)),
             ("dialog_export_history", ExportHistoryDialog(lambda _p: None, window)),
             ("dialog_phi_review", PhiReviewDialog(demo, window)),
             ("dialog_storage_location", StorageLocationDialog(window)),

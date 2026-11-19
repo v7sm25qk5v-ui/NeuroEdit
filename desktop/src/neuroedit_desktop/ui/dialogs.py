@@ -9,12 +9,14 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QSettings, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -22,16 +24,35 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QRadioButton,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
+from neuroedit_desktop import export_plan
 from neuroedit_desktop.captions import build_caption_cues
+from neuroedit_desktop.export_plan import (
+    DEFAULT_EXPORT_NAME,
+    QUALITY_PRESETS,
+    STANDARD_FPS,
+    QualityPreset,
+    automatic_fps,
+    estimate_encode_seconds,
+    estimate_output_bytes,
+    format_time_estimate,
+    preset_for_key,
+    readable_export_name,
+    unique_export_path,
+)
 from neuroedit_desktop.models import ProjectState
+from neuroedit_desktop.project_copy import format_bytes
+from neuroedit_desktop.ui.editor_panels import (
+    project_has_active_audio_tracks,
+    project_preflight_warnings,
+)
 from neuroedit_desktop.ui.project_library import relative_time
 from neuroedit_desktop.ui.styles import ACCENT_AMBER, TEXT_MUTED
 from neuroedit_desktop.ui.timeline_utils import fmt_time as format_time
+from neuroedit_desktop.ui.timeline_utils import project_end_time
 
 if TYPE_CHECKING:
     from neuroedit_desktop.exporter import ExportSettings
@@ -425,143 +446,6 @@ class PhiReviewDialog(QDialog):
             self.reject()
 
 
-class ExportChecklistDialog(QDialog):
-    """Pre-export attestation: one concise dialog (not a chain of pop-ups) that
-    requires the three trust-critical confirmations before the export job starts.
-    The audio item warns but never blocks. State is pre-filled from the project
-    so re-exports don't re-ask what was already confirmed."""
-
-    def __init__(
-        self,
-        project: ProjectState,
-        *,
-        export_includes_audio: bool,
-        keeps_source_audio: bool,
-        burns_captions: bool = False,
-        parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Before You Export")
-        self.setMinimumWidth(500)
-
-        title = QLabel("Confirm before exporting")
-        title.setProperty("role", "title")
-        intro = QLabel(
-            "These confirmations are saved with the project and written into the "
-            "export report next to the MP4."
-        )
-        intro.setProperty("role", "muted")
-        intro.setWordWrap(True)
-
-        self.phi_check = QCheckBox(
-            "I reviewed the full timeline for on-screen PHI\n"
-            "(names, MRNs, dates, faces, monitors, paperwork)"
-        )
-        self.phi_check.setChecked(project.phi_review_confirmed)
-        self.deid_check = QCheckBox(
-            "De-identification is complete — redactions cover\nany identifiers found"
-        )
-        self.deid_check.setChecked(project.deidentified_confirmed)
-        self.consent_check = QCheckBox(
-            "Patient consent or institutional authorization\nis in place for this use"
-        )
-        self.consent_check.setChecked(project.consent_confirmed)
-
-        self.guided_btn = QPushButton("Run Guided PHI Review…")
-        self.guided_btn.setVisible(not project.phi_review_confirmed)
-        self.guided_review_requested = False
-        self.guided_btn.clicked.connect(self._request_guided_review)
-
-        self.audio_check = QCheckBox("The audio was reviewed for spoken PHI")
-        self.audio_check.setChecked(project.audio_reviewed_for_phi)
-        self.audio_warning = QLabel()
-        self.audio_warning.setWordWrap(True)
-        self.audio_warning.setStyleSheet(f"color: {ACCENT_AMBER};")
-        audio_note = (
-            "This export includes audio. Spoken identifiers (patient name, MRN, "
-            "date of birth) are not covered by the Redact tool."
-        )
-        if keeps_source_audio:
-            audio_note += " Original operating-room clip audio is being kept."
-        self.audio_warning.setText(audio_note)
-        self._export_includes_audio = export_includes_audio
-        self.audio_check.setVisible(export_includes_audio)
-        self.audio_warning.setVisible(export_includes_audio)
-        self.audio_check.toggled.connect(self._update_audio_warning)
-        self._update_audio_warning()
-
-        # Burned-in caption text cannot be covered after export, and it is shown
-        # even when the export has no audio.
-        self._reviews_captions = burns_captions and project_has_transcript_text(project)
-        self.caption_check = QCheckBox(
-            "The caption text was checked for patient information\n"
-            "(names, MRNs, dates)"
-        )
-        self.caption_check.setChecked(
-            bool((project.phi_review_progress or {}).get(TRANSCRIPT_REVIEW_KEY))
-        )
-        self.caption_check.setVisible(self._reviews_captions)
-
-        for check in (self.phi_check, self.deid_check, self.consent_check, self.caption_check):
-            check.toggled.connect(self._update_ok_enabled)
-
-        self.buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok
-        )
-        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Continue to Export")
-        self.buttons.accepted.connect(self.accept)
-        self.buttons.rejected.connect(self.reject)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(12)
-        layout.addWidget(title)
-        layout.addWidget(intro)
-        layout.addWidget(self.phi_check)
-        layout.addWidget(self.guided_btn)
-        layout.addWidget(self.deid_check)
-        layout.addWidget(self.consent_check)
-        layout.addWidget(self.audio_warning)
-        layout.addWidget(self.audio_check)
-        layout.addWidget(self.caption_check)
-        layout.addWidget(self.buttons)
-        self._update_ok_enabled()
-
-    def _request_guided_review(self) -> None:
-        self.guided_review_requested = True
-        self.reject()
-
-    def _update_ok_enabled(self) -> None:
-        required_ok = (
-            self.phi_check.isChecked()
-            and self.deid_check.isChecked()
-            and self.consent_check.isChecked()
-            and (not self._reviews_captions or self.caption_check.isChecked())
-        )
-        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(required_ok)
-
-    def _update_audio_warning(self) -> None:
-        # Reviewed audio doesn't need the amber warning anymore.
-        if self.audio_check.isChecked():
-            self.audio_warning.setStyleSheet(f"color: {TEXT_MUTED};")
-        else:
-            self.audio_warning.setStyleSheet(f"color: {ACCENT_AMBER};")
-
-    def apply_to_project(self, project: ProjectState) -> None:
-        project.phi_review_confirmed = self.phi_check.isChecked()
-        project.deidentified_confirmed = self.deid_check.isChecked()
-        project.consent_confirmed = self.consent_check.isChecked()
-        if self._export_includes_audio:
-            project.audio_reviewed_for_phi = self.audio_check.isChecked()
-        if self._reviews_captions:
-            progress = dict(project.phi_review_progress or {})
-            if self.caption_check.isChecked():
-                progress[TRANSCRIPT_REVIEW_KEY] = True
-            else:
-                progress.pop(TRANSCRIPT_REVIEW_KEY, None)
-            project.phi_review_progress = progress
-
-
 def recommended_preset_key(project: ProjectState | None) -> tuple[str, str]:
     """(preset_key, reason) for the export dialog's default selection, from
     source resolution and intended use. Never recommends upscaling, and only
@@ -578,94 +462,138 @@ def recommended_preset_key(project: ProjectState | None) -> tuple[str, str]:
     return "1080p", "the best balance for teaching and sharing at your source resolution"
 
 
-class ExportDialog(QDialog):
-    PRESETS = [
-        (
-            "1080p",
-            "Recommended: 1080p MP4",
-            "Best default for teaching videos, conference screens, and general sharing.",
-            1920,
-            1080,
-            30,
-            20,
-        ),
-        (
-            "720p",
-            "Small screen: 720p MP4",
-            "Smaller files for quick review, email, or mobile-first viewing.",
-            1280,
-            720,
-            30,
-            23,
-        ),
-        (
-            "4k",
-            "Big screen / high quality: 4K MP4",
-            "Use for large displays or when you want the cleanest export.",
-            3840,
-            2160,
-            30,
-            18,
-        ),
+EXPORT_FOLDER_KEY = "export/lastFolder"
+EXPORT_PIXEL_RATE_KEY = "export/pixelRate"
+
+# Preflight warnings the sheet's privacy gate already covers. Everything else
+# in project_preflight_warnings() is shown as a quiet "suggestions" list.
+_GATE_WARNING_PREFIXES = (
+    "Confirm patient consent",
+    "Confirm de-identification",
+    "Complete a PHI review",
+    "Audio has not been reviewed",
+)
+
+
+def export_suggestions(project: ProjectState) -> list[str]:
+    return [
+        warning for warning in project_preflight_warnings(project)
+        if not warning.startswith(_GATE_WARNING_PREFIXES)
     ]
 
-    def __init__(self, project: ProjectState | None = None, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Export Video")
-        self.setMinimumWidth(440)
-        self._project = project
 
-        title = QLabel("Where will this video be watched?")
+def default_export_folder() -> Path:
+    """The folder used last time, else ~/Movies, else the home folder."""
+    remembered = str(QSettings("NeuroEdit", "Desktop").value(EXPORT_FOLDER_KEY, "") or "")
+    for candidate in (
+        Path(remembered) if remembered else None,
+        Path.home() / "Movies",
+        Path.home(),
+    ):
+        if candidate is not None and candidate.is_dir():
+            return candidate
+    return Path.home()
+
+
+def _link_button(text: str) -> QPushButton:
+    """A borderless text button (the app style gives every QPushButton a frame)."""
+    button = QPushButton(text)
+    button.setCursor(Qt.CursorShape.PointingHandCursor)
+    button.setStyleSheet(
+        "QPushButton { border: none; background: transparent; text-align: left;"
+        " padding: 2px 0px; }"
+    )
+    return button
+
+
+class ExportDialog(QDialog):
+    """The one export sheet: quality, audio, name and place, and the privacy
+    gate, all inline. Export stays disabled until the required confirmations
+    hold and the name and folder are usable."""
+
+    def __init__(
+        self,
+        project: ProjectState | None = None,
+        parent: QWidget | None = None,
+        *,
+        fps_probe=None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Export")
+        self.setMinimumWidth(600)
+        project = project if project is not None else ProjectState()
+        self._project = project
+        prefs = dict(project.export_preferences or {})
+        self.guided_review_requested = False
+        self._details_open = False
+
+        settings = QSettings("NeuroEdit", "Desktop")
+        try:
+            self._pixel_rate = float(settings.value(EXPORT_PIXEL_RATE_KEY, 0.0, type=float))
+        except (TypeError, ValueError):
+            self._pixel_rate = 0.0
+        self._duration = project.duration if project.duration > 0 else project_end_time(project)
+
+        # Header
+        title = QLabel(project.project_name or DEFAULT_EXPORT_NAME)
         title.setProperty("role", "title")
         title.setWordWrap(True)
-        intro = QLabel(
-            "Choose the viewing target. NeuroEdit will keep the format simple: "
-            "MP4 for the best Mac and Windows compatibility."
-        )
-        intro.setProperty("role", "muted")
-        intro.setWordWrap(True)
+        length = QLabel(format_time(self._duration))
+        length.setProperty("role", "muted")
+        header = QHBoxLayout()
+        header.addWidget(title, 1)
+        header.addWidget(length, 0, Qt.AlignmentFlag.AlignTop)
 
-        self.preset_combo = QComboBox()
-        for key, label, help_text, width, height, fps, crf in self.PRESETS:
-            self.preset_combo.addItem(label, (key, width, height, fps, crf, help_text))
-        self.preset_combo.currentIndexChanged.connect(self._preset_changed)
-
+        # Quality
+        recommended_key, reason = recommended_preset_key(project)
+        self._recommended_key = recommended_key
+        self._recommended_reason = reason
+        chosen_key = prefs.get("quality")
+        if chosen_key not in {preset.key for preset in QUALITY_PRESETS}:
+            chosen_key = recommended_key
+        self.preset_group = QButtonGroup(self)
+        self.preset_buttons: dict[str, QRadioButton] = {}
+        quality_box = QVBoxLayout()
+        quality_box.setSpacing(4)
+        for preset in QUALITY_PRESETS:
+            button = QRadioButton(preset.label)
+            button.setToolTip(preset.help)
+            self.preset_group.addButton(button)
+            self.preset_buttons[preset.key] = button
+            quality_box.addWidget(button)
+        self.preset_buttons[chosen_key].setChecked(True)
         self.help_label = QLabel()
         self.help_label.setProperty("role", "muted")
-        self.help_label.setWordWrap(True)
+        self.estimate_label = QLabel()
+        self.estimate_label.setWordWrap(True)
+        quality_box.addWidget(self.help_label)
+        quality_box.addWidget(self.estimate_label)
 
-        recommended_key, reason = recommended_preset_key(project)
-        recommended_label = next(
-            (label for key, label, *_rest in self.PRESETS if key == recommended_key),
-            "",
-        )
-        self.recommend_label = QLabel(
-            f"★ Recommended for this project: {recommended_label} — {reason}."
-        )
-        self.recommend_label.setProperty("role", "muted")
-        self.recommend_label.setWordWrap(True)
-        self._recommended_key = recommended_key
-
-        self.file_type = QComboBox()
-        self.file_type.addItem("MP4 video (.mp4) - highest compatibility", "mp4")
-        self.file_type.setEnabled(False)
-
-        self.mute_source_audio_check = QCheckBox(
-            "Remove original clip audio"
-        )
+        # Audio and captions
+        self.mute_source_audio_check = QCheckBox("Remove original clip audio")
         # Safe default for a clinical tool: drop the original operating-room audio,
         # which can contain spoken identifiers. Narration added on the Audio panel
         # is always kept. The user must deliberately opt in to retaining it.
-        self.mute_source_audio_check.setChecked(True)
+        self.mute_source_audio_check.setChecked(bool(prefs.get("mute_source_audio", True)))
         self.mute_source_audio_check.setToolTip(
             "Drops the audio recorded with your video clips from the export. "
             "Narration or music you added on the Audio panel is kept."
         )
+        privacy_explanation = QLabel(
+            "Original audio may contain spoken PHI. Added narration and music are kept."
+        )
+        privacy_explanation.setProperty("role", "muted")
+        privacy_explanation.setWordWrap(True)
+        audio_box = QVBoxLayout()
+        audio_box.setSpacing(2)
+        audio_box.addWidget(self.mute_source_audio_check)
+        audio_box.addWidget(privacy_explanation)
 
-        self.burn_captions_check = QCheckBox("Burn captions into the video (from transcript)")
-        has_transcript = bool(project and project.transcript_segments)
-        if has_transcript:
-            self.burn_captions_check.setChecked(bool(project and project.captions_enabled))
+        self.burn_captions_check = QCheckBox("Burn in captions (from transcript)")
+        if project.transcript_segments:
+            self.burn_captions_check.setChecked(
+                bool(prefs.get("burn_captions", project.captions_enabled))
+            )
             self.burn_captions_check.setToolTip(
                 "Renders the transcript as open captions in the exported frames. "
                 "For toggleable captions, use File → Export Captions (SRT/VTT) "
@@ -678,117 +606,390 @@ class ExportDialog(QDialog):
                 "Add transcript segments on the Audio panel to enable captions."
             )
 
-        form = QFormLayout()
-        form.addRow("Viewing target", self.preset_combo)
-        form.addRow("File type", self.file_type)
-        privacy_explanation = QLabel(
-            "Original audio may contain spoken PHI. Added narration and music are kept."
-        )
-        privacy_explanation.setWordWrap(True)
-        privacy_layout = QVBoxLayout()
-        privacy_layout.setContentsMargins(0, 0, 0, 0)
-        privacy_layout.addWidget(self.mute_source_audio_check)
-        privacy_layout.addWidget(privacy_explanation)
-        form.addRow("Privacy", privacy_layout)
-        form.addRow("Captions", self.burn_captions_check)
-
-        # Advanced settings stay collapsed: presets are the primary interface,
-        # and the fields below re-glue to the preset whenever it changes.
-        self.advanced_toggle = QPushButton("Advanced settings ▸")
-        self.advanced_toggle.setCheckable(True)
-        self.advanced_toggle.setFlat(True)
-        self.advanced_toggle.setStyleSheet("text-align: left; padding: 2px;")
-        self.advanced_toggle.toggled.connect(self._toggle_advanced)
-
-        self.crf_spin = QSpinBox()
-        self.crf_spin.setRange(12, 32)
-        self.crf_spin.setToolTip(
-            "Constant Rate Factor: lower = higher quality and bigger files. "
-            "18–23 is the practical range for most exports. Applies to the "
-            "software encoder only: when the Mac hardware encoder is used, "
-            "quality is fixed by resolution and this setting is ignored."
-        )
+        # More options (collapsed)
+        probe = fps_probe or (lambda path: export_plan.source_fps(path))
+        self._auto_fps = automatic_fps(project, probe=probe)
         self.fps_combo = QComboBox()
-        for fps_value in (24, 25, 30, 50, 60):
+        self.fps_combo.addItem(f"Automatic (matches your video: {self._auto_fps} fps)", "auto")
+        for fps_value in STANDARD_FPS:
             self.fps_combo.addItem(f"{fps_value} fps", fps_value)
-        self.width_spin = QSpinBox()
-        self.width_spin.setRange(320, 4096)
-        self.width_spin.setSingleStep(2)
-        self.height_spin = QSpinBox()
-        self.height_spin.setRange(240, 2160)
-        self.height_spin.setSingleStep(2)
+        index = self.fps_combo.findData(prefs.get("fps", "auto"))
+        self.fps_combo.setCurrentIndex(index if index >= 0 else 0)
         self.audio_bitrate_combo = QComboBox()
         for kbps in (128, 192, 256):
-            self.audio_bitrate_combo.addItem(f"AAC {kbps} kbit/s", kbps)
+            self.audio_bitrate_combo.addItem(f"{kbps} kbit/s", kbps)
         self.audio_bitrate_combo.setCurrentIndex(1)  # 192k, the long-standing default
+        more_form = QFormLayout()
+        more_form.setContentsMargins(0, 0, 0, 0)
+        more_form.addRow("Frame rate", self.fps_combo)
+        more_form.addRow("Audio quality", self.audio_bitrate_combo)
+        self.more_widget = QWidget()
+        self.more_widget.setLayout(more_form)
+        self.more_widget.setVisible(False)
+        self.more_toggle = _link_button("More options ▸")
+        self.more_toggle.clicked.connect(lambda *_: self._toggle_more())
 
-        advanced_form = QFormLayout()
-        advanced_form.addRow("Quality (CRF)", self.crf_spin)
-        advanced_form.addRow("Frame rate", self.fps_combo)
-        advanced_form.addRow("Width", self.width_spin)
-        advanced_form.addRow("Height", self.height_spin)
-        advanced_form.addRow("Audio", self.audio_bitrate_combo)
-        self.advanced_widget = QWidget()
-        self.advanced_widget.setLayout(advanced_form)
-        self.advanced_widget.setVisible(False)
+        # Save as / Where
+        self._folder = default_export_folder()
+        self._name_is_default = True
+        self.name_edit = QLineEdit()
+        self.name_edit.setText(self._default_name())
+        self.name_edit.textEdited.connect(self._name_edited)
+        self.name_edit.textChanged.connect(self._refresh_destination)
+        self.replace_note = QLabel("Replaces the existing file")
+        self.replace_note.setStyleSheet(f"color: {ACCENT_AMBER};")
+        self.folder_label = QLabel()
+        self.folder_button = QPushButton("Change…")
+        self.folder_button.clicked.connect(self._choose_folder)
+        where_row = QHBoxLayout()
+        where_row.addWidget(self.folder_label, 1)
+        where_row.addWidget(self.folder_button)
+        save_box = QVBoxLayout()
+        save_box.setSpacing(4)
+        save_box.addWidget(self.name_edit)
+        save_box.addWidget(self.replace_note)
 
-        buttons = QDialogButtonBox(
+        # A grid, not a QFormLayout: it sizes wrapped labels correctly.
+        form = QGridLayout()
+        form.setVerticalSpacing(10)
+        form.setColumnStretch(1, 1)
+        rows = (
+            ("Quality", quality_box), ("Audio", audio_box),
+            ("Captions", self.burn_captions_check), ("", self.more_toggle),
+            ("", self.more_widget), ("Save as", save_box), ("Where", where_row),
+        )
+        for row, (caption, content) in enumerate(rows):
+            if caption:
+                form.addWidget(QLabel(caption), row, 0, Qt.AlignmentFlag.AlignTop)
+            if isinstance(content, QWidget):
+                form.addWidget(content, row, 1)
+            else:
+                form.addLayout(content, row, 1)
+
+        # Privacy gate
+        privacy_title = QLabel("Privacy")
+        privacy_title.setProperty("role", "muted")
+        self.summary_label = QLabel()
+        self.summary_label.setWordWrap(True)
+        self.review_btn = _link_button("Review…")
+        self.review_btn.clicked.connect(self._open_details)
+        self.privacy_summary = QWidget()
+        summary_row = QHBoxLayout(self.privacy_summary)
+        summary_row.setContentsMargins(0, 0, 0, 0)
+        summary_row.addWidget(self.summary_label, 1)
+        summary_row.addWidget(self.review_btn)
+
+        self.phi_check = QCheckBox(
+            "I reviewed the full timeline for on-screen PHI\n"
+            "(names, MRNs, dates, faces, monitors, paperwork)"
+        )
+        self.phi_check.setChecked(project.phi_review_confirmed)
+        self.deid_check = QCheckBox(
+            "De-identification is complete — redactions cover\nany identifiers found"
+        )
+        self.deid_check.setChecked(project.deidentified_confirmed)
+        self.consent_check = QCheckBox(
+            "Patient consent or institutional authorization\nis in place for this use"
+        )
+        self.consent_check.setChecked(project.consent_confirmed)
+        self.guided_btn = QPushButton("Run Guided PHI Review…")
+        self.guided_btn.setVisible(not project.phi_review_confirmed)
+        self.guided_btn.clicked.connect(self._request_guided_review)
+        # Burned-in caption text cannot be covered after export, and it is shown
+        # even when the export has no audio.
+        self.caption_check = QCheckBox(
+            "The caption text was checked for patient information\n"
+            "(names, MRNs, dates)"
+        )
+        self.caption_check.setChecked(
+            bool((project.phi_review_progress or {}).get(TRANSCRIPT_REVIEW_KEY))
+        )
+        self.privacy_details = QWidget()
+        details = QVBoxLayout(self.privacy_details)
+        details.setContentsMargins(0, 0, 0, 0)
+        details.setSpacing(8)
+        for widget in (
+            self.phi_check, self.guided_btn, self.deid_check, self.consent_check,
+            self.caption_check,
+        ):
+            details.addWidget(widget)
+
+        # The audio item warns but never blocks, so it stays visible whenever the
+        # export carries audio, even when the three required items are collapsed.
+        self.audio_check = QCheckBox("The audio was reviewed for spoken PHI")
+        self.audio_check.setChecked(project.audio_reviewed_for_phi)
+        self.audio_warning = QLabel()
+        self.audio_warning.setWordWrap(True)
+        self.audio_group = QWidget()
+        audio_gate = QVBoxLayout(self.audio_group)
+        audio_gate.setContentsMargins(0, 0, 0, 0)
+        audio_gate.setSpacing(4)
+        audio_gate.addWidget(self.audio_warning)
+        audio_gate.addWidget(self.audio_check)
+
+        for check in (
+            self.phi_check, self.deid_check, self.consent_check, self.caption_check,
+        ):
+            check.toggled.connect(self._refresh_privacy)
+        self.audio_check.toggled.connect(self._refresh_privacy)
+        self.mute_source_audio_check.toggled.connect(self._refresh_privacy)
+        self.burn_captions_check.toggled.connect(self._refresh_privacy)
+        self.preset_group.buttonToggled.connect(lambda *_: self._refresh_estimate())
+        self.mute_source_audio_check.toggled.connect(lambda *_: self._refresh_estimate())
+        self.fps_combo.currentIndexChanged.connect(lambda *_: self._refresh_estimate())
+        self.audio_bitrate_combo.currentIndexChanged.connect(lambda *_: self._refresh_estimate())
+
+        # Suggestions (never blocking)
+        self._suggestions = export_suggestions(project)
+        count = len(self._suggestions)
+        self._suggestions_title = f"{count} suggestion{'s' if count != 1 else ''}"
+        self.suggestions_toggle = _link_button(f"{self._suggestions_title} ▸")
+        self.suggestions_toggle.setVisible(bool(self._suggestions))
+        self.suggestions_toggle.clicked.connect(lambda *_: self._toggle_suggestions())
+        self.suggestions_label = QLabel("\n".join(f"• {item}" for item in self._suggestions))
+        self.suggestions_label.setProperty("role", "muted")
+        self.suggestions_label.setWordWrap(True)
+        self.suggestions_label.setVisible(False)
+
+        self.buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok
         )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Choose Save Location")
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
+        self.export_button = self.buttons.button(QDialogButtonBox.StandardButton.Ok)
+        self.export_button.setText("Export")
+        self.export_button.setDefault(True)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(12)
-        layout.addWidget(title)
-        layout.addWidget(intro)
-        layout.addWidget(self.recommend_label)
+        layout.addLayout(header)
         layout.addLayout(form)
-        layout.addWidget(self.help_label)
-        layout.addWidget(self.advanced_toggle)
-        layout.addWidget(self.advanced_widget)
-        layout.addWidget(buttons)
-        # Preselect the recommendation; the user can still pick any preset.
-        for index in range(self.preset_combo.count()):
-            if self.preset_combo.itemData(index)[0] == recommended_key:
-                self.preset_combo.setCurrentIndex(index)
-                break
-        self._preset_changed()
+        layout.addWidget(privacy_title)
+        layout.addWidget(self.privacy_summary)
+        layout.addWidget(self.privacy_details)
+        layout.addWidget(self.audio_group)
+        layout.addWidget(self.suggestions_toggle)
+        layout.addWidget(self.suggestions_label)
+        layout.addWidget(self.buttons)
 
-    def export_settings(self, output_path: Path) -> ExportSettings:
+        self._refresh_destination()
+        self._refresh_estimate()
+        self._refresh_privacy()
+
+    # ── choices ──────────────────────────────────────────────────────────
+
+    def selected_preset(self) -> QualityPreset:
+        for key, button in self.preset_buttons.items():
+            if button.isChecked():
+                return preset_for_key(key)
+        return preset_for_key(None)
+
+    def selected_fps(self) -> int:
+        data = self.fps_combo.currentData()
+        return self._auto_fps if data == "auto" else int(data)
+
+    def export_settings(self, output_path: Path | None = None) -> ExportSettings:
         from neuroedit_desktop.exporter import ExportSettings
 
+        preset = self.selected_preset()
         return ExportSettings(
-            output_path=output_path,
-            width=int(self.width_spin.value()),
-            height=int(self.height_spin.value()),
-            fps=int(self.fps_combo.currentData()),
-            crf=int(self.crf_spin.value()),
-            label=self.preset_combo.currentText(),
+            output_path=output_path if output_path is not None else self.output_path(),
+            width=preset.width,
+            height=preset.height,
+            fps=self.selected_fps(),
+            crf=preset.crf,
+            label=preset.label,
             mute_source_audio=self.mute_source_audio_check.isChecked(),
             burn_captions=self.burn_captions_check.isChecked(),
             audio_bitrate_k=int(self.audio_bitrate_combo.currentData()),
         )
 
-    def _toggle_advanced(self, checked: bool) -> None:
-        self.advanced_widget.setVisible(checked)
-        self.advanced_toggle.setText(
-            "Advanced settings ▾" if checked else "Advanced settings ▸"
+    def save_preferences(self, project: ProjectState) -> None:
+        """Remember this sheet's choices on the project (no undo step)."""
+        prefs = dict(project.export_preferences or {})
+        prefs["quality"] = self.selected_preset().key
+        prefs["mute_source_audio"] = self.mute_source_audio_check.isChecked()
+        if self.burn_captions_check.isEnabled():
+            prefs["burn_captions"] = self.burn_captions_check.isChecked()
+        prefs["fps"] = self.fps_combo.currentData()
+        project.export_preferences = prefs
+
+    def remember_folder(self) -> None:
+        QSettings("NeuroEdit", "Desktop").setValue(EXPORT_FOLDER_KEY, str(self._folder))
+
+    # ── name and place ───────────────────────────────────────────────────
+
+    def _default_name(self) -> str:
+        return unique_export_path(
+            self._folder, readable_export_name(self._project.project_name)
+        ).stem
+
+    def _name_edited(self, _text: str) -> None:
+        self._name_is_default = False
+
+    def _typed_name(self) -> str:
+        text = self.name_edit.text().strip()
+        if text.lower().endswith(".mp4"):
+            text = text[:-4]
+        return text.strip(" .")
+
+    def output_path(self) -> Path | None:
+        name = self._typed_name()
+        if not name:
+            return None
+        return self._folder / f"{readable_export_name(name)}.mp4"
+
+    def _folder_usable(self) -> bool:
+        return self._folder.is_dir() and os.access(self._folder, os.W_OK)
+
+    def _choose_folder(self) -> None:
+        chosen = QFileDialog.getExistingDirectory(
+            self, "Choose Export Folder", str(self._folder)
+        )
+        if not chosen:
+            return
+        self._folder = Path(chosen)
+        if self._name_is_default:
+            self.name_edit.setText(self._default_name())
+        self._refresh_destination()
+
+    def _refresh_destination(self, *_args) -> None:
+        name = self._folder.name or str(self._folder)
+        self.folder_label.setText(name)
+        self.folder_label.setToolTip(str(self._folder))
+        path = self.output_path()
+        self.replace_note.setVisible(path is not None and path.exists())
+        self._update_export_enabled()
+
+    # ── estimate ─────────────────────────────────────────────────────────
+
+    def _refresh_estimate(self) -> None:
+        preset = self.selected_preset()
+        note = f"{preset.width} x {preset.height}"
+        if preset.key == self._recommended_key:
+            note += " · Recommended for this project"
+        self.help_label.setText(note)
+        self.help_label.setToolTip(f"{preset.help}\n{self._recommended_reason}")
+        if self._duration <= 0:
+            self.estimate_label.setText("")
+            return
+        audio_kbps = int(self.audio_bitrate_combo.currentData()) if self._includes_audio() else None
+        size = estimate_output_bytes(
+            preset.width, preset.height, self._duration, audio_kbps=audio_kbps
+        )
+        seconds = estimate_encode_seconds(
+            preset.width, preset.height, self.selected_fps(), self._duration,
+            pixel_rate=self._pixel_rate or None,
+        )
+        where = "this Mac" if sys.platform == "darwin" else "this computer"
+        self.estimate_label.setText(
+            f"About {format_bytes(size)} · {format_time_estimate(seconds)} on {where}"
+        )
+
+    def _toggle_more(self) -> None:
+        opened = self.more_widget.isHidden()
+        self.more_widget.setVisible(opened)
+        self.more_toggle.setText("More options ▾" if opened else "More options ▸")
+        self.adjustSize()
+
+    def _toggle_suggestions(self) -> None:
+        checked = self.suggestions_label.isHidden()
+        self.suggestions_label.setVisible(checked)
+        self.suggestions_toggle.setText(
+            f"{self._suggestions_title} {'▾' if checked else '▸'}"
         )
         self.adjustSize()
 
-    def _preset_changed(self) -> None:
-        _key, width, height, fps, crf, help_text = self.preset_combo.currentData()
-        self.help_label.setText(f"{help_text} Output: {width} x {height}, {fps} fps.")
-        # Re-glue the advanced fields to the preset so a preset switch always
-        # produces exactly the preset, even after manual tweaks.
-        self.crf_spin.setValue(int(crf))
-        index = self.fps_combo.findData(int(fps))
-        self.fps_combo.setCurrentIndex(index if index >= 0 else 2)
-        self.width_spin.setValue(int(width))
-        self.height_spin.setValue(int(height))
+    # ── privacy gate ─────────────────────────────────────────────────────
+
+    def _keeps_source_audio(self) -> bool:
+        return not self.mute_source_audio_check.isChecked() and any(
+            clip.media_type == "video" for clip in self._project.clips
+        )
+
+    def _includes_audio(self) -> bool:
+        return self._keeps_source_audio() or project_has_active_audio_tracks(self._project)
+
+    def _reviews_captions(self) -> bool:
+        return self.burn_captions_check.isChecked() and project_has_transcript_text(
+            self._project
+        )
+
+    def required_confirmed(self) -> bool:
+        return (
+            self.phi_check.isChecked()
+            and self.deid_check.isChecked()
+            and self.consent_check.isChecked()
+            and (not self._reviews_captions() or self.caption_check.isChecked())
+        )
+
+    def can_export(self) -> bool:
+        return (
+            self.required_confirmed()
+            and bool(self._typed_name())
+            and self._folder_usable()
+        )
+
+    def _open_details(self) -> None:
+        self._details_open = True
+        self._refresh_privacy()
+
+    def _request_guided_review(self) -> None:
+        # Keep the choices made so far; the caller restarts the sheet afterwards.
+        self.save_preferences(self._project)
+        self.guided_review_requested = True
+        self.reject()
+
+    def _refresh_privacy(self, *_args) -> None:
+        reviews_captions = self._reviews_captions()
+        self.caption_check.setVisible(reviews_captions)
+        if not self.required_confirmed():
+            self._details_open = True  # never hide an unchecked required item
+        self.privacy_details.setVisible(self._details_open)
+        self.privacy_summary.setVisible(not self._details_open)
+        self.summary_label.setText(
+            "✓ PHI review, de-identification, consent and caption text confirmed"
+            if reviews_captions
+            else "✓ PHI review, de-identification and consent confirmed"
+        )
+        includes_audio = self._includes_audio()
+        self.audio_group.setVisible(includes_audio)
+        note = (
+            "This export includes audio. Spoken identifiers (patient name, MRN, "
+            "date of birth) are not covered by the Redact tool."
+        )
+        if self._keeps_source_audio():
+            note += " Original operating-room clip audio is being kept."
+        self.audio_warning.setText(note)
+        # Reviewed audio doesn't need the amber warning anymore.
+        colour = TEXT_MUTED if self.audio_check.isChecked() else ACCENT_AMBER
+        self.audio_warning.setStyleSheet(f"color: {colour};")
+        self._refresh_estimate()
+        self._update_export_enabled()
+
+    def _update_export_enabled(self) -> None:
+        # Called while the widgets are still being built.
+        if hasattr(self, "export_button") and hasattr(self, "audio_group"):
+            self.export_button.setEnabled(self.can_export())
+
+    def accept(self) -> None:
+        if self.can_export():
+            super().accept()
+
+    def apply_to_project(self, project: ProjectState) -> None:
+        project.phi_review_confirmed = self.phi_check.isChecked()
+        project.deidentified_confirmed = self.deid_check.isChecked()
+        project.consent_confirmed = self.consent_check.isChecked()
+        if self._includes_audio():
+            project.audio_reviewed_for_phi = self.audio_check.isChecked()
+        if self._reviews_captions():
+            progress = dict(project.phi_review_progress or {})
+            if self.caption_check.isChecked():
+                progress[TRANSCRIPT_REVIEW_KEY] = True
+            else:
+                progress.pop(TRANSCRIPT_REVIEW_KEY, None)
+            project.phi_review_progress = progress
 
 
 class ExportHistoryDialog(QDialog):

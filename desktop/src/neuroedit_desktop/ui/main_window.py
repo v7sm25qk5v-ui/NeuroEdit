@@ -75,7 +75,6 @@ from neuroedit_desktop.ui.branding import (
     _wordmark_font,
 )
 from neuroedit_desktop.ui.dialogs import (
-    ExportChecklistDialog,
     ExportDialog,
     ExportHistoryDialog,
     PhiReviewDialog,
@@ -156,7 +155,6 @@ __all__ = [
     "SamPropagationWorker",
     "SamSegmentWorker",
     "VideoGraphicsView",
-    "ExportChecklistDialog",
     "ExportDialog",
     "ExportHistoryDialog",
     "ExportWorker",
@@ -456,6 +454,10 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self.phi_review_action = QAction("Guided PHI Review…", self)
         self.phi_review_action.triggered.connect(self._start_phi_review)
 
+        self.export_movie_action = QAction("Export Movie…", self)
+        self.export_movie_action.setShortcut(QKeySequence("Ctrl+E"))  # ⌘E on macOS
+        self.export_movie_action.triggered.connect(lambda *_: self._export_project())
+
         self.export_captions_action = QAction("Export Captions (SRT/VTT)…", self)
         self.export_captions_action.triggered.connect(self._export_captions)
 
@@ -512,6 +514,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         file_menu.addAction(self.import_image_action)
         file_menu.addAction(self.relink_media_action)
         file_menu.addSeparator()
+        file_menu.addAction(self.export_movie_action)
         file_menu.addAction(self.export_captions_action)
         file_menu.addAction(self.export_history_action)
         file_menu.addSeparator()
@@ -720,7 +723,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self.export_btn = QPushButton("Export")
         self.export_btn.setProperty("variant", "emerald")
         self.export_btn.setFixedHeight(32)
-        self.export_btn.clicked.connect(self._export_project)
+        self.export_btn.clicked.connect(self._export_button_clicked)
         row1.addWidget(self.export_btn)
 
         # ── Row 2: annotation drawing tools ──────────────────────────────

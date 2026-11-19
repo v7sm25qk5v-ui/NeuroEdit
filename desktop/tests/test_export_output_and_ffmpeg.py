@@ -83,16 +83,28 @@ def test_exdev_replaces_existing_output_only_with_complete_file(qt_app, tmp_path
     assert [p.name for p in out.parent.iterdir()] == ["out.mp4"]
 
 
-def test_failed_copy_keeps_old_output_and_leaves_no_partial(qt_app, tmp_path, monkeypatch):
+def test_failed_copy_keeps_old_output_and_leaves_no_partial(tmp_path, monkeypatch):
+    # The export no longer copies across volumes (the final file is written
+    # into the destination folder), so the copy fallback is checked directly.
     _exdev_across_dirs(monkeypatch)
 
     def boom(src, dst, *a, **k):
         raise OSError(errno.ENOSPC, "No space left on device")
 
     monkeypatch.setattr(exporter_module.shutil, "copymode", boom)
+    src, dest = _pair(tmp_path)
+    dest.write_bytes(b"old")
+    with pytest.raises(OSError):
+        exporter_module._publish_file(src, dest)
+    assert dest.read_bytes() == b"old"
+    assert [p.name for p in dest.parent.iterdir()] == ["out.mp4"]
+
+
+def test_failed_encode_keeps_old_output_and_leaves_no_partial(qt_app, tmp_path, monkeypatch):
     exporter, out = _export(tmp_path, monkeypatch, tmp_path / "ext")
     out.write_bytes(b"old")
-    with pytest.raises(OSError):
+    monkeypatch.setattr(exporter, "_encoder_args", lambda _f: ["-c:v", "no_such_encoder_xyz"])
+    with pytest.raises(RuntimeError):
         exporter.export()
     assert out.read_bytes() == b"old"
     assert [p.name for p in out.parent.iterdir()] == ["out.mp4"]

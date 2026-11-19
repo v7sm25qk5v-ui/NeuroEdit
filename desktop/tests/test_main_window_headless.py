@@ -625,7 +625,9 @@ def test_export_report_contains_phi_flag_block(window, tmp_path):
     window._export_report_project = project
     output = tmp_path / "out.mp4"
     report_path = window._write_export_report(output, ["note one"])
-    assert report_path == tmp_path / "out.export-report.txt"
+    # Beside the project, never beside the MP4 that people share.
+    assert report_path == window.store.project_path.parent / "Export Reports" / "out.export-report.txt"
+    assert not (tmp_path / "out.export-report.txt").exists()
     text = report_path.read_text(encoding="utf-8")
     assert "Consent/authorization confirmed: True" in text
     assert "De-identified: True" in text

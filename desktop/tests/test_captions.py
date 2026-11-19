@@ -127,28 +127,25 @@ def test_burned_captions_force_render():
     assert 3.0 in burn._timeline_boundaries(10.0)
 
 
-def test_export_dialog_caption_and_advanced_settings(app):
+def test_export_dialog_caption_and_more_options(app):
     project = ProjectState()
     project.transcript_segments.append(_segment("hi", 0.0, 2.0))
     project.captions_enabled = True
     dialog = ExportDialog(project)
     assert dialog.burn_captions_check.isEnabled()
     assert dialog.burn_captions_check.isChecked()
-    # Advanced fields glue to the preset until edited...
+    # The preset drives size and CRF; the frame rate is automatic by default.
     settings = dialog.export_settings(Path("/tmp/x.mp4"))
     assert (settings.width, settings.height, settings.fps, settings.crf) == (1920, 1080, 30, 20)
     assert settings.burn_captions is True
     assert settings.audio_bitrate_k == 192
-    # ...manual tweaks are respected...
-    dialog.crf_spin.setValue(24)
+    # More options are respected...
     dialog.fps_combo.setCurrentIndex(dialog.fps_combo.findData(60))
+    assert dialog.export_settings(Path("/tmp/x.mp4")).fps == 60
+    # ...and the preset still decides size.
+    dialog.preset_buttons["720p"].setChecked(True)
     settings = dialog.export_settings(Path("/tmp/x.mp4"))
-    assert settings.crf == 24
-    assert settings.fps == 60
-    # ...and switching presets re-glues every advanced field.
-    dialog.preset_combo.setCurrentIndex(1)  # 720p preset
-    settings = dialog.export_settings(Path("/tmp/x.mp4"))
-    assert (settings.width, settings.height, settings.fps, settings.crf) == (1280, 720, 30, 23)
+    assert (settings.width, settings.height, settings.fps, settings.crf) == (1280, 720, 60, 23)
 
 
 def test_export_dialog_captions_disabled_without_transcript(app):

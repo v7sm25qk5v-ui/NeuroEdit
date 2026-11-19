@@ -4,15 +4,16 @@ NeuroEdit is a standalone desktop video editor for preparing operative video for
 conference, research, and educational use. Editing and export run locally;
 NeuroEdit does not upload video or audio to a cloud editing service.
 
-Current release: [NeuroEdit 1.0](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v1.0.0)
+Current release: [NeuroEdit 1.1](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v1.1.0)
 
 [Download the latest build](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/latest).
 
-### What's new in NeuroEdit 1.0
+### What's new in NeuroEdit 1.1
 
-- **Save As** uses one dialog to name your project and choose a writable location.
-- **Media copy progress** shows how much media has been copied. Copying runs in
-  the background so the progress dialog stays responsive and you can cancel.
+- **Export Movie** puts quality, captions, audio, destination, and privacy review
+  in one dialog, with estimates for file size and export time.
+- **Background export** shows progress on the Export button and lets you cancel
+  while the editor stays responsive.
 
 The retained security findings are tracked in [SECURITY_FIXES.md](SECURITY_FIXES.md).
 The original scan had partial coverage; these fixes do not constitute a completed audit.
@@ -40,9 +41,8 @@ The original scan had partial coverage; these fixes do not constitute a complete
   and mix them into exports with per-track timing and volume.
 - **Captions** — generated from transcript segments, previewed on the canvas,
   burned in at export or exported as an SRT/VTT sidecar.
-- **Export** — H.264 MP4 with resolution presets (a recommended preset is
-  preselected from your source resolution and intended use), advanced CRF/fps/
-  bitrate controls, export history, and a written export report next to each MP4.
+- **Export** — H.264 MP4 with quality presets and automatic frame-rate selection,
+  export history, and a written report in the project's `Export Reports` folder.
 - **Media linking and project library** — add individual files or link a video
   folder on an external drive while keeping the source files in place. Finder/
   File Explorer drag-and-drop, a recent-project library with neutral previews, durations,
@@ -54,7 +54,7 @@ The original scan had partial coverage; these fixes do not constitute a complete
 
 ### macOS
 
-Download `NeuroEdit-v1.0.0-macOS-unsigned.dmg` from the release page.
+Download `NeuroEdit-v1.1.0-macOS-unsigned.dmg` from the release page.
 Open the DMG, drag `NeuroEdit.app` into Applications, then right-click the app
 and choose `Open` for the first launch.
 
@@ -64,7 +64,7 @@ If macOS blocks launch, open `System Settings` -> `Privacy & Security`, choose
 
 ### Windows
 
-Download `NeuroEdit-v1.0.0-Windows-Setup.exe` from the release page on a
+Download `NeuroEdit-v1.1.0-Windows-Setup.exe` from the release page on a
 Windows PC. If SmartScreen warns, choose `More info` -> `Run anyway`, then follow
 the installer.
 
@@ -83,7 +83,7 @@ saves your work and reopens the same saved project after restarting. Checks only
 contact GitHub when requested; project media stays local.
 
 Builds from v0.5.19-alpha onward include the updater and can update to
-v1.0.0 in the app. Older versions must install manually once.
+v1.1.0 in the app. Older versions must install manually once.
 On macOS, a read-only running copy can update a single identical writable copy
 in `/Applications` or `~/Applications`. Older updater builds may still require
 a one-time manual installation if macOS translocates them. Source checkouts and

@@ -47,12 +47,7 @@ def test_cancel_reaches_export_while_worker_is_busy(tmp_path, monkeypatch):
         def __init__(self):
             super().__init__()
             self.project = ProjectState()
-            self.export_btn = QPushButton(self)
-            self.result = None
-
-        def _export_finished(self, output_path, error, warnings):
-            self.result = (output_path, error, warnings)
-            self._export_progress_dialog.close()
+            self.export_btn = QPushButton("Export", self)
 
     monkeypatch.setattr(ProjectExporter, "export", export)
     window = ExportWindow()
@@ -62,14 +57,18 @@ def test_cancel_reaches_export_while_worker_is_busy(tmp_path, monkeypatch):
     thread = window._export_thread
     try:
         assert entered.wait(2.0), "Export worker never started"
-        window._export_progress_dialog.canceled.emit()
+        assert window.export_btn.text().startswith("Exporting")
+        # A click while exporting opens a menu instead of starting another export.
+        window._export_button_clicked()
+        window._export_menu.actions()[0].trigger()
         deadline = time.monotonic() + 3.0
         while window._export_thread is not None and time.monotonic() < deadline:
             app.processEvents()
             time.sleep(0.005)
         assert canceled.is_set(), "Cancel was queued behind the running export"
-        assert window.result == (None, "Export canceled.", [])
         assert window._export_thread is None
+        assert window.statusBar().currentMessage() == "Export canceled."
+        assert window.export_btn.text() == "Export"
     finally:
         if window._export_thread is not None:
             thread.quit()

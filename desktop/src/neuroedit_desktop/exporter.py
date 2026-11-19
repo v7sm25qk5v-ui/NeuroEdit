@@ -7,6 +7,9 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Literal
@@ -17,7 +20,9 @@ from PySide6.QtGui import QBrush, QColor, QFont, QFontMetricsF, QImage, QPainter
 
 from neuroedit_desktop.annotation_label import paint_annotation_label
 from neuroedit_desktop.captions import build_caption_cues, cue_at_time, paint_caption
+from neuroedit_desktop.export_plan import estimate_output_bytes, video_bitrate_bps
 from neuroedit_desktop.models import Annotation, AudioTrack, ProjectState, Slide, VideoClip
+from neuroedit_desktop.project_copy import CHUNK_BYTES, SPACE_MARGIN_BYTES, format_bytes, is_dataless
 from neuroedit_desktop.stills import read_upright_image
 
 
@@ -94,6 +99,12 @@ def require_ffmpeg() -> str:
 
 def reset_ffmpeg_cache() -> None:
     _ffmpeg_cache.clear()
+    _encoder_cache.clear()
+
+
+# (ffmpeg path, encoder name) -> available. `ffmpeg -encoders` takes a while on
+# a cold start, and its answer cannot change within a session.
+_encoder_cache: dict[tuple[str, str], bool] = {}
 
 
 _STAGE_PREFIX = ".neuroedit-export-"
@@ -183,6 +194,125 @@ class ExportCancelled(Exception):
     pass
 
 
+class ExportError(RuntimeError):
+    """A failure with a plain-language message. `str(exc)` is what the user sees;
+    the raw ffmpeg stderr or OS error is kept in `.details`."""
+
+    def __init__(self, message: str, details: str = "") -> None:
+        super().__init__(message)
+        self.details = details
+
+
+_NO_SPACE_MARKERS = ("no space left on device", "disk quota exceeded")
+_PERMISSION_MARKERS = ("permission denied", "operation not permitted", "read-only file system")
+_UNREADABLE_MARKERS = (
+    "moov atom not found",
+    "invalid data found",
+    "error while decoding",
+    "error opening input",
+    "end of file",
+    "corrupt",
+    "could not find codec parameters",
+)
+_NO_SPACE_MESSAGE = "NeuroEdit ran out of disk space while exporting. Free up space or choose another location."
+_PERMISSION_MESSAGE = "NeuroEdit isn't allowed to save the export there. Choose another folder."
+
+
+def _error_from_text(
+    text: str,
+    fallback: str,
+    clip_name: str | None = None,
+    clip_path: str | None = None,
+) -> ExportError:
+    """Turn raw ffmpeg stderr into a plain message; unrecognised text is kept in the message."""
+    lowered = text.lower()
+    if any(marker in lowered for marker in _NO_SPACE_MARKERS):
+        return ExportError(_NO_SPACE_MESSAGE, text)
+    if any(marker in lowered for marker in _PERMISSION_MARKERS):
+        if clip_name and clip_path and clip_path in text:
+            return ExportError(f"“{clip_name}” can't be read. NeuroEdit isn't allowed to open it.", text)
+        return ExportError(_PERMISSION_MESSAGE, text)
+    if clip_name and any(marker in lowered for marker in _UNREADABLE_MARKERS):
+        return ExportError(f"“{clip_name}” can't be read. It may be damaged or still copying.", text)
+    return ExportError(f"{fallback}: {text or 'unknown error'}", text)
+
+
+def _error_from_oserror(exc: OSError, folder: Path | None = None) -> ExportError | None:
+    """Plain message for the OS errors an export can hit; None for anything else."""
+    if exc.errno in (errno.ENOSPC, getattr(errno, "EDQUOT", errno.ENOSPC)):
+        return ExportError(_NO_SPACE_MESSAGE, str(exc))
+    if exc.errno in (errno.EACCES, errno.EPERM, errno.EROFS):
+        where = f"“{folder.name}”" if folder is not None and folder.name else "that folder"
+        return ExportError(f"NeuroEdit can't save to {where}. Choose another folder.", str(exc))
+    return None
+
+
+def sweep_stale_export_temp(max_age_s: float = 6 * 3600) -> int:
+    """Delete `neuroedit_export_*` temp folders left behind by a crash. Returns how many."""
+    removed = 0
+    try:
+        entries = list(Path(tempfile.gettempdir()).glob("neuroedit_export_*"))
+    except OSError:
+        return 0
+    now = time.time()
+    for entry in entries:
+        try:
+            if entry.is_symlink() or not entry.is_dir() or now - entry.stat().st_mtime <= max_age_s:
+                continue
+            shutil.rmtree(entry, ignore_errors=True)
+            if not entry.exists():
+                removed += 1
+        except OSError:
+            continue
+    return removed
+
+
+def _clock(seconds: float) -> str:
+    total = max(0, int(seconds))
+    hours, rest = divmod(total, 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
+
+def _volume_name(path: Path) -> str:
+    """Finder's name for the volume holding `path` (falls back to the folder name)."""
+    parts = path.resolve().parts
+    if len(parts) > 2 and parts[1] == "Volumes":
+        return parts[2]
+    try:
+        for entry in os.scandir("/Volumes"):
+            if os.path.realpath(entry.path) == "/":
+                return entry.name
+    except OSError:
+        pass
+    return path.name or "this volume"
+
+
+def _tail(stderr_file) -> str:
+    stderr_file.seek(0, os.SEEK_END)
+    stderr_file.seek(max(0, stderr_file.tell() - 4000))
+    return stderr_file.read().decode("utf-8", errors="replace").strip()
+
+
+def _parse_progress_seconds(line: str) -> float | None:
+    """Seconds of output written, from one `-progress` line (None for other lines)."""
+    key, _, value = line.strip().partition("=")
+    if key in ("out_time_us", "out_time_ms"):  # both are microseconds in practice
+        try:
+            micros = int(value)
+        except ValueError:
+            return None
+        return micros / 1_000_000 if micros >= 0 else None
+    return None
+
+
+_VIDEO_BAND_START = 1  # 0-1% is for the checks and iCloud downloads
+_VIDEO_BAND_END = 95  # the video segments fill 1-95%, or 1-90% when audio is mixed
+_AUDIO_BAND_END = 90
+_FINAL_BAND_END = 99  # the join / audio pass fills the rest
+_MIN_EMIT_INTERVAL_S = 0.1
+
+
 class ProjectExporter:
     def __init__(
         self,
@@ -201,21 +331,53 @@ class ProjectExporter:
         self._image_cache: dict[str, np.ndarray] = {}
         self._qt_image_cache: dict[str, QImage] = {}
         self._audio_probe_cache: dict[str, bool] = {}
-        self._ffmpeg_encoder_cache: dict[str, bool] = {}
+        self._last_pct = 0
+        self._last_emit = 0.0
+        self._timeline_total = 0.0
+        self._band_end = _VIDEO_BAND_END
         self._caption_cues = (
             build_caption_cues(project.transcript_segments)
             if settings.burn_captions
             else []
         )
 
+    def _report(self, pct: float, message: str, *, force: bool = False) -> None:
+        """Progress that never goes backwards and is limited to ~10 updates/s."""
+        pct = max(self._last_pct, min(100, int(pct)))
+        now = time.monotonic()
+        if not force and pct < 100 and now - self._last_emit < _MIN_EMIT_INTERVAL_S:
+            return
+        self._last_pct = pct
+        self._last_emit = now
+        self.progress(pct, message)
+
+    def _timeline_reporter(
+        self, segment: TimelineSegment, start_frac: float, end_frac: float
+    ) -> Callable[[float], None]:
+        """Callback taking seconds written into `segment`, reporting timeline progress."""
+        low, high = float(_VIDEO_BAND_START), float(self._band_end)
+
+        def report(local_s: float) -> None:
+            local_s = min(local_s, segment.duration)
+            frac = min(1.0, max(0.0, local_s / segment.duration)) if segment.duration > 0 else 1.0
+            overall = start_frac + (end_frac - start_frac) * frac
+            total = max(self._timeline_total, segment.end)
+            self._report(
+                low + (high - low) * overall,
+                f"Exporting… {_clock(segment.start + local_s)} of {_clock(total)}",
+            )
+
+        return report
+
     def export(self) -> list[str]:
         import cv2  # noqa: PLC0415
 
         warnings: list[str] = []
+        output_path = self.settings.output_path
         try:
-            output_path = self.settings.output_path.resolve()
+            resolved_output = output_path.resolve()
             sources = self._source_media()
-            if any(path.resolve() == output_path for _name, path in sources):
+            if any(path.resolve() == resolved_output for _name, path in sources):
                 raise RuntimeError("Choose an export path that is not one of the source media files.")
             missing = [name for name, path in sources if not path.is_file()]
             if missing:
@@ -225,33 +387,121 @@ class ProjectExporter:
             duration = self._duration()
             if duration <= 0:
                 raise RuntimeError("The project has no timeline content to export.")
+            self._timeline_total = duration
 
-            self.settings.output_path.parent.mkdir(parents=True, exist_ok=True)
             ffmpeg = self._find_ffmpeg()
+            self._report(0, "Checking the export…", force=True)
+            self._hydrate_sources(sources)
+            audio_sources = self._audio_sources(ffmpeg) if ffmpeg else []
+            self._check_destination(output_path)
+            self._check_free_space(output_path, duration, bool(audio_sources))
+            self._band_end = _AUDIO_BAND_END if audio_sources else _VIDEO_BAND_END
 
-            with tempfile.TemporaryDirectory(prefix="neuroedit_export_") as tmp_dir:
-                tmp_video = Path(tmp_dir) / "visual.mp4"
+            with tempfile.TemporaryDirectory(prefix="neuroedit_export_") as tmp_dir, \
+                    self._partial_output(output_path) as partial:
                 if ffmpeg:
-                    self._encode_timeline_video(tmp_video, ffmpeg, Path(tmp_dir), duration)
+                    direct = None if audio_sources else partial
+                    segment_paths = self._encode_timeline_segments(ffmpeg, Path(tmp_dir), duration, direct)
+                    if segment_paths != [partial]:
+                        self._assemble_final(segment_paths, partial, audio_sources, ffmpeg, Path(tmp_dir), duration)
+                    if not audio_sources and self._active_audio_tracks():
+                        warnings.append("No readable audio streams were found, so the MP4 is silent.")
                 else:
+                    tmp_video = Path(tmp_dir) / "visual.mp4"
                     self._encode_video_with_opencv(tmp_video, duration, cv2)
                     warnings.append(
                         "No working FFmpeg was found, so the export uses OpenCV video encoding without audio."
                     )
+                    _publish_file(tmp_video, partial, self.cancelled)
 
-                audio_sources = self._audio_sources(ffmpeg) if ffmpeg else []
-                if ffmpeg and audio_sources:
-                    self.progress(92, "Mixing audio...")
-                    self._mux_audio(tmp_video, self.settings.output_path, audio_sources, ffmpeg, duration)
-                else:
-                    if ffmpeg and self._active_audio_tracks():
-                        warnings.append("No readable audio streams were found, so the MP4 is silent.")
-                    _publish_file(tmp_video, self.settings.output_path, self.cancelled)
-
-            self.progress(100, "Export complete.")
+            self._report(100, "Export complete.", force=True)
             return warnings
+        except OSError as exc:
+            friendly = _error_from_oserror(exc, output_path.parent)
+            if friendly is None:
+                raise
+            raise friendly from exc
         finally:
             self._release_captures()
+
+    @contextmanager
+    def _partial_output(self, output_path: Path):
+        """Hidden file next to `output_path`, renamed onto it only when complete.
+
+        The final ffmpeg pass writes straight into the destination folder, so
+        publishing is a same-volume rename (atomic, also over an existing file).
+        """
+        name = f".{output_path.name[:100]}.neuroedit-partial"
+        partial = output_path.parent / name
+        try:
+            yield partial
+            os.replace(partial, output_path)
+        except BaseException:
+            partial.unlink(missing_ok=True)
+            raise
+
+    def _display_name(self, name: str, path: Path) -> str:
+        return name.strip() or path.name
+
+    def _hydrate_sources(self, sources: list[tuple[str, Path]]) -> None:
+        """Download iCloud-evicted sources now, visibly and cancellably, not inside ffmpeg."""
+        for name, path in sources:
+            if not is_dataless(path):
+                continue
+            label = self._display_name(name, path)
+            self._report(0, f"Downloading {label} from iCloud…", force=True)
+            try:
+                with open(path, "rb") as handle:
+                    while handle.read(CHUNK_BYTES):
+                        if self.cancelled():
+                            raise ExportCancelled()
+            except OSError as exc:
+                raise ExportError(
+                    f"“{label}” can't be downloaded from iCloud. "
+                    "Check your internet connection and try again.",
+                    str(exc),
+                ) from exc
+
+    def _check_destination(self, output_path: Path) -> None:
+        folder = output_path.parent
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            fd, probe = tempfile.mkstemp(prefix=".neuroedit-write-test-", dir=folder)
+            os.close(fd)
+            os.unlink(probe)
+        except OSError as exc:
+            raise ExportError(
+                f"NeuroEdit can't save to “{folder.name}”. Choose another folder.", str(exc)
+            ) from exc
+
+    def _check_free_space(self, output_path: Path, duration: float, has_audio: bool) -> None:
+        settings = self.settings
+        audio_kbps = settings.audio_bitrate_k if has_audio else None
+        final_bytes = estimate_output_bytes(settings.width, settings.height, duration, audio_kbps=audio_kbps)
+        temp_bytes = estimate_output_bytes(settings.width, settings.height, duration, audio_kbps=None)
+        folder = output_path.parent
+        temp_dir = Path(tempfile.gettempdir())
+        try:
+            same_device = os.stat(folder).st_dev == os.stat(temp_dir).st_dev
+            needs = (
+                [(folder, final_bytes + temp_bytes + SPACE_MARGIN_BYTES)]
+                if same_device
+                else [
+                    (folder, final_bytes + SPACE_MARGIN_BYTES),
+                    (temp_dir, temp_bytes + SPACE_MARGIN_BYTES),
+                ]
+            )
+            for where, needed in needs:
+                free = shutil.disk_usage(where).free
+                if free < needed:
+                    raise ExportError(
+                        f"This export needs about {format_bytes(needed)} of free space on "
+                        f"“{_volume_name(where)}”, but only {format_bytes(free)} is available. "
+                        "Free up space or choose another location.",
+                        f"needed={needed} free={free} path={where}",
+                    )
+        except OSError:
+            return  # can't measure it: let the export try rather than block it
 
     def _source_media(self) -> list[tuple[str, Path]]:
         sources = [(clip.name, Path(clip.path)) for clip in self.project.clips]
@@ -296,6 +546,24 @@ class ProjectExporter:
         tmp_dir: Path,
         duration: float,
     ) -> None:
+        """Encode the whole timeline into the single video file `path`."""
+        paths = self._encode_timeline_segments(ffmpeg, tmp_dir, duration, path)
+        if paths != [path]:
+            self._concat_video_segments(paths, path, ffmpeg, tmp_dir)
+
+    def _encode_timeline_segments(
+        self,
+        ffmpeg: str,
+        tmp_dir: Path,
+        duration: float,
+        final_path: Path | None = None,
+    ) -> list[Path]:
+        """Encode each timeline segment; returns the files to join in order.
+
+        When `final_path` is given and the timeline is a single segment it is
+        encoded straight into it (with +faststart) and `[final_path]` returned,
+        so no join pass is needed.
+        """
         # Every segment must use the same output-frame clock. Rounding each
         # segment's duration up independently adds a frame at many cuts and
         # progressively shifts the visuals away from narration timestamps.
@@ -311,46 +579,38 @@ class ProjectExporter:
                     segment.clip,
                 ))
         if not segments:
+            target = final_path if final_path is not None else tmp_dir / "segment_00001.mp4"
             self._encode_render_segment_with_ffmpeg(
                 TimelineSegment(0.0, duration, "render"),
-                path,
+                target,
                 ffmpeg,
                 0.0,
                 1.0,
+                final=final_path is not None,
             )
-            return
+            return [target]
 
+        direct = final_path is not None and len(segments) == 1
         segment_paths: list[Path] = []
         total = max(0.01, sum(segment.duration for segment in segments))
         complete = 0.0
         for index, segment in enumerate(segments, start=1):
             if self.cancelled():
                 raise ExportCancelled()
-            segment_path = tmp_dir / f"segment_{index:05d}.mp4"
-            start_pct = complete / total
-            end_pct = (complete + segment.duration) / total
+            segment_path = final_path if direct else tmp_dir / f"segment_{index:05d}.mp4"
+            start_frac = complete / total
+            end_frac = (complete + segment.duration) / total
             if segment.kind == "video" and segment.clip is not None:
-                self.progress(
-                    int(start_pct * 88),
-                    f"Fast-exporting video segment {index} of {len(segments)}...",
+                self._encode_video_segment_with_ffmpeg(
+                    segment, segment_path, ffmpeg, start_frac, end_frac, final=direct
                 )
-                self._encode_video_segment_with_ffmpeg(segment, segment_path, ffmpeg)
             else:
                 self._encode_render_segment_with_ffmpeg(
-                    segment,
-                    segment_path,
-                    ffmpeg,
-                    start_pct,
-                    end_pct,
+                    segment, segment_path, ffmpeg, start_frac, end_frac, final=direct
                 )
             complete += segment.duration
             segment_paths.append(segment_path)
-
-        if len(segment_paths) == 1:
-            os.replace(segment_paths[0], path)
-            return
-        self.progress(89, "Joining timeline segments...")
-        self._concat_video_segments(segment_paths, path, ffmpeg, tmp_dir)
+        return segment_paths
 
     def _frame_number(self, time_s: float) -> int:
         # Decimal timeline arithmetic can put an exact frame boundary a tiny
@@ -478,6 +738,10 @@ class ProjectExporter:
         segment: TimelineSegment,
         path: Path,
         ffmpeg: str,
+        start_frac: float = 0.0,
+        end_frac: float = 1.0,
+        *,
+        final: bool = False,
     ) -> None:
         if segment.clip is None:
             raise RuntimeError("Video segment is missing its source clip.")
@@ -518,11 +782,19 @@ class ProjectExporter:
             *self._encoder_args(ffmpeg),
             "-pix_fmt",
             "yuv420p",
-            "-movflags",
-            "+faststart",
+            *self._output_args(final),
             str(path),
         ]
-        self._run_ffmpeg(cmd, "FFmpeg video segment export failed")
+        self._run_ffmpeg(
+            cmd,
+            "FFmpeg video segment export failed",
+            on_progress=self._timeline_reporter(segment, start_frac, end_frac),
+            clip=segment.clip,
+        )
+
+    def _output_args(self, final: bool) -> list[str]:
+        """Container flags: faststart (a full-file rewrite) only on the file the user gets."""
+        return ["-movflags", "+faststart", "-f", "mp4"] if final else []
 
     def _encode_render_segment_with_ffmpeg(
         self,
@@ -531,6 +803,8 @@ class ProjectExporter:
         ffmpeg: str,
         progress_start: float,
         progress_end: float,
+        *,
+        final: bool = False,
     ) -> None:
         width, height = self.settings.width, self.settings.height
         cmd = [
@@ -555,8 +829,7 @@ class ProjectExporter:
             *self._encoder_args(ffmpeg),
             "-pix_fmt",
             "yuv420p",
-            "-movflags",
-            "+faststart",
+            *self._output_args(final),
             str(path),
         ]
         # stderr goes to a temp file, not a pipe: nothing reads it while frames
@@ -568,6 +841,7 @@ class ProjectExporter:
             stderr_file.close()
             raise
         assert proc.stdin is not None
+        report = self._timeline_reporter(segment, progress_start, progress_end)
         first_frame = self._frame_number(segment.start)
         frame_count = max(1, self._frame_number(segment.end) - first_frame)
         encoder_died = False
@@ -584,35 +858,37 @@ class ProjectExporter:
                     # stderr below instead of crashing on the pipe write.
                     encoder_died = True
                     break
-                if index % max(1, self.settings.fps) == 0:
-                    ratio = index / frame_count
-                    pct = int((progress_start + (progress_end - progress_start) * ratio) * 88)
-                    self.progress(pct, f"Rendering segment frame {index + 1} of {frame_count}...")
+                report(index / self.settings.fps)
             try:
                 proc.stdin.close()
             except (BrokenPipeError, OSError):
                 encoder_died = True
-            ret = proc.wait()
-            stderr_file.seek(0, os.SEEK_END)
-            stderr_file.seek(max(0, stderr_file.tell() - 4000))
-            stderr = stderr_file.read().decode("utf-8", errors="replace")
-        finally:
-            # A decoder/painter failure must reap ffmpeg too: otherwise the
-            # child remains alive waiting for more raw frames on its open pipe.
-            if proc.poll() is None:
-                proc.terminate()
+            # ffmpeg is flushing its last frames: stay responsive to Cancel.
+            while True:
                 try:
-                    proc.wait(timeout=5)
+                    ret = proc.wait(timeout=0.05)
+                    break
                 except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait(timeout=5)
+                    if self.cancelled():
+                        raise ExportCancelled() from None
+            stderr = _tail(stderr_file)
+        finally:
+            # A decoder/painter failure or Cancel must reap ffmpeg too, at once:
+            # closing stdin first lets a healthy encoder exit by itself, but
+            # one still running is killed rather than waited for.
             try:
                 proc.stdin.close()
             except OSError:
                 pass
+            if proc.poll() is None:
+                proc.kill()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
             stderr_file.close()
         if ret != 0 or encoder_died:
-            raise RuntimeError(f"FFmpeg video export failed: {stderr.strip() or 'unknown error'}")
+            raise _error_from_text(stderr, "FFmpeg video export failed")
 
     def _concat_video_segments(
         self,
@@ -621,37 +897,9 @@ class ProjectExporter:
         ffmpeg: str,
         tmp_dir: Path,
     ) -> None:
-        list_path = tmp_dir / "segments.txt"
-        lines = []
-        for path in segment_paths:
-            escaped = str(path).replace("\\", "\\\\").replace("'", "\\'")
-            lines.append(f"file '{escaped}'")
-        list_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        cmd = [
-            ffmpeg,
-            "-y",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            str(list_path),
-            "-map_metadata",
-            "-1",
-            "-map_metadata:s",
-            "-1",
-            "-map_chapters",
-            "-1",
-            "-c",
-            "copy",
-            "-movflags",
-            "+faststart",
-            str(output_path),
-        ]
-        self._run_ffmpeg(cmd, "FFmpeg timeline join failed")
+        """Join `segment_paths` into `output_path` (atomically, with +faststart)."""
+        with self._partial_output(output_path) as partial:
+            self._assemble_final(segment_paths, partial, [], ffmpeg, tmp_dir, self._timeline_total)
 
     def _encoder_args(self, ffmpeg: str) -> list[str]:
         if self._has_encoder(ffmpeg, "h264_videotoolbox"):
@@ -659,49 +907,114 @@ class ProjectExporter:
         return ["-c:v", "libx264", "-preset", "veryfast", "-crf", str(self.settings.crf)]
 
     def _hardware_bitrate(self) -> str:
-        pixels = self.settings.width * self.settings.height
-        if pixels >= 3840 * 2160:
-            return "45M"
-        if pixels >= 1920 * 1080:
-            return "12M"
-        return "5M"
+        # Shared with the export sheet's file-size estimate (export_plan).
+        bps = video_bitrate_bps(self.settings.width, self.settings.height)
+        return f"{bps // 1_000_000}M"
+
+    def _probe_ffmpeg(self, cmd: list[str], timeout: float) -> str | None:
+        """Run a short ffmpeg query and return its stdout+stderr; None on timeout.
+
+        Polls Cancel, so a slow probe (e.g. a file still downloading) never
+        delays it. Raises ExportCancelled.
+        """
+        with tempfile.TemporaryFile() as out:
+            proc = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+            deadline = time.monotonic() + timeout
+            try:
+                while True:
+                    try:
+                        proc.wait(timeout=0.05)
+                        break
+                    except subprocess.TimeoutExpired:
+                        if self.cancelled():
+                            raise ExportCancelled() from None
+                        if time.monotonic() > deadline:
+                            return None
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait()
+            out.seek(0)
+            return out.read().decode("utf-8", errors="replace")
 
     def _has_encoder(self, ffmpeg: str, encoder_name: str) -> bool:
-        cached = self._ffmpeg_encoder_cache.get(encoder_name)
+        key = (ffmpeg, encoder_name)
+        cached = _encoder_cache.get(key)
         if cached is not None:
             return cached
-        try:
-            proc = subprocess.run(
-                [ffmpeg, "-hide_banner", "-encoders"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=15,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            self._ffmpeg_encoder_cache[encoder_name] = False
-            return False
-        available = encoder_name in proc.stdout
-        self._ffmpeg_encoder_cache[encoder_name] = available
+        listing = self._probe_ffmpeg([ffmpeg, "-hide_banner", "-encoders"], 15)
+        if listing is None:
+            return False  # not cached: a slow first launch may succeed next time
+        available = encoder_name in listing
+        _encoder_cache[key] = available
         return available
 
-    def _run_ffmpeg(self, cmd: list[str], failure_prefix: str) -> None:
-        # communicate() drains stdout/stderr while waiting — polling without
-        # reading can deadlock once ffmpeg fills the OS pipe buffer.
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        while True:
+    def _run_ffmpeg(
+        self,
+        cmd: list[str],
+        failure_prefix: str,
+        *,
+        on_progress: Callable[[float], None] | None = None,
+        clip: VideoClip | None = None,
+    ) -> None:
+        """Run ffmpeg to completion, polling Cancel and reporting `-progress`.
+
+        stdout is read on a thread and stderr goes to a temp file, so neither can
+        fill a pipe and stall ffmpeg. Cancel kills the process outright: SIGTERM
+        would let ffmpeg finish writing (including the faststart rewrite).
+        """
+        run_cmd = [*cmd[:1], "-progress", "pipe:1", "-nostats", "-stats_period", "0.1", *cmd[1:]]
+        stderr_file = tempfile.TemporaryFile()
+        try:
+            proc = subprocess.Popen(
+                run_cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=stderr_file, text=True
+            )
+        except BaseException:
+            stderr_file.close()
+            raise
+        latest = [0.0]
+
+        def read_progress() -> None:
             try:
-                stdout, stderr = proc.communicate(timeout=0.1)
-                break
-            except subprocess.TimeoutExpired:
-                if self.cancelled():
-                    proc.terminate()
-                    proc.wait()
-                    raise ExportCancelled() from None
-        if proc.returncode != 0:
-            details = (stderr or stdout or "unknown error").strip()
-            raise RuntimeError(f"{failure_prefix}: {details}")
+                for line in proc.stdout:  # type: ignore[union-attr]
+                    seconds = _parse_progress_seconds(line)
+                    if seconds is not None:
+                        latest[0] = seconds
+            except (OSError, ValueError):
+                pass
+
+        reader = threading.Thread(target=read_progress, daemon=True)
+        reader.start()
+        try:
+            while True:
+                try:
+                    proc.wait(timeout=0.05)
+                    break
+                except subprocess.TimeoutExpired:
+                    if self.cancelled():
+                        raise ExportCancelled() from None
+                    if on_progress is not None:
+                        on_progress(latest[0])
+            reader.join(timeout=2)
+            if proc.returncode == 0:
+                if on_progress is not None:
+                    on_progress(float("inf"))
+                return
+            stderr = _tail(stderr_file)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+            reader.join(timeout=2)
+            if proc.stdout is not None:
+                proc.stdout.close()
+            stderr_file.close()
+        raise _error_from_text(
+            stderr or "unknown error",
+            failure_prefix,
+            clip.name if clip is not None else None,
+            clip.path if clip is not None else None,
+        )
 
     def _encode_video_with_opencv(self, path: Path, duration: float, cv2) -> None:
         writer = None
@@ -1219,20 +1532,12 @@ class ProjectExporter:
         cached = self._audio_probe_cache.get(key)
         if cached is not None:
             return cached
-        try:
-            proc = subprocess.run(
-                [ffmpeg, "-hide_banner", "-i", str(path)],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=15,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
+        listing = self._probe_ffmpeg([ffmpeg, "-hide_banner", "-i", str(path)], 15)
+        if listing is None:
             self._audio_probe_cache[key] = False
             return False
         # Only stream lines count: the banner also echoes the input file name.
-        has_audio = _AUDIO_STREAM_LINE.search(proc.stderr) is not None
+        has_audio = _AUDIO_STREAM_LINE.search(listing) is not None
         self._audio_probe_cache[key] = has_audio
         return has_audio
 
@@ -1244,8 +1549,35 @@ class ProjectExporter:
         ffmpeg: str,
         duration: float,
     ) -> None:
-        staged_output = tmp_video.with_name("muxed.mp4")
-        cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-i", str(tmp_video)]
+        """Add the mixed audio to one finished video file (atomically)."""
+        with self._partial_output(output_path) as partial:
+            self._assemble_final([tmp_video], partial, audio_sources, ffmpeg, tmp_video.parent, duration)
+
+    def _assemble_final(
+        self,
+        video_paths: list[Path],
+        dest: Path,
+        audio_sources: list[AudioSource],
+        ffmpeg: str,
+        tmp_dir: Path,
+        duration: float,
+    ) -> None:
+        """Join the video segments and mix the audio in ONE pass writing `dest`.
+
+        The video is stream-copied (concat demuxer, or the single file), the
+        audio is mixed from the original files, and +faststart is applied once.
+        """
+        cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error"]
+        if len(video_paths) == 1:
+            cmd.extend(["-i", str(video_paths[0])])
+        else:
+            list_path = tmp_dir / "segments.txt"
+            lines = []
+            for path in video_paths:
+                escaped = str(path).replace("\\", "\\\\").replace("'", "\\'")
+                lines.append(f"file '{escaped}'")
+            list_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            cmd.extend(["-f", "concat", "-safe", "0", "-i", str(list_path)])
         for source in audio_sources:
             cmd.extend(["-i", str(source.path)])
 
@@ -1272,45 +1604,37 @@ class ProjectExporter:
                 f"adelay={delay_ms}:all=1[{label}]"
             )
             labels.append(f"[{label}]")
-        if not labels:
-            _publish_file(tmp_video, output_path, self.cancelled)
-            return
 
-        chains.append(
-            "".join(labels)
-            + f"amix=inputs={len(labels)}:duration=longest:normalize=0,"
-            + f"atrim=0:{duration:.3f}[mix]"
-        )
-        filter_complex = ";".join(chains)
-        cmd.extend(
-            [
-                "-filter_complex",
-                filter_complex,
-                "-map",
-                "0:v:0",
-                "-map",
-                "[mix]",
-                "-map_metadata",
-                "-1",
-                "-map_metadata:s",
-                "-1",
-                "-map_chapters",
-                "-1",
-                "-c:v",
-                "copy",
-                "-c:a",
-                "aac",
-                "-b:a",
-                f"{max(64, int(self.settings.audio_bitrate_k))}k",
-                "-t",
-                f"{duration:.3f}",
-                "-movflags",
-                "+faststart",
-                str(staged_output),
-            ]
-        )
-        self._run_ffmpeg(cmd, "Audio mux failed")
-        _publish_file(staged_output, output_path, self.cancelled)
+        if labels:
+            chains.append(
+                "".join(labels)
+                + f"amix=inputs={len(labels)}:duration=longest:normalize=0,"
+                + f"atrim=0:{duration:.3f}[mix]"
+            )
+            cmd.extend(["-filter_complex", ";".join(chains), "-map", "0:v:0", "-map", "[mix]"])
+        cmd.extend(["-map_metadata", "-1", "-map_metadata:s", "-1", "-map_chapters", "-1"])
+        if labels:
+            cmd.extend([
+                "-c:v", "copy",
+                "-c:a", "aac",
+                "-b:a", f"{max(64, int(self.settings.audio_bitrate_k))}k",
+                "-t", f"{duration:.3f}",
+            ])
+        else:
+            cmd.extend(["-c", "copy"])
+        cmd.extend(["-movflags", "+faststart", "-f", "mp4", str(dest)])
+
+        low = float(self._band_end)
+        total = max(0.01, duration)
+
+        def report(seconds: float) -> None:
+            frac = min(1.0, max(0.0, seconds / total))
+            self._report(
+                low + (_FINAL_BAND_END - low) * frac,
+                "Mixing audio…" if labels else "Finishing…",
+            )
+
+        self._run_ffmpeg(cmd, "Audio mux failed" if labels else "FFmpeg timeline join failed", on_progress=report)
 
     def _release_captures(self) -> None:
         for cap in self._captures.values():

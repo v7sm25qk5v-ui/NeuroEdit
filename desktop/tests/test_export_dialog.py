@@ -3,6 +3,7 @@ default, with the dialog preselecting it."""
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -63,16 +64,17 @@ def test_4k_source_talk_adjunct_stays_1080p():
 
 def test_dialog_preselects_recommendation(app):
     dialog = ExportDialog(_project(height=720))
-    assert dialog.preset_combo.currentData()[0] == "720p"
-    assert "Recommended for this project" in dialog.recommend_label.text()
-    # Advanced fields re-glued to the recommended preset.
-    assert dialog.height_spin.value() == 720
+    assert dialog.selected_preset().key == "720p"
+    assert dialog.preset_buttons["720p"].isChecked()
+    assert "Recommended for this project" in dialog.help_label.text()
+    settings = dialog.export_settings(Path("/tmp/x.mp4"))
+    assert (settings.width, settings.height) == (1280, 720)
 
 
 def test_dialog_defaults_keep_simple_path(app):
     dialog = ExportDialog(_project(height=1080))
-    assert dialog.preset_combo.currentData()[0] == "1080p"
-    assert not dialog.advanced_widget.isVisible()  # advanced stays collapsed
+    assert dialog.selected_preset().key == "1080p"
+    assert not dialog.more_widget.isVisibleTo(dialog)  # more options stay collapsed
     assert dialog.mute_source_audio_check.isChecked()  # privacy default intact
 
 
