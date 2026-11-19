@@ -1,5 +1,21 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-18 — NeuroEdit 1.1 published
+
+- Published [v1.1.0](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v1.1.0)
+  from `b922bd98179f23fbc905b935bf508ad3662a9a73`, annotated tag
+  `b6c4ca4c0cc9508e1c9195e015766638786dd67d`. GitHub Latest matched the
+  checked-in notes. The macOS DMG, macOS ZIP, and Windows installer all
+  returned HTTP 200 and have GitHub SHA-256 digests. The v1.0.0 updater
+  accepted both platform downloads in the published release metadata.
+- [Tagged CI](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44442738260)
+  passed 943 macOS tests and built and published both installers. The
+  informational Windows suite recorded 916 passes, 19 failures, and 8 skips.
+  Eighteen failures matched v1.0.0. The new failure in the FFmpeg probe
+  cancellation test used a Unix shell script as an executable on Windows.
+  The previous release's relative-date failure did not recur. No local tests
+  were rerun at the user's request.
+
 ## 2026-11-18 — NeuroEdit 1.1 release preparation
 
 - Prepared `v1.1.0` for the export overhaul below. Updated the package version,
