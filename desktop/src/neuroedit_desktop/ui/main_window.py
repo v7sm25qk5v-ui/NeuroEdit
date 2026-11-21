@@ -871,8 +871,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         # Video column
         video_column = QWidget()
         video_column.setObjectName("videoColumn")
-        # Keep the video preview + playback controls usable; stops the splitter or
-        # a narrow window from squeezing the video pane to nothing.
+        # Keep the video preview usable; stops the splitter or a narrow window
+        # from squeezing the video pane to nothing.
         video_column.setMinimumWidth(360)
         video_column_layout = QVBoxLayout(video_column)
         video_column_layout.setContentsMargins(0, 0, 0, 0)
@@ -937,7 +937,6 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self.take_still_btn.setToolTip("Capture the current preview and insert it as a slide.")
         self.take_still_btn.clicked.connect(self._take_still)
         controls.addWidget(self.take_still_btn)
-        controls.addStretch(1)
 
         # Speed button
         self.speed_btn = QPushButton("1×")
@@ -945,12 +944,16 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self.speed_btn.setToolTip("Cycle playback speed")
         self.speed_btn.setProperty("role", "rateButton")
         self.speed_btn.clicked.connect(self._cycle_speed)
-        controls.addWidget(self.speed_btn)
-
-        video_column_layout.addWidget(controls_frame)
 
         # Timeline
         self.timeline = RichTimelineWidget(self.project)
+        # Share one full-width transport/editing bar above the tracks. Keep the
+        # timeline controls scrollable when the window is narrow.
+        self.timeline.layout().removeWidget(self.timeline.toolbar_scroll)
+        controls.addWidget(self.timeline.toolbar_scroll, 1)
+        controls.addWidget(self.speed_btn)
+        self.timeline.layout().insertWidget(0, controls_frame)
+        self.timeline.refresh()
         self.timeline.seek_requested.connect(self._seek_global)
         self.timeline.scrub_requested.connect(self._preview_scrub)
         self.timeline.scrub_finished.connect(self._finish_scrub)
@@ -959,7 +962,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         self.timeline.project_changed.connect(self._mark_review_relevant_project_dirty)
         self.timeline.view_changed.connect(self._mark_timeline_view_dirty)
         self.timeline.item_activated.connect(self._timeline_item_activated)
-        self.timeline.setMinimumHeight(340)
+        self.timeline.setMinimumHeight(160)
         self._install_editor_shortcuts()
 
         self.media_panel = MediaExplorerPanel(self.project)
@@ -1073,7 +1076,9 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
 
         main_splitter.addWidget(splitter)
         main_splitter.addWidget(self.timeline)
-        main_splitter.setSizes([500, 380])
+        main_splitter.setStretchFactor(0, 1)
+        main_splitter.setStretchFactor(1, 0)
+        main_splitter.setSizes([500, self.timeline.maximumHeight()])
 
         self._main_vbox.addWidget(body, 1)
 

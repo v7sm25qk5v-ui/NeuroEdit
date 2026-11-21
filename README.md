@@ -4,16 +4,19 @@ NeuroEdit is a standalone desktop video editor for preparing operative video for
 conference, research, and educational use. Editing and export run locally;
 NeuroEdit does not upload video or audio to a cloud editing service.
 
-Current release: [NeuroEdit 1.2](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v1.2.0)
+Current release: [NeuroEdit 1.2.1](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v1.2.1)
 
 [Download the latest build](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/latest).
 
-### What's new in NeuroEdit 1.2
+### What's new in NeuroEdit 1.2.1
 
-- **Import at the playhead** or drop media on the timeline. New clips snap to
-  the nearest clip boundary and make room by shifting later items.
-- **Reorder clips** and their connected labels, markers, slides, captions,
-  and audio move with them. An opening title stays first.
+- **Combined controls:** timeline zoom, snapping, markers, splitting and fades
+  sit beside playback controls in one full-width bar above the tracks.
+- **More timeline space:** removes unused space below the tracks and the old
+  300-pixel height cap. Stacked rows can use a taller timeline pane.
+- Keeps playback visible in narrow windows, scrolls editing controls when needed,
+  and returns freed space to the preview after resizing or removing stacked rows.
+- Retains import-at-playhead and connected clip reordering from NeuroEdit 1.2.
 
 The retained security findings are tracked in [SECURITY_FIXES.md](SECURITY_FIXES.md).
 The original scan had partial coverage; these fixes do not constitute a completed audit.
@@ -54,7 +57,7 @@ The original scan had partial coverage; these fixes do not constitute a complete
 
 ### macOS
 
-Download `NeuroEdit-v1.2.0-macOS-unsigned.dmg` from the release page.
+Download `NeuroEdit-v1.2.1-macOS-unsigned.dmg` from the release page.
 Open the DMG, drag `NeuroEdit.app` into Applications, then right-click the app
 and choose `Open` for the first launch.
 
@@ -64,7 +67,7 @@ If macOS blocks launch, open `System Settings` -> `Privacy & Security`, choose
 
 ### Windows
 
-Download `NeuroEdit-v1.2.0-Windows-Setup.exe` from the release page on a
+Download `NeuroEdit-v1.2.1-Windows-Setup.exe` from the release page on a
 Windows PC. If SmartScreen warns, choose `More info` -> `Run anyway`, then follow
 the installer.
 
@@ -83,7 +86,7 @@ saves your work and reopens the same saved project after restarting. Checks only
 contact GitHub when requested; project media stays local.
 
 Builds from v0.5.19-alpha onward include the updater and can update to
-v1.2.0 in the app. Older versions must install manually once.
+v1.2.1 in the app. Older versions must install manually once.
 On macOS, a read-only running copy can update a single identical writable copy
 in `/Applications` or `~/Applications`. Older updater builds may still require
 a one-time manual installation if macOS translocates them. Source checkouts and

@@ -1,5 +1,48 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-21 — NeuroEdit 1.2.1 release preparation
+
+- User requested a release of the combined playback/timeline controls and unused
+  track-space fix. Confirmed v1.2.1 after noting v1.1.1 would be older than the
+  already published v1.2.0 and unavailable through its updater.
+- Updated pyproject version, README/download links and checked-in release notes.
+  Uses the completed 195-test layout verification and independent senior review;
+  required hosted quality and both platform installer builds remain enabled.
+- Publish from current main plus these layout changes, keep existing tags
+  immutable, and verify all three assets, Latest and the repository sidebar.
+  Record final CI/publication evidence in a separate documentation follow-up.
+- Existing daily-optimization and local baseline notes remain in the worktree;
+  they are not included in this release commit.
+
+## 2026-11-21 — Combined playback/timeline controls and reclaimed track space
+
+- Moved the timeline zoom/Fit/Snap/Mark/Split/fade controls beside playback,
+  Take Still and speed in one full-width bar immediately above the tracks
+  (`ui/main_window.py`). Timeline controls scroll horizontally on narrow windows;
+  playback stays visible. Existing actions, signals and shortcuts are retained.
+- Removed the timeline scroll area's fixed 300 px ceiling and the separate
+  controls row. Track viewport fills its pane; the pane's height ceiling follows
+  actual track content, returning unused vertical space to the preview. Stacked
+  label/slide lanes can use a taller pane; the splitter remains draggable with
+  a 160 px minimum. Toolbar scrollbar transitions preserve a fitted track area
+  without overriding a deliberately shortened pane.
+- Dynamic toolbar layout minimum prevents overlapping controls as time text or
+  font metrics grow. Sol senior review independently checked widget ownership,
+  shortcut lifetime and long-time/larger-font control reachability. Final review
+  also verified zero exterior gap after wide/narrow/wide resize and lane removal,
+  and that a deliberately shortened 200 px pane remains unchanged.
+- Verification: **195 passed in 20.53 s** across `test_timeline_polish.py`,
+  `test_timeline_editing.py`, and `test_main_window_headless.py`; Ruff passed.
+  Isolated offscreen screenshots/geometry at 2200×1100, 1440×900 and minimum
+  1099×600, plus seven stacked label lanes at 1440×1050, verified shared-bar
+  placement, reachable controls, no gap below the viewport and wide/narrow/wide
+  resizing. A 548 px stacked canvas was fully visible after expanding the pane.
+  Artifacts: `/private/tmp/neuroedit-layout-20261121/`. No patient media used.
+- Verification used a temporary pinned Python environment after the iCloud venv
+  stalled on imports. User preferences/project storage were isolated. Existing
+  local HANDOFF/TODO/CLAUDE changes were preserved. Implemented locally; no tag,
+  installer rebuild, push or release requested for this layout change yet.
+
 ## 2026-11-21 — NeuroEdit 1.2 published
 
 - Published [v1.2.0](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v1.2.0)

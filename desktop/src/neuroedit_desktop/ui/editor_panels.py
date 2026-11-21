@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QLayout,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
@@ -32,6 +33,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSlider,
     QSpinBox,
+    QSplitter,
     QTextEdit,
     QTreeView,
     QVBoxLayout,
@@ -1845,6 +1847,7 @@ class RichTimelineWidget(QWidget):
 
         toolbar_widget = QWidget()
         toolbar = QHBoxLayout(toolbar_widget)
+        toolbar.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         toolbar.setContentsMargins(10, 6, 10, 6)
         toolbar.setSpacing(8)
         title = QLabel("Timeline")
@@ -1884,11 +1887,18 @@ class RichTimelineWidget(QWidget):
 
         self.toolbar_scroll = QScrollArea()
         self.toolbar_scroll.setWidget(toolbar_widget)
-        self.toolbar_scroll.setWidgetResizable(False)
+        self.toolbar_scroll.setWidgetResizable(True)
         self.toolbar_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.toolbar_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.toolbar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.toolbar_scroll.setFixedHeight(toolbar_widget.sizeHint().height() + 18)
+        toolbar_height = toolbar_widget.sizeHint().height()
+        toolbar_bar = self.toolbar_scroll.horizontalScrollBar()
+        self.toolbar_scroll.setFixedHeight(toolbar_height)
+        toolbar_bar.rangeChanged.connect(
+            lambda low, high: self.toolbar_scroll.setFixedHeight(
+                toolbar_height + (toolbar_bar.sizeHint().height() if high > low else 0)
+            )
+        )
 
         self.canvas = TimelineCanvas(project)
         self.canvas.seek_requested.connect(self.seek_requested)
@@ -1905,7 +1915,6 @@ class RichTimelineWidget(QWidget):
         self.scroll.setToolTip("Scroll to move through time. Shift-scroll to reach stacked label rows.")
         self.scroll.setWidget(self.canvas)
         self.scroll.setWidgetResizable(False)
-        self.scroll.setMaximumHeight(self._timeline_scroll_height())
         self.scroll.horizontalScrollBar().valueChanged.connect(self._scroll_changed)
         self.scroll.verticalScrollBar().valueChanged.connect(self.canvas._on_filmstrip_vertical_scroll)
 
@@ -1920,7 +1929,13 @@ class RichTimelineWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self.toolbar_scroll)
-        layout.addWidget(self.scroll)
+        layout.addWidget(self.scroll, 1)
+        toolbar_bar.rangeChanged.connect(
+            lambda _low, _high: QTimer.singleShot(0, self._update_height_limit)
+        )
+        self.scroll.horizontalScrollBar().rangeChanged.connect(
+            lambda _low, _high: QTimer.singleShot(0, self._update_height_limit)
+        )
         self.refresh()
 
     def _delete_selection(self) -> None:
@@ -1959,7 +1974,7 @@ class RichTimelineWidget(QWidget):
         self._refresh_time_label()
         self.canvas.refresh_geometry()
         self.canvas.update()
-        self.scroll.setMaximumHeight(self._timeline_scroll_height())
+        self._update_height_limit()
         if getattr(self, "trash", None) is not None and self.trash.isVisible():
             self._position_trash()
 
@@ -2006,8 +2021,35 @@ class RichTimelineWidget(QWidget):
             f"{fmt_time(self.project.current_time)} / {fmt_time(self.project.duration)}"
         )
 
-    def _timeline_scroll_height(self) -> int:
-        return min(self.canvas.minimumHeight() + 20, 300)
+    def _update_height_limit(self) -> None:
+        # Fit the actual tracks and the current transport bar. Excess window
+        # height goes back to the preview, rather than an empty area below tracks.
+        bar = self.scroll.horizontalScrollBar()
+        scrollbar_height = bar.sizeHint().height() if bar.maximum() > bar.minimum() else 0
+        header_height = self.layout().itemAt(0).sizeHint().height()
+        header_growth = header_height - getattr(self, "_transport_height", header_height)
+        self._transport_height = header_height
+        height_limit = (self.canvas.minimumHeight() + 2 * self.scroll.frameWidth()
+                        + scrollbar_height + header_height)
+        parent = self.parentWidget()
+        # A newly visible toolbar scrollbar should not steal track space from
+        # an already fitted pane. Preserve a user's deliberately shorter pane.
+        fitted_sizes = None
+        height_change = 0
+        if (isinstance(parent, QSplitter)
+                and parent.orientation() == Qt.Orientation.Vertical
+                and parent.indexOf(self) == 1):
+            if header_growth > 0 and self.height() == self.maximumHeight():
+                height_change = header_growth
+            elif self.height() > height_limit:
+                height_change = height_limit - self.height()
+            if height_change:
+                fitted_sizes = parent.sizes()
+        self.setMaximumHeight(height_limit)
+        if fitted_sizes is not None:
+            fitted_sizes[0] = max(0, fitted_sizes[0] - height_change)
+            fitted_sizes[1] += height_change
+            parent.setSizes(fitted_sizes)
 
     def _set_fade(self, side: str, value: float) -> None:
         clip = self.project.active_clip
