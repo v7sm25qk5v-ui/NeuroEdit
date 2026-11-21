@@ -1,5 +1,42 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-21 — NeuroEdit 1.2.1 published and verified
+
+- Published [v1.2.1](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v1.2.1)
+  from `b8bc574163253e8f345557b6bae84f565a816c92`; annotated tag object
+  `71949ed1edafaccf8730b4c7e079d2d216fc68a5`. User confirmed 1.2.1 instead of
+  initially requested 1.1.1 so existing 1.2 installations can receive the update.
+- Includes combined playback/timeline controls, removal of unused track space and
+  the 300 px viewport cap, responsive scrolling/height and safe timer teardown.
+  Initial unpublished candidate failed on the queued-callback lifecycle bug;
+  fixed before any installers or release were published. Only this task's new
+  unpublished tag was replaced using an exact old-object lease (details below).
+- Main [quality 44943878848](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44943878848)
+  passed **972 tests, 2 existing warnings in 175.18 s**, clean exit. Tagged
+  [workflow 44943879002](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44943879002)
+  attempt 2 passed **972 tests in 273.33 s**, clean exit; Ruff, both installer
+  builds and publication passed. Attempt 1 was cancelled after an 11-minute stall
+  in the import-cancellation test's QTest.qWait; retry used identical source.
+  Follow up on that rare event-loop stall; no claim of a proven runner-only cause.
+- Windows informational suite: **944 passed, 20 failed, 8 skipped, 2 warnings**
+  in 212.19 s, same failing names as v1.2.0, no new failures. Installer build passed.
+- Local verification: 234 targeted tests passed plus independent senior review.
+  Independent full run: 966 passed/6 failed (251.03 s), no hang or teardown error.
+  All six failures were export buttons disabled by the sandbox's unwritable
+  default ~/Movies destination; all six passed (0.30 s) with an in-memory fixture
+  selecting writable tmp_path. No source/test changes or user Movies writes.
+- All public downloads returned HEAD HTTP 200: DMG 130265990 bytes, ZIP 117741348
+  bytes, Windows EXE 100459016 bytes. GitHub SHA-256, CI and retry evidence are in
+  `desktop/docs/releases/v1.2.1-verification.json`. These release assets were not
+  independently downloaded or installed during publication.
+- Verified GitHub Latest API, live repository Releases sidebar and README all
+  show 1.2.1. Existing 1.2.0 updater parsing accepted both platform assets/digests.
+  Unsigned/not-notarized/editor-only limits remain; actual native install/update
+  and UI smoke checks are not claimed complete. Use Help → Check for Updates….
+- Documentation-only follow-up records publication without changing the tested
+  tag. Earlier preparation entries are historical. Unrelated local optimization
+  and prior baseline notes remain uncommitted in HANDOFF/TODO/CLAUDE.
+
 ## 2026-11-21 — Corrected unpublished 1.2.1 release candidate shutdown error
 
 - Initial candidate source `74471493af0a844d157fe41375b60c0db57a5296`, tag object

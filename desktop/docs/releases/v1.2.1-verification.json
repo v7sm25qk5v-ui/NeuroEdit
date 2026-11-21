@@ -1,0 +1,146 @@
+{
+  "release_id": 453957973,
+  "tag": "v1.2.1",
+  "name": "NeuroEdit v1.2.1",
+  "source_commit": "b8bc574163253e8f345557b6bae84f565a816c92",
+  "annotated_tag_object": "71949ed1edafaccf8730b4c7e079d2d216fc68a5",
+  "release_url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v1.2.1",
+  "published_at": "2026-11-21T20:21:08Z",
+  "verified_at": "2026-11-21T20:22:47.096642+00:00",
+  "draft": false,
+  "prerelease": false,
+  "latest_tag": "v1.2.1",
+  "sidebar_verified": "NeuroEdit v1.2.1 Latest (live browser accessibility tree)",
+  "local_targeted_validation": {
+    "passed": 234,
+    "warnings": 2,
+    "seconds": 27.7,
+    "clean_exit": true,
+    "senior_review": "approved, including 100 immediate-deletion cycles"
+  },
+  "local_independent_full_validation": {
+    "passed": 966,
+    "failed": 6,
+    "warnings": 2,
+    "seconds": 251.03,
+    "hang_or_teardown_error": false,
+    "failure_scope": "Export confirmation buttons remain disabled because default ~/Movies destination is unwritable inside filesystem sandbox.",
+    "six_test_recheck": {
+      "passed": 6,
+      "seconds": 0.3,
+      "method": "Temporary in-memory pytest fixture redirects default_export_folder to writable tmp_path; no source/test-file changes."
+    }
+  },
+  "main_workflow": {
+    "id": 44943878848,
+    "url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44943878848",
+    "conclusion": "success",
+    "pytest_passed": 972,
+    "pytest_seconds": 175.18,
+    "warnings": 2,
+    "clean_exit": true
+  },
+  "tagged_workflow": {
+    "id": 44943879002,
+    "url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44943879002",
+    "attempt": 2,
+    "conclusion": "success",
+    "pytest_passed": 972,
+    "pytest_seconds": 273.33,
+    "warnings": 2,
+    "clean_exit": true,
+    "jobs": [
+      {
+        "name": "quality / Test and lint desktop app",
+        "conclusion": "success"
+      },
+      {
+        "name": "quality / Test and lint desktop app (Windows, informational)",
+        "conclusion": "failure"
+      },
+      {
+        "name": "Build Windows (Setup.exe)",
+        "conclusion": "success"
+      },
+      {
+        "name": "Build macOS (.dmg)",
+        "conclusion": "success"
+      },
+      {
+        "name": "Publish GitHub Release",
+        "conclusion": "success"
+      }
+    ],
+    "attempt_1": {
+      "conclusion": "cancelled by orchestrator after about 11 minutes of stalled pytest",
+      "stack": "test_import_placement.py _wait/QTest.qWait in test_project_changed_during_import_still_aborts",
+      "retry_source_changed": false,
+      "independent_same_test": "passed locally"
+    }
+  },
+  "windows_informational": {
+    "conclusion": "failure",
+    "nonblocking": true,
+    "passed": 944,
+    "failed": 20,
+    "skipped": 8,
+    "warnings": 2,
+    "seconds": 212.19,
+    "new_failure_names_since_v1_2_0": [],
+    "resolved_failure_names_since_v1_2_0": [],
+    "ruff": "passed",
+    "installer_build": "success"
+  },
+  "updater_metadata_validation": {
+    "current_version": "v1.2.0",
+    "newer_version_accepted": true,
+    "platforms": [
+      "darwin",
+      "win32"
+    ],
+    "asset_name_size_digest_validation": "passed",
+    "actual_installed_update_run": false
+  },
+  "assets": [
+    {
+      "name": "NeuroEdit-v1.2.1-macOS-unsigned.dmg",
+      "size": 130265990,
+      "state": "uploaded",
+      "github_reported_digest": "sha256:cd00401f27b918226a6a862f6303d895066dc3520564f44d9cae8f64461d2b1c",
+      "browser_download_url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/download/v1.2.1/NeuroEdit-v1.2.1-macOS-unsigned.dmg",
+      "public_head_http_status": 200
+    },
+    {
+      "name": "NeuroEdit-v1.2.1-macOS-unsigned.zip",
+      "size": 117741348,
+      "state": "uploaded",
+      "github_reported_digest": "sha256:a5496704106ce1c57ff297fc0296f00b36d637dcb6493032c9636895579951f0",
+      "browser_download_url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/download/v1.2.1/NeuroEdit-v1.2.1-macOS-unsigned.zip",
+      "public_head_http_status": 200
+    },
+    {
+      "name": "NeuroEdit-v1.2.1-Windows-Setup.exe",
+      "size": 100459016,
+      "state": "uploaded",
+      "github_reported_digest": "sha256:7fba7b17fdd463c1e5afc79ee21b2c3d1d4db14359d44dc4e2223804db450b3e",
+      "browser_download_url": "https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/download/v1.2.1/NeuroEdit-v1.2.1-Windows-Setup.exe",
+      "public_head_http_status": 200
+    }
+  ],
+  "asset_verification_scope": "Public HEAD HTTP200 and GitHub-reported SHA256; v1.2.1 installer bytes were not independently downloaded or installed.",
+  "first_unpublished_candidate": {
+    "source_commit": "74471493af0a844d157fe41375b60c0db57a5296",
+    "annotated_tag_object": "e0ce68a7b460c2d3979b899aecd50fac6da6f94a",
+    "tagged_workflow": 44943124014,
+    "main_workflow": 44943123856,
+    "required_quality": "failed on deleted-widget resize callback during teardown; fixed with timeline-owned timer and regression test",
+    "release_or_assets_published": false,
+    "tag_replacement": "Only new unpublished v1.2.1 tag replaced, with exact old-object force-with-lease; prior published tags untouched."
+  },
+  "remaining_validation": [
+    "Native installed-app visual smoke on macOS and Windows",
+    "Actual installed updater replacement/restart",
+    "Windows informational failures and UI scaling",
+    "Investigate rare import-cancellation test event-loop stall; same source passed main and tagged retry"
+  ]
+}
