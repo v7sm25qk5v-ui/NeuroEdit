@@ -1,5 +1,24 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-21 — NeuroEdit 1.2 published
+
+- Published [v1.2.0](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v1.2.0)
+  from `a40e4ca29e399a067ee8d7d927974de5fde15f0e`, annotated tag
+  `b2153077035046f347fb9ba1665a836d9bd3eabe`. GitHub Latest matched the
+  checked-in notes. The macOS DMG, macOS ZIP, and Windows installer returned
+  HTTP 200 and have GitHub SHA-256 digests. The v1.1.0 updater accepted both
+  platform downloads in the published release metadata.
+- [Tagged CI](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44910168210)
+  passed 971 macOS tests and built and published both installers. The
+  informational Windows suite had 943 passes, 20 failures, and 8 skips.
+  Nineteen failures matched v1.1.0. A relative-date boundary test that had
+  failed in earlier releases also failed on this run. No local suite was rerun.
+- [Main CI](https://github.com/v7sm25qk5v-ui/NeuroEdit/actions/runs/44910167862)
+  had 970 macOS passes and one failure on both attempts. In each run,
+  `test_dragging_on_empty_timeline_scrubs_the_playhead` did not observe the
+  queued preview within its 70 ms wait. The same test passed on the tagged
+  workflow at the same commit.
+
 ## 2026-11-21 — NeuroEdit 1.2 release preparation
 
 - Prepared `v1.2.0` for timeline import placement and clip reordering.
