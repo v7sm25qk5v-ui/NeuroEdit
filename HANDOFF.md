@@ -1,5 +1,26 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-21 — Corrected unpublished 1.2.1 release candidate shutdown error
+
+- Initial candidate source `74471493af0a844d157fe41375b60c0db57a5296`, tag object
+  `e0ce68a7b460c2d3979b899aecd50fac6da6f94a`, failed required hosted quality.
+  Main had 971 passes and four teardown errors; tagged quality had 970 passes,
+  one known scrub-timing failure and the same four teardown errors. Neither
+  installer build nor GitHub Release publication ran.
+- Real defect: an unowned singleShot callback could run after RichTimelineWidget
+  and its scroll area were deleted. Replaced it with a coalescing, single-shot
+  QTimer parented to the timeline. Added a deletion regression test; reproduced
+  that test's scenario against the previous source with the deleted-object error.
+- Replaced the existing scrub test's fragile 70 ms preview wait with a bounded
+  event wait (up to one second); assertions and production scrub behavior remain.
+- Local final verification: 234 passed, two existing Qt warnings, clean exit
+  in 27.70 s; Ruff passed. Independent senior review approved: 100 immediate-deletion cycles without
+  callback errors, plus fitted/shortened pane resize and lane-removal checks.
+- GitHub API verified no v1.2.1 Release or installer assets exist. Only this
+  task's newly created, unpublished v1.2.1 tag will be updated to the corrected
+  commit with an exact old-object lease. Published release tags stay unchanged.
+  New hosted checks/builds/publication must finish before release completion.
+
 ## 2026-11-21 — NeuroEdit 1.2.1 release preparation
 
 - User requested a release of the combined playback/timeline controls and unused

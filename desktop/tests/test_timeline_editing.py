@@ -1151,7 +1151,11 @@ def test_dragging_on_empty_timeline_scrubs_the_playhead() -> None:
     _move(canvas, canvas.LABEL_W + 350, y)
     assert previews == [1.0]  # only the immediate press so far
     assert seeks == []
-    QTest.qWait(70)
+    # Wait for the queued preview, allowing for a busy hosted runner.
+    for _ in range(100):
+        if len(previews) >= 2:
+            break
+        QTest.qWait(10)
     assert previews == pytest.approx([1.0, 3.5])
     _move(canvas, canvas.LABEL_W + 360, y)
     _release(canvas, canvas.LABEL_W + 420, y)  # no final mouse-move event

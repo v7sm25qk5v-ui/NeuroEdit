@@ -9,7 +9,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import QPoint, QRect, Qt  # noqa: E402
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QRect, Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QStyle, QStyleOptionSlider, QWidget  # noqa: E402
 
@@ -19,6 +19,21 @@ from neuroedit_desktop.ui.editor_panels import RichTimelineWidget, TimelineCanva
 from neuroedit_desktop.ui.labels_panel import LabelsPanel  # noqa: E402
 from neuroedit_desktop.ui.tutorial import TutorialCard  # noqa: E402
 from test_main_window_headless import _review_state, app, reviewed, window  # noqa: E402, F401
+
+
+def test_pending_timeline_layout_update_is_cancelled_on_delete(app, monkeypatch):  # noqa: F811
+    import sys
+
+    errors = []
+    monkeypatch.setattr(sys, "excepthook", lambda *error: errors.append(error))
+    timeline = RichTimelineWidget(ProjectState())
+    # A final scrollbar change can queue a resize just before the editor closes.
+    timeline.toolbar_scroll.horizontalScrollBar().setRange(0, 100)
+    timeline.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
+
+    assert errors == []
 
 
 def test_timeline_delete_of_a_label_is_one_undoable_edit_that_resets_review(reviewed):  # noqa: F811

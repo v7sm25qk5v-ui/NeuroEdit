@@ -1930,11 +1930,15 @@ class RichTimelineWidget(QWidget):
         layout.setSpacing(0)
         layout.addWidget(self.toolbar_scroll)
         layout.addWidget(self.scroll, 1)
+        self._height_timer = QTimer(self)
+        self._height_timer.setSingleShot(True)
+        self._height_timer.setInterval(0)
+        self._height_timer.timeout.connect(self._update_height_limit)
         toolbar_bar.rangeChanged.connect(
-            lambda _low, _high: QTimer.singleShot(0, self._update_height_limit)
+            lambda _low, _high: self._height_timer.start()
         )
         self.scroll.horizontalScrollBar().rangeChanged.connect(
-            lambda _low, _high: QTimer.singleShot(0, self._update_height_limit)
+            lambda _low, _high: self._height_timer.start()
         )
         self.refresh()
 
