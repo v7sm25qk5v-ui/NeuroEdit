@@ -11,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QEventLoop, QMimeData, QThread, Qt, QTimer, QUrl
+from PySide6.QtCore import QEvent, QEventLoop, QMimeData, QPoint, QThread, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -2112,13 +2112,16 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
     def _import_media_file(self, path: str) -> None:
         self._import_media_files([Path(path)])
 
-    def _import_media_files(self, paths: list[Path]) -> None:
+    def _import_media_files(self, paths: list[Path], at: float | None = None) -> None:
+        """Import `paths` in order at timeline time `at` (default: the playhead
+        now), moved to the nearest storyline edge when the import finishes."""
         if getattr(self, "_import_thread", None) is not None:
             self.statusBar().showMessage("An import is already in progress.", 5000)
             return
         videos = [path for path in paths if path.suffix.lower() in VIDEO_EXTENSIONS]
         self._import_cancel_requested = False
         self._import_paths = paths
+        self._import_at = self.project.current_time if at is None else at
         self._import_project = self.project
         self._import_store = self.store
         self._import_snapshot = self._snapshot_payload(self._snapshot())
@@ -2195,7 +2198,7 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
             self.statusBar().showMessage("Import cancelled or project changed; no files added.", 5000)
             return
         failures = []
-        clip = None
+        new_clips = []
         converted = 0
         for path in self._import_paths:
             suffix = path.suffix.lower()
@@ -2206,7 +2209,8 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
                 duration, width, height = values
                 if (math.isfinite(duration) and duration > 0 and width > 0 and height > 0
                         and signature == MediaImportWorker._file_signature(media_path)):
-                    clip = self.project.add_clip(media_path, duration=duration, width=width, height=height)
+                    clip = self.project.make_clip(media_path, duration, width, height)
+                    new_clips.append(clip)
                     if media_path != path:
                         clip.name = path.stem  # keep the name the user knows
                         converted += 1
@@ -2219,20 +2223,42 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
                 if image.isNull():
                     failures.append(path.name)
                 else:
-                    clip = self.project.add_image_clip(path, width=image.width(), height=image.height())
+                    new_clips.append(self.project.make_image_clip(path, image.width(), image.height()))
             else:
                 failures.append(path.name)
         self._delete_working_copies(unused_copies)
-        if clip is not None:
-            self.project.active_clip_id = clip.id
+        if new_clips:
+            point = self.project.slide_insert_point(self._import_at, boundaries_only=True)
+            point = self.project.insert_clips_at(point, new_clips)
+            end = max(clip.start_time + clip.display_duration for clip in self.project.clips)
+            total = sum(clip.display_duration for clip in new_clips)
+            self.project.active_clip_id = new_clips[0].id
+            self.project.current_time = point
+            self._invalidate_project_end_time()
             self._load_active_clip()
             self._mark_dirty(review_relevant=True)
-        if converted:
-            self.statusBar().showMessage(
-                f"Converted {converted} MPG file(s) to a working copy in the project's media "
-                "folder. The original files were not changed.",
-                8000,
+            self.timeline.scroll.horizontalScrollBar().setValue(
+                max(0, int(point * self.project.zoom) - 150)
             )
+            if point <= 1e-9:
+                where = "at the start"
+            elif abs(point + total - end) <= 1e-6:
+                where = "at the end"
+            else:
+                where = f"at {format_time(point)}"
+            count = len(new_clips)
+            added = f"Added {count} clip{'s' if count != 1 else ''} {where}"
+        else:
+            added = ""
+        if converted:
+            # One message: the placement and the MPG note must not overwrite each other.
+            note = (
+                f"Converted {converted} MPG file(s) to a working copy in the project's "
+                "media folder. The original files were not changed."
+            )
+            self.statusBar().showMessage(f"{added}. {note}" if added else note, 8000)
+        elif added:
+            self.statusBar().showMessage(added, 5000)
         if failures:
             QMessageBox.warning(self, "Import Media", "Could not import: " + ", ".join(failures))
 
@@ -2348,8 +2374,25 @@ class MainWindow(HistoryMixin, ExportWorkflowMixin, SamWorkflowMixin, QMainWindo
         if not paths:
             event.ignore()
             return
-        self._import_media_files(paths)
+        drop_time = self._timeline_time_at_drop(event.position().toPoint())
+        if drop_time is None:
+            self._import_media_files(paths)
+        else:
+            self._import_media_files(paths, at=drop_time)
         event.acceptProposedAction()
+
+    def _timeline_time_at_drop(self, pos: QPoint) -> float | None:
+        """Timeline time under a drop at window position `pos`, or None when
+        the drop is not over the timeline's clip area."""
+        viewport = self.timeline.scroll.viewport()
+        local = viewport.mapFrom(self, pos)
+        if not viewport.rect().contains(local):
+            return None
+        canvas_x = self.timeline.canvas.mapFrom(self, pos).x()
+        label_w = self.timeline.canvas.LABEL_W
+        if canvas_x < label_w:
+            return None
+        return (canvas_x - label_w) / max(1.0, self.project.zoom)
 
     def _select_media_clip(self, clip_id: str) -> None:
         clip = next((candidate for candidate in self.project.clips if candidate.id == clip_id), None)

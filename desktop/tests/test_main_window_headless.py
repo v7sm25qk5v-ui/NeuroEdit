@@ -9,7 +9,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent, QMimeData, QSettings, QTimer, QUrl
+from PySide6.QtCore import QCoreApplication, QEvent, QMimeData, QPointF, QSettings, QTimer, QUrl
 from PySide6.QtGui import QImage
 from PySide6.QtTest import QTest
 from PySide6.QtGui import QKeySequence
@@ -272,6 +272,9 @@ class _DropEvent:
     def mimeData(self) -> QMimeData:
         return self._mime_data
 
+    def position(self) -> QPointF:
+        return QPointF(0, 0)  # top-left corner of the window, not the timeline
+
     def acceptProposedAction(self) -> None:
         self.accepted = True
 
@@ -312,7 +315,7 @@ def test_multi_file_import_loads_preview_and_marks_dirty_once(window, tmp_path, 
     _wait_for_import(window)
 
     assert [Path(clip.path) for clip in window.project.clips[-2:]] == [video, image]
-    assert window.project.active_clip_id == window.project.clips[-1].id
+    assert window.project.active_clip_id == window.project.clips[-2].id
     assert loaded == ["preview"]
     assert len(window._undo_stack) == history_before + 1
 

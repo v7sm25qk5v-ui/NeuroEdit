@@ -136,14 +136,31 @@ def test_reordering_clips_keeps_the_title_slide_first():
     """Before this change a gap before the first clip collapsed on any clip
     move, sliding the first clip under the title slide."""
     project = _project(20, 20)
-    _insert(project, _slide("title", 5), 0.0)
+    title = _slide("title", 5)
+    _insert(project, title, 0.0)
     project.arrange_clips_without_overlap()
     assert _starts(project) == {"A": 5.0, "B": 25.0}
-    # Drag B in front of A on the timeline: both stay after the title slide.
+    # Drag B in front of A (but not in front of the title slide): both stay
+    # after the title slide.
+    canvas = TimelineCanvas(project)
+    canvas._preview_clip_move("B", 6.0)
+    canvas._commit_clip_move()
+    assert _starts(project) == {"B": 5.0, "A": 25.0}
+    assert title.start_time == 0.0
+
+
+def test_dragging_a_clip_to_the_very_front_keeps_the_opening_title_first():
+    """The opening title stays the opening: a clip dropped in front of it goes
+    right after it, and the slide keeps 0:00."""
+    project = _project(20, 20)
+    title = _slide("title", 5)
+    _insert(project, title, 0.0)
+    project.arrange_clips_without_overlap()
     canvas = TimelineCanvas(project)
     canvas._preview_clip_move("B", 0.0)
     canvas._commit_clip_move()
     assert _starts(project) == {"B": 5.0, "A": 25.0}
+    assert title.start_time == 0.0
 
 
 def test_removing_an_inserted_slide_closes_its_time():

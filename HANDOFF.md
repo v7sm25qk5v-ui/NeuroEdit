@@ -1,5 +1,45 @@
 # NeuroEdit — Session Handoff
 
+## 2026-11-21 — NeuroEdit 1.2 release preparation
+
+- Prepared `v1.2.0` for timeline import placement and clip reordering.
+  Updated the package version, README, and release notes for the GitHub
+  installer workflow. Used the targeted test results below and GitHub CI
+  for release verification. Daily optimization notes remain local.
+
+## 2026-11-20 — Import at the playhead and move clips with connected items
+
+- **Tickets:** (1) imports always appended at the end; (2) moving a clip left labels,
+  markers and slides behind. Designs follow Final Cut / Resolve / Premiere.
+- **Import placement** (`models.py` `make_clip`/`make_image_clip`/`insert_clips_at`;
+  `ui/main_window.py` `_import_media_files(at=)`, `_finish_media_import`,
+  `_timeline_time_at_drop`): insert at the playhead, or at the drop point when files
+  are dropped on the timeline, snapped to the nearest clip edge (never splits); later
+  items ripple via `insert_gap`; playhead jumps to the first new clip; "Added N clips
+  at …" (combined with the MPG-conversion note when both apply). One undo step.
+- **Storyline moves** (`models.py` `storyline_order`, `storyline_insert_index`,
+  `connected_to_span`, `storyline_move_preview`, `reorder_storyline`, `_carry_riders`;
+  `ui/editor_panels.py` clip-drag preview/commit): inserted slides are storyline
+  items and keep their order; markers, finite labels, cover/overlay slides, loose
+  captions and audio lying inside a clip move with it; whole-timeline labels and
+  spanning narration stay; redactions keep `move_redactions_with_clips`. Coordinator
+  kept an opening title at 0:00 first for both drags and imports.
+- **Changed tests:** `test_slide_insert.py` (title-first test now a 0.0-pointer drag
+  that keeps the title first), `test_ripple_overlays.py` (a label on the moved clip
+  now moves), `test_timeline_editing.py` (legacy full-frame slide follows the
+  storyline), `test_main_window_headless.py` (drop fake has `position()`; first new
+  clip is active). New: `test_storyline_move.py` (12), `test_import_placement.py` (15).
+- **Verified:** storyline + slide-insert + ripple + timeline + library + headless:
+  278 passed; import placement 15 passed; `test_mpg_import.py` 27 passed on a clean
+  agent rerun; lazy exporter import checked directly. `ruff` clean.
+- **Not verified / environment:** a final clean full-suite run was not possible: free
+  disk fell to ~6 GB and macOS re-evicted the venv (~36k files), so runs took 3–5× longer,
+  MPG tests skipped (ffmpeg health probe timed out) and timing tests failed
+  (`test_main_window_import_keeps_exporter_lazy` 15 s subprocess limit; an export
+  cancel-latency test at 2.0 s). None of those touch today's code. Not tried in the
+  running app.
+- **Next:** try both behaviors in the installed app.
+
 ## 2026-11-18 — NeuroEdit 1.1 published
 
 - Published [v1.1.0](https://github.com/v7sm25qk5v-ui/NeuroEdit/releases/tag/v1.1.0)

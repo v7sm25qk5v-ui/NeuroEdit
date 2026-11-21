@@ -390,8 +390,9 @@ class ProjectState:
             clip.start_time = positions[clip.id]
         self.clips = ordered
 
-    def compact_clip_positions(self, ordered: list[VideoClip] | None = None) -> dict[str, float]:
-        """Return magnetic storyline positions without mutating the project."""
+    def _reserved_gaps(self) -> list[tuple[float, float]]:
+        """Gaps between clips (and before the first) that full-frame slides
+        completely fill: visible content the storyline keeps."""
         original = sorted(self.clips, key=lambda clip: clip.start_time)
         reserved_gaps: list[tuple[float, float]] = []
         full_frame_slides = sorted(
@@ -420,7 +421,12 @@ class ProjectState:
                 if covered_until >= gap_end - 1e-9:
                     reserved_gaps.append((gap_start, gap_end))
                     break
-        ordered = original if ordered is None else ordered
+        return reserved_gaps
+
+    def compact_clip_positions(self, ordered: list[VideoClip] | None = None) -> dict[str, float]:
+        """Return magnetic storyline positions without mutating the project."""
+        reserved_gaps = self._reserved_gaps()
+        ordered = sorted(self.clips, key=lambda clip: clip.start_time) if ordered is None else ordered
         cursor = 0.0
         positions: dict[str, float] = {}
         for clip in ordered:
@@ -567,6 +573,174 @@ class ProjectState:
                 annotation.ann_duration = max(piece[1] for piece in pieces) - new_start
             annotation.frame_time = new_start
             _shift_mask_frames(annotation, new_start - start)
+
+    # --- Magnetic storyline: clips and inserted slides, with what rides on them ---
+
+    def storyline_slides(self) -> list[Slide]:
+        """Slides that own storyline time: inserted ones, plus full-frame
+        slides filling a gap between clips (older projects)."""
+        gaps = self._reserved_gaps()
+        return [
+            slide for slide in self.slides
+            if slide_is_inserted(slide) or (
+                not slide.overlay and any(
+                    start - 1e-9 <= slide.start_time
+                    and slide.start_time + slide_span(slide) <= end + 1e-9
+                    for start, end in gaps
+                )
+            )
+        ]
+
+    @staticmethod
+    def _storyline_extent(item: VideoClip | Slide) -> tuple[float, float]:
+        length = item.display_duration if isinstance(item, VideoClip) else slide_span(item)
+        return item.start_time, item.start_time + length
+
+    def storyline_order(self) -> list[VideoClip | Slide]:
+        """The storyline in time order: video clips and storyline slides."""
+        items: list[VideoClip | Slide] = [*self.clips, *self.storyline_slides()]
+        return sorted(items, key=lambda item: item.start_time)
+
+    def storyline_insert_index(self, moving_id: str, pointer_time: float) -> int:
+        """Position of clip `moving_id` among the other storyline items when
+        dropped with the pointer at `pointer_time`: after every item whose
+        midpoint the pointer has passed."""
+        others = [
+            item for item in self.storyline_order()
+            if not (isinstance(item, VideoClip) and item.id == moving_id)
+        ]
+        index = sum(
+            pointer_time >= (lo + hi) / 2
+            for lo, hi in (self._storyline_extent(item) for item in others)
+        )
+        # An opening title (a slide at 0:00) stays first: a clip dragged to the
+        # very front goes right after it. Drag the slide itself to move it.
+        if index == 0 and others and isinstance(others[0], Slide) and others[0].start_time < 1e-6:
+            index = 1
+        return index
+
+    def connected_to_span(
+        self,
+        start: float,
+        end: float,
+        claimed: set[int] | None = None,
+    ) -> list[Any]:
+        """Timeline objects riding on the storyline item that spans
+        [start, end): they start under it, so they move with it. Markers,
+        finite labels, cover/overlay slides, captions of no narration, and
+        audio tracks lying entirely inside it (with their captions). A
+        whole-timeline label, a narration spanning several items and redactions
+        (which have their own safety rule) never ride along."""
+        eps = 1e-9
+        claimed = set() if claimed is None else claimed
+
+        def under(time_s: float) -> bool:
+            return start - eps <= time_s < end - eps
+
+        riders: list[Any] = [
+            *(m for m in self.markers if under(m.time)),
+            *(a for a in self.annotations
+              if a.type != "redact" and a.ann_duration > 0 and under(a.frame_time)),
+        ]
+        anchored = {id(slide) for slide in self.storyline_slides()}
+        riders.extend(s for s in self.slides if id(s) not in anchored and under(s.start_time))
+        tracks = {
+            t.id for t in self.audio_tracks
+            if under(t.start_time) and t.start_time + t.duration <= end + eps
+        }
+        riders.extend(t for t in self.audio_tracks if t.id in tracks)
+        known_tracks = {t.id for t in self.audio_tracks}
+        riders.extend(
+            seg for seg in self.transcript_segments
+            if (seg.audio_track_id in tracks if seg.audio_track_id in known_tracks
+                else under(seg.start_time))
+        )
+        fresh = [obj for obj in riders if id(obj) not in claimed]
+        claimed.update(id(obj) for obj in fresh)
+        return fresh
+
+    @staticmethod
+    def _shift_timeline_object(obj: Any, shift: float) -> None:
+        if isinstance(obj, TimelineMarker):
+            obj.time = max(0.0, obj.time + shift)
+        elif isinstance(obj, Annotation):
+            old_start = obj.frame_time
+            obj.frame_time = max(0.0, old_start + shift)
+            _shift_mask_frames(obj, obj.frame_time - old_start)
+        elif isinstance(obj, TranscriptSegment):
+            new_start = max(0.0, obj.start_time + shift)
+            obj.end_time += new_start - obj.start_time
+            obj.start_time = new_start
+        else:  # Slide, AudioTrack
+            obj.start_time = max(0.0, obj.start_time + shift)
+
+    def _plan_storyline_move(
+        self, moving_id: str, insert_at: int,
+    ) -> tuple[list[VideoClip | Slide], list[tuple[VideoClip | Slide, float]], list[tuple[Any, float]]] | None:
+        """(new order, shift of each storyline item, shift of each rider)
+        for clip `moving_id` dropped at index `insert_at` among the others."""
+        items = self.storyline_order()
+        moving = next((i for i in items if isinstance(i, VideoClip) and i.id == moving_id), None)
+        if moving is None:
+            return None
+        others = [item for item in items if item is not moving]
+        insert_at = max(0, min(insert_at, len(others)))
+        order = others[:insert_at] + [moving] + others[insert_at:]
+        new_start: dict[int, float] = {}
+        cursor = 0.0
+        for item in order:
+            new_start[id(item)] = cursor
+            lo, hi = self._storyline_extent(item)
+            cursor += hi - lo
+        item_shifts = [(item, new_start[id(item)] - item.start_time) for item in items]
+        claimed: set[int] = set()
+        riders = []
+        for item, shift in item_shifts:
+            if abs(shift) < 1e-9:
+                continue
+            lo, hi = self._storyline_extent(item)
+            riders.extend((obj, shift) for obj in self.connected_to_span(lo, hi, claimed))
+        return order, item_shifts, riders
+
+    def storyline_move_preview(
+        self, moving_id: str, insert_at: int,
+    ) -> tuple[dict[str, float], dict[str, float]]:
+        """Where clips and slides would start after the move, as
+        ({clip id: start}, {slide id: start}); nothing is changed."""
+        plan = self._plan_storyline_move(moving_id, insert_at)
+        if plan is None:
+            return {}, {}
+        _order, item_shifts, riders = plan
+        clips: dict[str, float] = {}
+        slides: dict[str, float] = {}
+        for item, shift in [*item_shifts, *((o, s) for o, s in riders if isinstance(o, Slide))]:
+            (clips if isinstance(item, VideoClip) else slides)[item.id] = item.start_time + shift
+        return clips, slides
+
+    def reorder_storyline(self, moving_id: str, insert_at: int) -> None:
+        """Drop clip `moving_id` at index `insert_at` among the other storyline
+        items and lay the storyline out back to back from 0. Everything
+        connected to an item moves with it by that item's shift; redactions
+        follow the footage they cover (move_redactions_with_clips)."""
+        plan = self._plan_storyline_move(moving_id, insert_at)
+        if plan is None:
+            return
+        order, item_shifts, riders = plan
+        old_spans = {
+            clip.id: (clip.start_time, clip.start_time + clip.display_duration)
+            for clip in self.clips
+        }
+        moved_old_start, moved_old_end = old_spans[moving_id]
+        playhead_in_moved = moved_old_start <= self.current_time < moved_old_end
+        for obj, shift in riders:
+            self._shift_timeline_object(obj, shift)
+        for item, shift in item_shifts:
+            item.start_time = max(0.0, item.start_time + shift)
+        self.clips = [item for item in order if isinstance(item, VideoClip)]
+        self.move_redactions_with_clips(old_spans)
+        if playhead_in_moved:
+            moving = next(c for c in self.clips if c.id == moving_id)
+            self.current_time = moving.start_time + (self.current_time - moved_old_start)
 
     def timeline_positions(self) -> list[tuple[Any, dict[str, Any]]]:
         """Capture every value a trim and its ripple can change, so a live
@@ -790,6 +964,7 @@ class ProjectState:
             return
         origin = self.timeline_positions()
         old_start = slide.start_time
+        riders = self.connected_to_span(old_start, old_start + slide_span(slide))
         self.remove_slide_gap(slide)
         point = self.slide_insert_point(time_s, boundaries_only=True, exclude_id=slide.id)
         if abs(point - old_start) < 1e-6:
@@ -799,6 +974,7 @@ class ProjectState:
             slide.insert = True
             return
         self.insert_slide(slide, point)
+        self._carry_riders(origin, riders, slide.start_time - old_start)
 
     def place_inserted_slide(self, slide: Slide, time_s: float) -> None:
         """Move an inserted slide to the playhead at `time_s` (current
@@ -812,6 +988,7 @@ class ProjectState:
             return
         origin = self.timeline_positions()
         clips = list(self.clips)
+        riders = self.connected_to_span(start, end)
         if self.remove_slide_gap(slide) and time_s > end:
             time_s -= end - start
         point = self.slide_insert_point(time_s, exclude_id=slide.id)
@@ -821,6 +998,21 @@ class ProjectState:
             slide.insert = True
             return
         self.insert_slide(slide, point)
+        self._carry_riders(origin, riders, slide.start_time - start)
+
+    def _carry_riders(
+        self,
+        origin: list[tuple[Any, dict[str, Any]]],
+        riders: list[Any],
+        shift: float,
+    ) -> None:
+        """Put items that sat over a moved slide back where they were and move
+        them by the slide's own shift, undoing the ripple of closing and
+        reopening its time."""
+        ids = {id(obj) for obj in riders}
+        self.restore_timeline_positions([(obj, vals) for obj, vals in origin if id(obj) in ids])
+        for obj in riders:
+            self._shift_timeline_object(obj, shift)
 
     def resize_inserted_slide(self, slide: Slide, duration: float) -> None:
         """Set a slide's duration; an inserted slide pushes or pulls what follows."""
@@ -881,26 +1073,51 @@ class ProjectState:
                 break
         return others[:insert_at] + [moving] + others[insert_at:]
 
-    def add_clip(self, path: Path, duration: float, width: int, height: int) -> VideoClip:
-        start_time = max(
-            (clip.start_time + clip.display_duration for clip in self.clips),
-            default=0.0,
-        )
-        clip = VideoClip(
+    @staticmethod
+    def make_clip(path: Path, duration: float, width: int, height: int) -> VideoClip:
+        """A whole-file video clip that is not in any project yet."""
+        return VideoClip(
             id=new_id(),
             path=str(path),
             name=path.stem,
             duration=duration,
-            start_time=start_time,
+            start_time=0.0,
             trim_start=0.0,
             trim_end=duration,
             width=width,
             height=height,
         )
+
+    @staticmethod
+    def make_image_clip(
+        path: Path, width: int, height: int, display_duration: float = 5.0,
+    ) -> VideoClip:
+        """A still-image clip that is not in any project yet."""
+        return VideoClip(
+            id=new_id(),
+            path=str(path),
+            name=path.stem,
+            duration=3600.0,  # arbitrary cap; images aren't time-bounded
+            start_time=0.0,
+            trim_start=0.0,
+            trim_end=display_duration,
+            width=width,
+            height=height,
+            media_type="image",
+        )
+
+    def _append_clip(self, clip: VideoClip) -> VideoClip:
+        clip.start_time = max(
+            (existing.start_time + existing.display_duration for existing in self.clips),
+            default=0.0,
+        )
         self.clips.append(clip)
         self.active_clip_id = self.active_clip_id or clip.id
         self.duration = max(self.duration, clip.start_time + clip.display_duration)
         return clip
+
+    def add_clip(self, path: Path, duration: float, width: int, height: int) -> VideoClip:
+        return self._append_clip(self.make_clip(path, duration, width, height))
 
     def add_image_clip(
         self,
@@ -909,26 +1126,35 @@ class ProjectState:
         height: int,
         display_duration: float = 5.0,
     ) -> VideoClip:
-        start_time = max(
-            (clip.start_time + clip.display_duration for clip in self.clips),
-            default=0.0,
+        return self._append_clip(self.make_image_clip(path, width, height, display_duration))
+
+    def insert_clips_at(self, point: float, clips: list[VideoClip]) -> float:
+        """Put `clips` back to back at `point` (a storyline edge from
+        slide_insert_point(..., boundaries_only=True)); everything from there on
+        moves later by their total length. Returns the point used."""
+        if not clips:
+            return point
+        if point < 1e-6:
+            # An opening title (an inserted slide at 0:00) stays first, as it
+            # does when a clip is dragged to the very front.
+            opening = next(
+                (s for s in self.slides if slide_is_inserted(s) and s.start_time < 1e-6), None
+            )
+            if opening is not None:
+                point = slide_span(opening)
+        total = sum(clip.display_duration for clip in clips)
+        point = self.insert_gap(point, total)
+        index = next(
+            (i for i, existing in enumerate(self.clips) if existing.start_time >= point - 1e-9),
+            len(self.clips),
         )
-        clip = VideoClip(
-            id=new_id(),
-            path=str(path),
-            name=path.stem,
-            duration=3600.0,  # arbitrary cap; images aren't time-bounded
-            start_time=start_time,
-            trim_start=0.0,
-            trim_end=display_duration,
-            width=width,
-            height=height,
-            media_type="image",
-        )
-        self.clips.append(clip)
-        self.active_clip_id = self.active_clip_id or clip.id
-        self.duration = max(self.duration, clip.start_time + clip.display_duration)
-        return clip
+        cursor = point
+        for clip in clips:
+            clip.start_time = cursor
+            cursor += clip.display_duration
+        self.clips[index:index] = clips
+        self.duration = max(self.duration, cursor)
+        return point
 
     def to_dict(self) -> dict[str, Any]:
         return {"schema_version": self.schema_version, **asdict(self)}

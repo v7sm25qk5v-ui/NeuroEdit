@@ -322,7 +322,7 @@ by the optimization automation; they are not duplicated into P4.5.
   payoff (only during an active drag, small n today). Affected:
   `ui/editor_panels.py`.
 
-- [ ] **Clip reorder re-places only redactions, not other annotations/markers
+- [x] **Clip reorder re-places only redactions, not other annotations/markers
   (possible functionality gap — confirm intent).** `_commit_clip_move`
   (`ui/editor_panels.py:871`) calls `move_redactions_with_clips`, which moves
   only `type == "redact"` annotations to follow their footage after a reorder.
@@ -335,7 +335,14 @@ by the optimization automation; they are not duplicated into P4.5.
   confirmed bug: either extend reorder re-placement to all annotation types +
   markers, or document the limitation alongside the existing "Known trade-offs"
   note in HANDOFF. Affected: `models.py` (`move_redactions_with_clips`),
-  `ui/editor_panels.py` (`_commit_clip_move`).
+  `ui/editor_panels.py` (`_commit_clip_move`). **Resolved by the storyline-move
+  rewrite (see HANDOFF 2026-11-20).** `_commit_clip_move`
+  now calls `ProjectState.reorder_storyline`, which moves everything *connected*
+  to each shifted clip — markers, finite labels (+ mask frames), cover/overlay
+  slides, loose captions, and audio lying inside the clip — by that clip's shift
+  via `connected_to_span`. The "extend re-placement" option was chosen; whole-
+  timeline labels and multi-item narration intentionally stay put, and redactions
+  still route through `move_redactions_with_clips`.
 
 - [ ] **`move_redactions_with_clips` sorts clip spans even when the project has
   no redactions (minor, one-shot).** The method builds and sorts `moves` before

@@ -298,6 +298,11 @@ class TimelineCanvas(QWidget):
         self._drag: tuple[str, str, float, float] | None = None
         self._clip_preview_start: float | None = None
         self._clip_preview_positions: dict[str, float] = {}
+        # Slides that follow the storyline during a clip drag: its inserted
+        # slides and the cover/overlay slides riding on clips.
+        self._slide_preview_positions: dict[str, float] = {}
+        # (clip id, index among the other storyline items) the drop would use.
+        self._clip_preview_move: tuple[str, int] | None = None
         self._clip_press_position: QPointF | None = None
         self._clip_pointer_global = QPoint()
         self.scroll_area: QScrollArea | None = None
@@ -436,6 +441,7 @@ class TimelineCanvas(QWidget):
             self._hover_item,
             self._drag[0:2] if self._drag else None,
             tuple(self._clip_preview_positions.items()),
+            tuple(self._slide_preview_positions.items()),
             # Over-guidance outlines depend on the goal/talk-length settings.
             p.video_goal, round(p.target_presentation_minutes, 1),
             tuple(
@@ -579,7 +585,7 @@ class TimelineCanvas(QWidget):
 
     def _slide_block_rect(self, slide: Slide, zoom: float) -> QRectF:
         lane = self._slide_lanes().get(slide.id, 0)
-        x = self.LABEL_W + slide.start_time * zoom
+        x = self.LABEL_W + self._slide_preview_positions.get(slide.id, slide.start_time) * zoom
         y = self._track_y(2) + lane * self.TRACK_H + 6
         return QRectF(x, y, max(28.0, max(0.25, slide.duration) * zoom), self.TRACK_H - 12)
 
@@ -871,7 +877,7 @@ class TimelineCanvas(QWidget):
         for slide in self.project.slides:
             if slide.overlay:
                 continue
-            start = slide.start_time
+            start = self._slide_preview_positions.get(slide.id, slide.start_time)
             end = start + slide_span(slide)
             if slide_is_inserted(slide):
                 rect = self._block_rect(start, end - start, 0, zoom)
@@ -1173,31 +1179,21 @@ class TimelineCanvas(QWidget):
         self.refresh_geometry()
 
     def _preview_clip_move(self, item_id: str, pointer_time: float) -> None:
-        moving = next(c for c in self.project.clips if c.id == item_id)
-        others = [c for c in self.project.clips if c.id != item_id]
-        insert_at = sum(
-            pointer_time >= clip.start_time + clip.display_duration / 2
-            for clip in others
-        )
-        ordered = list(others)
-        ordered.insert(insert_at, moving)
-        positions = self.project.compact_clip_positions(ordered)
-        self._clip_preview_positions = positions
-        self._clip_preview_start = positions[item_id]
-        self._snap_indicator_time = positions[item_id]
+        insert_at = self.project.storyline_insert_index(item_id, pointer_time)
+        clips, slides = self.project.storyline_move_preview(item_id, insert_at)
+        self._clip_preview_move = (item_id, insert_at)
+        self._clip_preview_positions = clips
+        self._slide_preview_positions = slides
+        self._clip_preview_start = clips[item_id]
+        self._snap_indicator_time = clips[item_id]
 
     def _commit_clip_move(self) -> None:
-        if not self._clip_preview_positions:
+        """Drop the dragged clip in its previewed place. The model moves every
+        storyline item and everything connected to it, so labels, markers,
+        slides and short audio follow their clips."""
+        if self._clip_preview_move is None:
             return
-        old_spans = {
-            clip.id: (clip.start_time, clip.start_time + clip.display_duration)
-            for clip in self.project.clips
-        }
-        for clip in self.project.clips:
-            clip.start_time = self._clip_preview_positions[clip.id]
-        self.project.clips.sort(key=lambda c: c.start_time)
-        self.project.arrange_clips_without_overlap()
-        self.project.move_redactions_with_clips(old_spans)
+        self.project.reorder_storyline(*self._clip_preview_move)
         self.project.duration = project_end_time(self.project)
 
     def _autoscroll_clip_drag(self) -> None:
@@ -1225,6 +1221,8 @@ class TimelineCanvas(QWidget):
         self._clip_scroll_timer.stop()
         self._clip_preview_start = None
         self._clip_preview_positions = {}
+        self._slide_preview_positions = {}
+        self._clip_preview_move = None
         self._clip_press_position = None
         self.refresh_geometry()
 

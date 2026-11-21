@@ -625,7 +625,7 @@ def test_full_frame_slide_time_is_not_treated_as_dead_space():
     ]
 
 
-def test_reorder_preview_preserves_full_frame_slide_time():
+def test_reorder_preview_moves_full_frame_slide_with_the_storyline():
     project = _project(
         clips=[_clip('left', 0, 4), _clip('right', 9, 4)],
         slides=[Slide(id='still', title='', start_time=4, duration=5, overlay=False)],
@@ -634,7 +634,9 @@ def test_reorder_preview_preserves_full_frame_slide_time():
 
     canvas._preview_clip_move('right', 0)
 
-    assert canvas._clip_preview_positions == {'right': 0, 'left': 9}
+    # The slide is a storyline item: it follows 'left' instead of keeping 4-9.
+    assert canvas._clip_preview_positions == {'right': 0, 'left': 4}
+    assert canvas._slide_preview_positions == {'still': 8}
 
 
 @pytest.mark.parametrize('grab_offset', [0.2, 4.8])

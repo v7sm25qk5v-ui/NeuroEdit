@@ -231,6 +231,19 @@ Save As (`_save_project_as`) uses one standard Save dialog
   `ProjectState.ripple_after` shifts only timeline items downstream of a
   trim/delete delta, preserving unrelated intentional gaps; the separate
   `arrange_clips_without_overlap` helper still resolves overlap/reorder cases.
+  **Storyline moves (2026-11-20, FCP "connected clips"):** the storyline is clips +
+  inserted slides (+ legacy full-frame slides filling a gap). Dragging a clip calls
+  `reorder_storyline` (`storyline_insert_index`, `storyline_move_preview`): items are
+  re-laid back to back, and everything *connected* to an item moves by that item's
+  shift. "Connected" (`connected_to_span`) means it starts under the item: markers,
+  finite labels (+ mask frames), cover/overlay slides, captions with no narration,
+  and audio tracks lying entirely inside it (with their linked captions).
+  Whole-timeline labels and narration spanning several items stay put. Redactions
+  are excluded and still go through `move_redactions_with_clips` (never moved
+  twice). An opening title (inserted slide at 0:00) stays first when a clip is
+  dragged to the very front. Inserted-slide drag/place carries what sits over the
+  slide (`_carry_riders`). Live preview moves clips and slides; labels/markers jump
+  on drop. `tests/test_storyline_move.py`.
   Full slides are either inserted (`Slide.insert`: they own a gap in the video
   storyline, so clips after them play later) or cover (drawn over footage,
   which is hidden). `insert_gap`, `slide_insert_point` (snaps to clip edges
@@ -646,9 +659,16 @@ Other PHI safeguards:
     `dragEnterEvent`/`dropEvent`; `_dropped_media_paths` filters local files by
     `VIDEO_EXTENSIONS | IMAGE_EXTENSIONS`; each accepted path routes through the
     same `_import_media_files` helper as File -> Import Video, File -> Import
-    Image, and single-file Media Explorer imports. A batch import loads one
-    preview, selects the last successful clip, and creates one dirty/history
-    operation; multi-video batches also share the §42 metadata progress dialog.
+    Image, and single-file Media Explorer imports. **Placement (2026-11-20):**
+    imports go in at the playhead (captured when the import starts) or, for a drop
+    over the timeline, at the drop point — snapped to the nearest storyline edge
+    (`slide_insert_point(..., boundaries_only=True)`, never splits a clip) and
+    placed with `ProjectState.insert_clips_at`, which uses `insert_gap` so
+    everything after moves later (an opening title at 0:00 stays first). The
+    playhead moves to the first new clip, which becomes active; status "Added N
+    clips at …". `add_clip`/`add_image_clip` still append for other callers.
+    `tests/test_import_placement.py`. A batch import loads one preview and creates
+    one dirty/history operation; multi-video batches also share the §42 metadata progress dialog.
   - Published baseline suite is **723 tests** (Claude-verified and tagged v0.5.18-alpha
     macOS CI-verified on 2026-11-17: 723 passed in 102.41 s, clean exit; see HANDOFF).
     The gate is

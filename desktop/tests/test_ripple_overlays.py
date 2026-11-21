@@ -392,8 +392,8 @@ def test_reordering_a_clip_moves_its_redaction_with_it() -> None:
     assert project.clips[2].start_time == pytest.approx(10.0)
     assert (on_a.frame_time, on_a.ann_duration) == pytest.approx((11.0, 3.0))
     assert (whole.frame_time, whole.ann_duration) == (0.0, 0.0)
-    # Ordinary labels are anchored to the timeline, not the clip (unchanged).
-    assert (label.frame_time, label.ann_duration) == pytest.approx((1.0, 3.0))
+    # Finite labels ride on the clip they start under (a is now at 10-15).
+    assert (label.frame_time, label.ann_duration) == pytest.approx((11.0, 3.0))
 
 
 def test_reordering_widens_a_redaction_that_spans_two_clips() -> None:
